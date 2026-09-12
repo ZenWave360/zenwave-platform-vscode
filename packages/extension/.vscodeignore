@@ -1,0 +1,9 @@
+**
+!dist/**
+!syntaxes/**
+!resources/**
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+**/*.map

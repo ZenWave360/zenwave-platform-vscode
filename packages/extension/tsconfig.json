@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vscode"],
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"]
+}

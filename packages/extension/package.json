@@ -1,0 +1,143 @@
+{
+  "name": "zenwave-platform",
+  "displayName": "ZenWave Platform",
+  "description": "Domain modeling, event storming and API design with ZDL and ZFL.",
+  "version": "0.1.0",
+  "publisher": "ZenWave360",
+  "license": "MIT",
+  "icon": "resources/zenwave-logo.png",
+  "private": true,
+  "homepage": "https://www.zenwave360.io/",
+  "bugs": {
+    "url": "https://github.com/ZenWave360/zenwave-platform-vscode/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZenWave360/zenwave-platform-vscode.git"
+  },
+  "author": {
+    "name": "Iván García Sainz-Aja",
+    "email": "ivangsa@gmail.com",
+    "url": "https://ivangsa.com"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Visualization"
+  ],
+  "keywords": [
+    "ZenWave 360º",
+    "ZDL",
+    "ZFL",
+    "DSL",
+    "DDD",
+    "Event Storming",
+    "Domain Driven Design",
+    "API-First"
+  ],
+  "main": "./dist/node/extension.js",
+  "browser": "./dist/browser/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Running ZenWave SDK code generation executes a command line tool from the workspace and is disabled in restricted mode. Syntax highlighting and previews work normally."
+    }
+  },
+  "activationEvents": [
+    "onLanguage:zdl",
+    "onLanguage:zfl"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "zdl",
+        "aliases": [
+          "ZenWave Domain Language",
+          "ZDL",
+          "zdl"
+        ],
+        "extensions": [
+          ".zdl",
+          ".zw"
+        ],
+        "configuration": "./syntaxes/zdl.language-configuration.json",
+        "icon": {
+          "light": "./resources/zdl-file-icon.png",
+          "dark": "./resources/zdl-file-icon.png"
+        }
+      },
+      {
+        "id": "zfl",
+        "aliases": [
+          "ZenWave Flow Language",
+          "ZFL",
+          "zfl"
+        ],
+        "extensions": [
+          ".zfl"
+        ],
+        "configuration": "./syntaxes/zfl.language-configuration.json",
+        "icon": {
+          "light": "./resources/zenwave-logo.png",
+          "dark": "./resources/zenwave-logo.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "zdl",
+        "scopeName": "source.zdl",
+        "path": "./syntaxes/zdl.tmLanguage.json"
+      },
+      {
+        "language": "zfl",
+        "scopeName": "source.zfl",
+        "path": "./syntaxes/zfl.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "zenwave.showOutput",
+        "title": "Show Output",
+        "category": "ZenWave"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "zenwave.showOutput"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ZenWave Platform",
+      "properties": {
+        "zenwave.trace.level": {
+          "type": "string",
+          "enum": [
+            "off",
+            "info",
+            "debug"
+          ],
+          "default": "info",
+          "description": "Verbosity of the ZenWave output channel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package": "node esbuild.mjs --production && vsce package --no-dependencies",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "run-in-browser": "npm run build && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. fixtures",
+    "serve-web": "npm run build && vscode-test-web --browser=none --quality=stable --extensionDevelopmentPath=. fixtures"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-web": "^0.0.81",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

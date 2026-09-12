@@ -1,0 +1,780 @@
+{
+  "name": "ZenWave Domain Language ZDL",
+  "scopeName": "source.zdl",
+  "fileTypes": [
+    "zdl",
+    "zw"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#imports"
+    },
+    {
+      "include": "#annotations"
+    },
+    {
+      "include": "#blocks"
+    },
+    {
+      "include": "#eventList"
+    },
+    {
+      "include": "#relationships"
+    },
+    {
+      "include": "#services"
+    },
+    {
+      "include": "#aggregateCommands"
+    },
+    {
+      "include": "#legacyConstants"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#booleans"
+    },
+    {
+      "include": "#pluginOptions"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#validators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "begin": "/\\*\\*",
+          "end": "\\*/",
+          "name": "comment.block.documentation.zdl"
+        },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "name": "comment.block.zdl"
+        },
+        {
+          "match": "//.*$",
+          "name": "comment.line.double-slash.zdl"
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "match": "(@import)\\s*(\\()",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.zdl"
+            },
+            "2": {
+              "name": "punctuation.section.group.begin.zdl"
+            }
+          }
+        },
+        {
+          "match": "\\b(import)\\b",
+          "name": "keyword.control.import.zdl"
+        }
+      ]
+    },
+    "eventList": {
+      "match": "(\\[)([A-Za-z_][\\w]*(?:\\s*\\|\\s*[A-Za-z_][\\w]*)*)(\\])",
+      "captures": {
+        "1": {
+          "name": "punctuation.section.brackets.begin.zdl"
+        },
+        "2": {
+          "patterns": [
+            {
+              "match": "[A-Za-z_][\\w]*",
+              "name": "entity.name.type.event.zdl"
+            },
+            {
+              "match": "\\|",
+              "name": "keyword.operator.zdl"
+            }
+          ]
+        },
+        "3": {
+          "name": "punctuation.section.brackets.end.zdl"
+        }
+      }
+    },
+    "aggregateCommands": {
+      "match": "\\b([a-zA-Z_][\\w]*)\\s*\\(([^)]*)\\)\\s*(withEvents)\\b",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.zdl"
+        },
+        "2": {
+          "patterns": [
+            {
+              "match": "\\b(id\\??|[A-Za-z_][\\w.]*\\??)\\b",
+              "name": "variable.parameter.zdl"
+            }
+          ]
+        },
+        "3": {
+          "name": "keyword.control.zdl"
+        }
+      }
+    },
+    "annotations": {
+      "patterns": [
+        {
+          "begin": "(@[a-zA-Z_][a-zA-Z0-9_]*)(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.annotation.zdl"
+            },
+            "2": {
+              "name": "punctuation.section.group.begin.zdl"
+            }
+          },
+          "end": "(\\))",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.group.end.zdl"
+            }
+          },
+          "name": "meta.annotation.zdl",
+          "patterns": [
+            {
+              "match": "\\b([a-zA-Z_][\\w.-]*)\\s*(:|=)",
+              "captures": {
+                "1": {
+                  "name": "constant.other.key.zdl"
+                },
+                "2": {
+                  "name": "keyword.operator.assignment.zdl"
+                }
+              }
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#booleans"
+            },
+            {
+              "match": "/.*?/",
+              "name": "string.regexp.zdl"
+            }
+          ]
+        },
+        {
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*",
+          "name": "storage.type.annotation.zdl"
+        }
+      ]
+    },
+    "blocks": {
+      "patterns": [
+        {
+          "begin": "\\b(config)\\b\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zdl"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.zdl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zdl"
+            }
+          },
+          "name": "meta.block.config.zdl",
+          "patterns": [
+            {
+              "include": "#pluginsBlock"
+            },
+            {
+              "include": "#configKey"
+            },
+            {
+              "include": "#pairs"
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(apis)\\b\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zdl"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.zdl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zdl"
+            }
+          },
+          "name": "meta.block.apis.zdl",
+          "patterns": [
+            {
+              "match": "\\b(asyncapi|openapi|zdl)\\b\\s*(\\()?\\s*([A-Za-z_][\\w.]*)?\\s*(\\))?\\s*([A-Za-z_][\\w.]*)",
+              "captures": {
+                "1": {
+                  "name": "storage.type.api.zdl"
+                },
+                "3": {
+                  "name": "variable.parameter.zdl"
+                },
+                "5": {
+                  "name": "entity.name.function.zdl"
+                }
+              }
+            },
+            {
+              "include": "#pairs"
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(policies)\\b(?:\\s*\\(\\s*([A-Za-z_][\\w.]*)\\s*\\))?\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zdl"
+            },
+            "2": {
+              "name": "variable.parameter.zdl"
+            },
+            "3": {
+              "name": "punctuation.section.block.begin.zdl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zdl"
+            }
+          },
+          "name": "meta.block.policies.zdl",
+          "patterns": [
+            {
+              "match": "^\\s*([A-Za-z_][\\w-]*)\\b",
+              "captures": {
+                "1": {
+                  "name": "entity.other.attribute-name.zdl"
+                }
+              }
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(entity|input|output|event)\\b\\s+([A-Za-z_][\\w.]*)\\s*(?:\\(\\s*([A-Za-z_][\\w.]*)\\s*\\))?\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.declaration.zdl"
+            },
+            "2": {
+              "name": "entity.name.type.zdl"
+            },
+            "3": {
+              "name": "variable.parameter.zdl"
+            },
+            "4": {
+              "name": "punctuation.section.block.begin.zdl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zdl"
+            }
+          },
+          "name": "meta.block.entity.zdl",
+          "patterns": [
+            {
+              "include": "#fields"
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(enum)\\b\\s+([A-Za-z_][\\w]*)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.declaration.zdl"
+            },
+            "2": {
+              "name": "entity.name.type.zdl"
+            },
+            "3": {
+              "name": "punctuation.section.block.begin.zdl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zdl"
+            }
+          },
+          "name": "meta.block.enum.zdl",
+          "patterns": [
+            {
+              "match": "\\b([A-Za-z_][\\w]*)\\b(?:\\s*\\(\\s*(\\d+)\\s*\\))?",
+              "captures": {
+                "1": {
+                  "name": "constant.other.enum.zdl"
+                },
+                "2": {
+                  "name": "constant.numeric.integer.zdl"
+                }
+              }
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(aggregate)\\b\\s+([A-Za-z_][\\w]*)\\s*\\(\\s*([A-Za-z_][\\w]*)\\s*\\)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.declaration.zdl"
+            },
+            "2": {
+              "name": "entity.name.type.zdl"
+            },
+            "3": {
+              "name": "variable.parameter.zdl"
+            },
+            "4": {
+              "name": "punctuation.section.block.begin.zdl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zdl"
+            }
+          },
+          "name": "meta.block.aggregate.zdl",
+          "patterns": [
+            {
+              "include": "#aggregateCommands"
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        }
+      ]
+    },
+    "booleans": {
+      "match": "\\b(true|false|null)\\b",
+      "name": "constant.language.zdl"
+    },
+    "common": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#annotations"
+        },
+        {
+          "include": "#eventList"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#booleans"
+        },
+        {
+          "include": "#pluginOptions"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#validators"
+        }
+      ]
+    },
+    "fields": {
+      "patterns": [
+        {
+          "begin": "\\b([A-Za-z_][\\w.]*)\\b\\s+([A-Za-z_][\\w.]*)(\\[\\])?\\s*(?:\\(\\s*([A-Za-z_][\\w.]*)\\s*\\))?",
+          "beginCaptures": {
+            "1": {
+              "name": "variable.other.member.zdl"
+            },
+            "2": {
+              "name": "support.type.zdl"
+            },
+            "3": {
+              "name": "storage.modifier.array.zdl"
+            },
+            "4": {
+              "name": "variable.parameter.zdl"
+            }
+          },
+          "end": "(?=,|\\}|$)",
+          "name": "meta.field.zdl",
+          "patterns": [
+            {
+              "match": "=\\s*([^,\\r\\n}]+)",
+              "captures": {
+                "0": {
+                  "name": "meta.assignment.zdl"
+                },
+                "1": {
+                  "patterns": [
+                    {
+                      "include": "#strings"
+                    },
+                    {
+                      "include": "#numbers"
+                    },
+                    {
+                      "include": "#booleans"
+                    },
+                    {
+                      "include": "#keywords"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "include": "#annotations"
+            },
+            {
+              "include": "#validators"
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "match": "\\b(import|config|apis|zdl|plugins|policies|disabled|asyncapi|openapi|entity|enum|input|output|event|relationship|ManyToMany|ManyToOne|OneToMany|OneToOne|service|aggregate|id|for|from|to|withEvents|with|lifecycle|initial|inherit)\\b",
+      "name": "keyword.control.zdl"
+    },
+    "legacyConstants": {
+      "match": "\\b([A-Z0-9_]+)\\b\\s*(=)\\s*(\\d+)\\b",
+      "captures": {
+        "1": {
+          "name": "constant.other.zdl"
+        },
+        "2": {
+          "name": "keyword.operator.assignment.zdl"
+        },
+        "3": {
+          "name": "constant.numeric.integer.zdl"
+        }
+      }
+    },
+    "numbers": {
+      "match": "\\b\\d+(?:\\.\\d+)?\\b",
+      "name": "constant.numeric.zdl"
+    },
+    "operators": {
+      "match": "\\b(or)\\b|\\||:|=|\\?",
+      "name": "keyword.operator.zdl"
+    },
+    "pairs": {
+      "patterns": [
+        {
+          "match": "\\b([A-Za-z_][\\w.-]*)\\b\\s*(:)",
+          "captures": {
+            "1": {
+              "name": "constant.other.key.zdl"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.zdl"
+            }
+          }
+        }
+      ]
+    },
+    "pluginOptions": {
+      "match": "--[A-Za-z_][A-Za-z0-9_]*",
+      "name": "support.constant.cli-option.zdl"
+    },
+    "pluginsBlock": {
+      "begin": "\\b(plugins)\\b\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.zdl"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.zdl"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.zdl"
+        }
+      },
+      "name": "meta.block.plugins.zdl",
+      "patterns": [
+        {
+          "include": "#pluginDeclaration"
+        },
+        {
+          "include": "#configKey"
+        },
+        {
+          "include": "#pluginOptions"
+        },
+        {
+          "include": "#pairs"
+        },
+        {
+          "include": "#common"
+        }
+      ]
+    },
+    "relationships": {
+      "begin": "\\b(relationship)\\b\\s+(ManyToMany|ManyToOne|OneToMany|OneToOne)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.declaration.zdl"
+        },
+        "2": {
+          "name": "keyword.control.zdl"
+        },
+        "3": {
+          "name": "punctuation.section.block.begin.zdl"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.zdl"
+        }
+      },
+      "name": "meta.block.relationship.zdl",
+      "patterns": [
+        {
+          "match": "\\b([A-Za-z_][\\w]*)\\b\\s*(?:\\{\\s*([A-Za-z_][\\w.]*)\\s*(?:\\(\\s*([A-Za-z_][\\w.]*)\\s*\\))?\\s*(required)?\\s*(?:minlength\\s*\\(\\s*\\d+\\s*\\))?\\s*(?:maxlength\\s*\\(\\s*\\d+\\s*\\))?\\s*\\})?",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.zdl"
+            },
+            "2": {
+              "name": "variable.other.member.zdl"
+            },
+            "3": {
+              "name": "variable.parameter.zdl"
+            },
+            "4": {
+              "name": "storage.modifier.zdl"
+            }
+          }
+        },
+        {
+          "match": "\\bto\\b",
+          "name": "keyword.control.zdl"
+        },
+        {
+          "include": "#validators"
+        },
+        {
+          "include": "#common"
+        }
+      ]
+    },
+    "services": {
+      "begin": "\\b(service)\\b\\s+([A-Za-z_][\\w]*)\\s+(for)\\s*\\(([^)]*)\\)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.declaration.zdl"
+        },
+        "2": {
+          "name": "entity.name.function.zdl"
+        },
+        "3": {
+          "name": "keyword.control.zdl"
+        },
+        "4": {
+          "patterns": [
+            {
+              "match": "\\b([A-Za-z_][\\w]*)\\b",
+              "name": "variable.parameter.zdl"
+            }
+          ]
+        },
+        "5": {
+          "name": "punctuation.section.block.begin.zdl"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.zdl"
+        }
+      },
+      "name": "meta.block.service.zdl",
+      "patterns": [
+        {
+          "match": "\\b([a-zA-Z_][\\w]*)\\b\\s*\\(([^)]*)\\)\\s*([A-Za-z_][\\w.]*\\[\\]|[A-Za-z_][\\w.]*\\??)?\\s*(withEvents)?",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.zdl"
+            },
+            "2": {
+              "patterns": [
+                {
+                  "match": "@natural|\\bid\\??\\b|\\b[A-Za-z_][\\w.]*\\??\\b",
+                  "name": "variable.parameter.zdl"
+                }
+              ]
+            },
+            "3": {
+              "name": "support.type.zdl"
+            },
+            "4": {
+              "name": "keyword.control.zdl"
+            }
+          }
+        },
+        {
+          "include": "#common"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.zdl",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.zdl",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.zdl",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.zdl",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "match": "/.*?/",
+          "name": "string.regexp.zdl"
+        }
+      ]
+    },
+    "types": {
+      "match": "\\b(String|Integer|Long|BigDecimal|Float|Double|Enum|Boolean|LocalDate|ZonedDateTime|Instant|Duration|UUID|Blob|AnyBlob|ImageBlob|TextBlob|byte|string|boolean|int|long|float|double)\\b",
+      "name": "support.type.primitive.zdl"
+    },
+    "validators": {
+      "match": "\\b(required|unique|min|max|minlength|maxlength|email|pattern)\\b",
+      "name": "storage.modifier.zdl"
+    },
+    "pluginDeclaration": {
+      "begin": "^\\s*(?:\\b(disabled)\\b\\s+)?([A-Za-z_][\\w.-]*)\\s*(?:\\(\\s*(inherit)\\s+(true|false)\\s*\\))?\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.zdl"
+        },
+        "2": {
+          "name": "entity.name.type.zdl"
+        },
+        "3": {
+          "name": "keyword.control.zdl"
+        },
+        "4": {
+          "name": "constant.language.zdl"
+        },
+        "5": {
+          "name": "punctuation.section.block.begin.zdl"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.zdl"
+        }
+      },
+      "name": "meta.block.plugin.zdl",
+      "patterns": [
+        {
+          "include": "#configKey"
+        },
+        {
+          "include": "#pluginOptions"
+        },
+        {
+          "include": "#pairs"
+        },
+        {
+          "include": "#common"
+        }
+      ]
+    },
+    "configKey": {
+      "match": "^\\s*([A-Za-z_][\\w.-]*)\\b(?!\\s*[({])",
+      "captures": {
+        "1": {
+          "name": "variable.other.member.zdl"
+        }
+      }
+    }
+  }
+}

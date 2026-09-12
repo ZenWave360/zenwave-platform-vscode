@@ -1,0 +1,35 @@
+{
+  "name": "zenwave-platform-vscode",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "ZenWave Platform for VS Code - monorepo root",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZenWave360/zenwave-platform-vscode.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "watch": "npm run watch --workspace packages/extension",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint packages --ext .ts,.tsx",
+    "test": "npm run test --workspaces --if-present",
+    "package": "npm run package --workspace packages/extension",
+    "run-in-browser": "npm run run-in-browser --workspace packages/extension",
+    "serve-web": "npm run serve-web --workspace packages/extension"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "esbuild": "^0.23.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.5.0"
+  }
+}

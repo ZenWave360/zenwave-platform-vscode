@@ -1,0 +1,526 @@
+{
+  "name": "ZenWave Flow Language ZFL",
+  "scopeName": "source.zfl",
+  "fileTypes": [
+    "zfl"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#imports"
+    },
+    {
+      "include": "#annotations"
+    },
+    {
+      "include": "#config"
+    },
+    {
+      "include": "#systems"
+    },
+    {
+      "include": "#flows"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#booleans"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#serviceReferences"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#labels"
+    }
+  ],
+  "repository": {
+    "annotations": {
+      "patterns": [
+        {
+          "begin": "(@[a-zA-Z_][a-zA-Z0-9_]*)(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.annotation.zfl"
+            },
+            "2": {
+              "name": "punctuation.section.group.begin.zfl"
+            }
+          },
+          "end": "(\\))",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.group.end.zfl"
+            }
+          },
+          "name": "meta.annotation.zfl",
+          "patterns": [
+            {
+              "match": "\\b([a-zA-Z_][\\w.-]*)\\b\\s*(:|=)",
+              "captures": {
+                "1": {
+                  "name": "constant.other.key.zfl"
+                },
+                "2": {
+                  "name": "keyword.operator.assignment.zfl"
+                }
+              }
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#booleans"
+            }
+          ]
+        },
+        {
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*",
+          "name": "storage.type.annotation.zfl"
+        }
+      ]
+    },
+    "booleans": {
+      "match": "\\b(true|false|null)\\b",
+      "name": "constant.language.zfl"
+    },
+    "common": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#annotations"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#booleans"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#serviceReferences"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#labels"
+        }
+      ]
+    },
+    "config": {
+      "begin": "\\b(config)\\b\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.zfl"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.zfl"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.zfl"
+        }
+      },
+      "name": "meta.block.config.zfl",
+      "patterns": [
+        {
+          "match": "\\b([A-Za-z_][\\w-]*)\\b\\s*(:)",
+          "captures": {
+            "1": {
+              "name": "constant.other.key.zfl"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.zfl"
+            }
+          }
+        },
+        {
+          "include": "#common"
+        }
+      ]
+    },
+    "fields": {
+      "patterns": [
+        {
+          "match": "\\b([A-Za-z_][\\w]*)\\b\\s+([A-Za-z_][\\w]*)(\\[\\])?\\b",
+          "captures": {
+            "1": {
+              "name": "variable.other.member.zfl"
+            },
+            "2": {
+              "name": "support.type.zfl"
+            },
+            "3": {
+              "name": "storage.modifier.array.zfl"
+            }
+          }
+        }
+      ]
+    },
+    "flows": {
+      "begin": "\\b(flow)\\b\\s+([A-Za-z_][\\w]*)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.declaration.zfl"
+        },
+        "2": {
+          "name": "entity.name.type.zfl"
+        },
+        "3": {
+          "name": "punctuation.section.block.begin.zfl"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.zfl"
+        }
+      },
+      "name": "meta.block.flow.zfl",
+      "patterns": [
+        {
+          "begin": "\\b(start)\\b\\s+([A-Za-z_][\\w]*)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zfl"
+            },
+            "2": {
+              "name": "entity.name.function.zfl"
+            },
+            "3": {
+              "name": "punctuation.section.block.begin.zfl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zfl"
+            }
+          },
+          "name": "meta.block.flow-start.zfl",
+          "patterns": [
+            {
+              "include": "#fields"
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(when)\\b\\s+([^\\r\\n{]+?)\\s+\\b(do)\\b\\s+([A-Za-z_][\\w]*)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zfl"
+            },
+            "2": {
+              "patterns": [
+                {
+                  "match": "\\b(and)\\b",
+                  "name": "keyword.operator.zfl"
+                },
+                {
+                  "match": "\\b[A-Za-z_][\\w]*\\b",
+                  "name": "variable.parameter.zfl"
+                }
+              ]
+            },
+            "3": {
+              "name": "keyword.control.zfl"
+            },
+            "4": {
+              "name": "entity.name.function.zfl"
+            },
+            "5": {
+              "name": "punctuation.section.block.begin.zfl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zfl"
+            }
+          },
+          "name": "meta.block.flow-when.zfl",
+          "patterns": [
+            {
+              "match": "\\b(service)\\b\\s+([A-Za-z_][\\w]*)\\.([A-Za-z_][\\w]*)",
+              "captures": {
+                "1": {
+                  "name": "keyword.control.zfl"
+                },
+                "2": {
+                  "name": "entity.name.namespace.zfl"
+                },
+                "3": {
+                  "name": "entity.name.function.zfl"
+                }
+              }
+            },
+            {
+              "match": "\\b(event)\\b\\s+([A-Za-z_][\\w]*)",
+              "captures": {
+                "1": {
+                  "name": "keyword.control.zfl"
+                },
+                "2": {
+                  "name": "variable.parameter.zfl"
+                }
+              }
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(end)\\b\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zfl"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.zfl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zfl"
+            }
+          },
+          "name": "meta.block.flow-end.zfl",
+          "patterns": [
+            {
+              "match": "\\b(completed|suspended|cancelled|[A-Za-z_][\\w]*)\\b\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "constant.other.key.zfl"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.zfl"
+                }
+              }
+            },
+            {
+              "match": "\\b[A-Za-z_][\\w]*\\b",
+              "name": "variable.parameter.zfl"
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "include": "#common"
+        }
+      ]
+    },
+    "keywords": {
+      "match": "\\b(import|config|flow|systems|zdl|service|commands|events|emits|on|start|when|do|for|command|event|if|else|policy|end|completed|suspended|cancelled|and)\\b",
+      "name": "keyword.control.zfl"
+    },
+    "numbers": {
+      "match": "\\b\\d+(?:\\.\\d+)?\\b",
+      "name": "constant.numeric.zfl"
+    },
+    "operators": {
+      "match": ":|=|\\.|\\?",
+      "name": "keyword.operator.zfl"
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.zfl",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.zfl",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.zfl",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.zfl",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "systems": {
+      "begin": "\\b(systems)\\b\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.declaration.zfl"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.zfl"
+        }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.zfl"
+        }
+      },
+      "name": "meta.block.systems.zfl",
+      "patterns": [
+        {
+          "begin": "\\b([A-Za-z_][\\w]*)\\b\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.name.type.zfl"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.zfl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zfl"
+            }
+          },
+          "name": "meta.block.system.zfl",
+          "patterns": [
+            {
+              "match": "\\b(service)\\b\\s+([A-Za-z_][\\w]*)\\s*(?:\\b(for)\\b\\s*\\(([^)]*)\\))?",
+              "captures": {
+                "1": {
+                  "name": "keyword.control.zfl"
+                },
+                "2": {
+                  "name": "entity.name.function.zfl"
+                },
+                "3": {
+                  "name": "keyword.control.zfl"
+                },
+                "4": {
+                  "patterns": [
+                    {
+                      "match": "\\b[A-Za-z_][\\w]*\\b",
+                      "name": "variable.parameter.zfl"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "match": "\\b(commands)\\b\\s*(:)",
+              "captures": {
+                "1": {
+                  "name": "keyword.control.zfl"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.zfl"
+                }
+              }
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
+          "include": "#common"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "begin": "/\\*\\*",
+          "end": "\\*/",
+          "name": "comment.block.documentation.zfl"
+        },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "name": "comment.block.zfl"
+        },
+        {
+          "match": "//.*$",
+          "name": "comment.line.double-slash.zfl"
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "match": "(@import)\\s*(\\()",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.zfl"
+            },
+            "2": {
+              "name": "punctuation.section.group.begin.zfl"
+            }
+          }
+        },
+        {
+          "match": "\\b(import)\\b",
+          "name": "keyword.control.import.zfl"
+        }
+      ]
+    },
+    "serviceReferences": {
+      "match": "\\b(service)\\s+([A-Za-z_][\\w]*)(?:(\\.)([A-Za-z_][\\w]*))?",
+      "captures": {
+        "1": {
+          "name": "keyword.control.zfl"
+        },
+        "2": {
+          "name": "entity.name.type.zfl"
+        },
+        "3": {
+          "name": "punctuation.accessor.zfl"
+        },
+        "4": {
+          "name": "entity.name.function.zfl"
+        }
+      }
+    },
+    "labels": {
+      "match": "^\\s*([A-Za-z_][\\w]*)\\s*(:)",
+      "captures": {
+        "1": {
+          "name": "constant.other.key.zfl"
+        },
+        "2": {
+          "name": "punctuation.separator.key-value.zfl"
+        }
+      }
+    }
+  }
+}
