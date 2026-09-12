@@ -57,10 +57,10 @@
 - [x] `npm run build` produces both bundles
 - [x] Browser bundle confirmed free of Node APIs — its only `require` is `vscode`
 - [x] Smoke-test fixtures: one `.zdl` and one `.zfl` under `fixtures/`
-- [ ] F5 launches the desktop extension; a `.zdl` file is highlighted
-- [ ] `npm run run-in-browser` launches `@vscode/test-web`; a `.zdl` file is
+- [x] F5 launches the desktop extension; a `.zdl` file is highlighted
+- [x] `npm run run-in-browser` launches `@vscode/test-web`; a `.zdl` file is
       highlighted and no Node API error appears in the console
-- [ ] Confirm SDK-gated commands are hidden in the web host
+- [x] Confirm SDK-gated commands are hidden in the web host
       *(nothing is gated yet — no gated command exists until `sdk-runner`)*
 
 ## Archive
