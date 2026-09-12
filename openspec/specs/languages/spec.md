@@ -1,7 +1,10 @@
 # languages Specification
 
 ## Purpose
-TBD - created by archiving change 001-extension-foundation. Update Purpose after archive.
+
+Making VS Code recognise ZDL and ZFL as languages of their own: file
+association, highlighting that needs no server or network, and editor behaviour
+that matches how the languages are actually written.
 
 ## Requirements
 

@@ -103,8 +103,13 @@ Handlebars templates leak across it.
 ### Identity
 
 Ships as a **new marketplace extension**, `ZenWave360.zenwave-platform`.
-`ZenWave360.zdl-vscode` gets deprecated with a pointer to the successor.
-Existing users migrate manually.
+
+The intent is that `ZenWave360.zdl-vscode` is eventually deprecated with a
+pointer to the successor, and that existing users migrate manually. **How that
+happens is not settled and is not scheduled** — the predecessor contributes the
+same language ids, so what a user with both installed experiences is a real
+question that `008-release` explicitly defers. Treat the deprecation as an
+intention, not as specified behaviour.
 
 ## Capability map
 
@@ -114,10 +119,43 @@ Capabilities appear in `specs/` as their changes are archived.
 | --- | --- | --- |
 | `host-capabilities` | change 001 | Detecting what the current host can do; gating features honestly |
 | `languages` | change 001 | ZDL/ZFL file association, syntax highlighting, editor configuration |
-| `lsp-client` | planned | Launching and talking to the language server over the right transport |
-| `markdown-preview` | planned | Side-by-side ZDL/ZFL preview with Mermaid diagrams |
-| `sdk-runner` | planned | CodeLens on plugin declarations; building and running the CLI command |
-| `eventflow-panel` | planned | Hosting the upstream `@zenwave360/vistas-eventflow` webview as a ZFL flow diagram panel, and feeding it a view model |
+| `sdk-runner` | change 002 | CodeLens on plugin declarations; building and running the CLI command |
+| `lsp-client` | change 003 | Launching and talking to the language server over the right transport |
+| `eventflow-panel` | change 004 | Hosting the upstream `@zenwave360/vistas-eventflow` webview as a ZFL flow diagram panel, and feeding it a view model |
+| `model-preview` | change 005 | Side-by-side ZDL/ZFL preview of the server's representations, with Mermaid diagrams |
+| `model-explorer` | change 006 | Architecture and model hierarchy trees in a ZenWave sidebar container |
+| `model-actions` | change 007 | Server-backed commands on a model: semantic navigation, organising ZFL services |
+| `release` | change 008 | Building, versioning and publishing to the VS Code Marketplace and Open VSX |
+
+**What is actually startable.** Only `008` — the release pipeline depends on
+nothing. `002` was classified as ready and is not: `@zenwave360/dsl` is not on
+the npm registry, so the extension cannot declare the dependency it is built on.
+`003` to `007` are blocked on `zenwave-lsp`, and several of them on upstream
+behaviour that an adversarial review of these specs showed was assumed rather
+than real — hierarchy for an unopened document, nodes that point at the document
+declaring them, a position-to-symbol step, matching a tree node to a diagram
+node, and configuration changes taken up without a restart. Each change's
+proposal says which of these it waits on.
+
+**A note on how these specs were written.** Much of the upstream behaviour here
+was established by reading Kotlin, and several claims that entered the specs as
+fact were inferences that turned out to be false — a planning document read as a
+description of what exists, an identifier assumed to be shared between two
+subsystems, a request assumed to compose with another. `openspec validate
+--strict` caught none of them; a fresh reader checking the claims against the
+code caught all of them. Verify against the implementation before building on a
+statement about upstream, including the ones in these documents.
+The cross-repo contracts they need are proposed in the shared store as
+`001-ide-client-contracts`.
+
+The preview (005) and the EventFlow diagram (004) are both **custom editors**, so
+a model file can be opened as text, as a preview or as a diagram. The trees in
+006 live in their own activity-bar container. Two consequences worth knowing
+before writing code against any of them: `window.activeTextEditor` is undefined
+whenever one of those editors has focus, so the active document is resolved
+through `window.tabGroups`; and the server/client division flips between them —
+view models and preview representations are rendered as the server describes
+them, while hierarchy nodes are presented in this client's own idiom.
 
 ## Conventions
 

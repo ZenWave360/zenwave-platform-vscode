@@ -1,7 +1,10 @@
 # host-capabilities Specification
 
 ## Purpose
-TBD - created by archiving change 001-extension-foundation. Update Purpose after archive.
+
+Knowing what the extension host we are running in can actually do — spawn a
+process, open a terminal, reach a local disk, talk to a language server — and
+making features that cannot work here absent and explained rather than broken.
 
 ## Requirements
 
