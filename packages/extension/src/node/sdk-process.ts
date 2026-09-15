@@ -4,15 +4,6 @@ import type { CommandProbe, ProcessResult, SdkInvocation, SdkProcessService } fr
 
 const MAX_CATALOGUE_BYTES = 20 * 1024 * 1024;
 
-function firstCommandToken(command: string): string | undefined {
-  const match = /^\s*(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(command);
-  return match?.[1] ?? match?.[2] ?? match?.[3];
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
 function result(
   stdout: string,
   stderr: string,
@@ -93,47 +84,31 @@ export class NodeSdkProcessService implements SdkProcessService {
     cwd: string,
     invocation: SdkInvocation,
   ): Promise<CommandProbe> {
-    const executable = firstCommandToken(command);
+    const trimmedCommand = command.trim();
     const searchPath = process.env.PATH ?? '';
-    if (!executable) {
+    if (!trimmedCommand) {
       return { found: false, diagnosis: 'The configured SDK command is empty.' };
     }
-
-    if (invocation.environment === 'loginShell') {
-      if (!invocation.loginShell) {
-        return {
-          found: false,
-          diagnosis:
-            'The SDK is configured to use a login shell, but zenwave.sdk.loginShell is empty.',
-        };
-      }
-      const check = await new Promise<ProcessResult>((resolve) => {
-        execFile(
-          invocation.loginShell,
-          ['-l', '-c', `command -v -- ${shellQuote(executable)}`],
-          { cwd },
-          (error, stdout, stderr) => resolve(result(stdout, stderr, error)),
-        );
-      });
-      return check.exitCode === 0
-        ? { found: true, diagnosis: check.stdout.trim() }
-        : {
-            found: false,
-            diagnosis: `Could not find "${executable}" from "${command}" through login shell "${invocation.loginShell}". The editor inherited PATH=${searchPath}`,
-          };
+    const attempted = `${trimmedCommand} -h json`;
+    const check = await this.catalogue(trimmedCommand, cwd, invocation);
+    if (check.exitCode === 0) {
+      return { found: true, diagnosis: `Started "${attempted}" in "${cwd}".` };
     }
-
-    const locator = process.platform === 'win32' ? 'where.exe' : 'which';
-    const check = await new Promise<ProcessResult>((resolve) => {
-      execFile(locator, [executable], { cwd }, (error, stdout, stderr) =>
-        resolve(result(stdout, stderr, error)),
-      );
-    });
-    return check.exitCode === 0
-      ? { found: true, diagnosis: check.stdout.trim() }
-      : {
-          found: false,
-          diagnosis: `Could not find "${executable}" from "${command}" in the environment inherited by VS Code. Searched PATH=${searchPath}`,
-        };
+    const environment =
+      invocation.environment === 'loginShell'
+        ? invocation.loginShell
+          ? `login shell "${invocation.loginShell}"`
+          : 'an empty zenwave.sdk.loginShell setting'
+        : 'the environment inherited by VS Code';
+    return {
+      found: false,
+      diagnosis: [
+        `Could not start the configured SDK command by running "${attempted}" in "${cwd}" through ${environment}.`,
+        `Searched PATH=${searchPath}`,
+        check.stderr.trim(),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    };
   }
 }
