@@ -1,0 +1,3 @@
+entity Order {
+  id UUID required
+}

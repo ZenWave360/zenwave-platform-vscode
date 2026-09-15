@@ -20,8 +20,26 @@ Event Storming board.
 ## Current features
 
 - Syntax highlighting for ZDL and ZFL, in both desktop and browser VS Code
+- ZenWave SDK plugin completion and hover help, backed by the installed SDK or a
+  clearly marked shipped catalogue
+- Run CodeLens actions for enabled ZDL plugin declarations in trusted desktop
+  workspaces
 
 More is on the way; see the repository for what is planned.
+
+## Development dependency
+
+`@zenwave360/dsl@1.9.0-SNAPSHOT` is not published to npm yet, so a clean
+`npm install`/`npm ci` currently fails. Build the sibling `dsl-kotlin` repository
+and link its generated package without changing this manifest's version-based
+dependency:
+
+```console
+npm link --no-save --workspace packages/extension ../dsl-kotlin/build/js/packages/dsl-kotlin
+```
+
+Once that exact version is published, clean installs work without a manifest
+change.
 
 ## Replaces
 

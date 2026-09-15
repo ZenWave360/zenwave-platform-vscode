@@ -1,0 +1,17 @@
+config {
+  basePackage "io.example.orders"
+
+  plugins {
+    DefaultInheritancePlugin {
+      targetFolder "."
+    }
+
+    ExplicitInheritancePlugin (inherit true) {
+      targetFolder "build/generated"
+    }
+
+    NoInheritancePlugin (inherit false) {
+      targetFolder "build/standalone"
+    }
+  }
+}

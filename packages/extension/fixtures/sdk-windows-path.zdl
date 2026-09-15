@@ -1,0 +1,7 @@
+config {
+  plugins {
+    WindowsPathPlugin {
+      sourceFile "${this.file.path}"
+    }
+  }
+}

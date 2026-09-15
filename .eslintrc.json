@@ -32,6 +32,12 @@
       "rules": {
         "no-restricted-imports": "off"
       }
+    },
+    {
+      "files": ["packages/extension/test/unit/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
     }
   ]
 }

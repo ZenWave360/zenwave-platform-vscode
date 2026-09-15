@@ -76,8 +76,9 @@ the CLI options are all readable from the parsed model.
 `plugin_options: LPAREN plugin_options_inherit RPAREN`, so the syntax is
 `MyPlugin (inherit false) { … }` — there is no nested `options { }` block, and an
 earlier draft of this spec invented one. Worse, the listener stores the rule's
-`.text`, so `parseZdl` reports `options.inherit` as the **string** `"inherit
-false"` when the clause is present and the boolean `true` when it is absent. Code
+`.text`, so `parseZdl` reports `options.inherit` as a **string** when the clause
+is present (`"inheritfalse"` in the current Kotlin/JS build; whitespace is not
+preserved) and the boolean `true` when it is absent. Code
 that reads it for truthiness therefore always inherits, which is the wrong answer
 silently. IntelliJ avoids this by testing the PSI token rather than the model
 field. Either interpret the string, or ask upstream for a boolean; do not trust
@@ -268,6 +269,16 @@ that the requirement is written at the right level.
 between the terminal and the model file. Splitting them into an argv array and
 letting `ShellExecution` re-quote would produce a command line the user cannot
 paste back, and would fight the `--deps a,b,c` and `option=value` forms.
+
+**Implementation discovery:** `parseZdl` exposes semantic config values, not the
+source token text, and it records no source locations for plugin config values.
+For example, both `displayName "Orders API"` and `displayName 'Orders API'` are
+reported as `"Orders API"` without their delimiters. Exact source preservation
+would require a second ZDL lexer, which this design rejects. The observable
+contract therefore preserves the parsed value and safely re-quotes whitespace;
+it does not promise the source's original quote character. CLI options are
+different: the DSL package reports their value text with its quotes intact, so
+those can still be appended verbatim.
 
 The cost is quoting: a path containing a space breaks the command. Only
 path-valued segments we inject ourselves (`zdlFile=`, the `${this.file.path}`

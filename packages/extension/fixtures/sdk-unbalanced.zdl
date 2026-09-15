@@ -1,0 +1,4 @@
+config {
+  plugins {
+    UnfinishedPlugin {
+      targetFolder "build/generated"

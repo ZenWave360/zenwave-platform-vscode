@@ -27,7 +27,7 @@
       configuration
 - [ ] 3.4 Install the built VSIX into a clean editor and confirm it activates
 - [x] 3.5 Record the package's size, so growth from bundled renderers is visible
-- [ ] 3.6 Regenerate the shipped SDK plugin catalogue as part of cutting a
+- [x] 3.6 Regenerate the shipped SDK plugin catalogue as part of cutting a
       release, and record which SDK release it came from
 
 ## 4. Release metadata

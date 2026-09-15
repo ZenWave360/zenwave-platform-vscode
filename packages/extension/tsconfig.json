@@ -2,8 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["vscode"],
-    "rootDir": "src"
+    "types": ["node", "vscode"],
+    "rootDir": ".",
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts"]
 }

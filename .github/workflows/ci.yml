@@ -31,6 +31,16 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Install JBang for a release catalogue check
+        if: github.ref_type == 'tag'
+        uses: jbangdev/setup-jbang@v0.1.1
+
+      - name: Verify the release carries the current SDK catalogue
+        if: github.ref_type == 'tag'
+        run: |
+          npm run generate:sdk-catalogue --workspace packages/extension
+          git diff --exit-code -- packages/extension/resources/sdk-plugin-catalogue.json
+
       - name: Validate OpenSpec changes
         run: npx openspec validate --all --strict
 
@@ -39,6 +49,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Unit tests
+        run: npm test
 
       - name: Build both extension hosts
         run: |

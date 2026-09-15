@@ -55,10 +55,6 @@ function run(command, args, extraEnvironment = {}) {
   }
 }
 
-if (manifest.scripts['generate:sdk-catalogue']) {
-  run('npm', ['run', 'generate:sdk-catalogue']);
-}
-
 run('node', ['esbuild.mjs', '--production']);
 
 fs.mkdirSync(path.dirname(path.resolve(projectDir, output)), { recursive: true });

@@ -5,6 +5,8 @@ import {
   type HostCapabilities,
 } from './host/capabilities.js';
 import { Logger } from './host/logger.js';
+import { registerSdkFeature } from './sdk/feature.js';
+import type { SdkProcessService } from './sdk/host.js';
 
 declare const __ZENWAVE_BUILD_COMMIT__: string;
 
@@ -14,7 +16,11 @@ declare const __ZENWAVE_BUILD_COMMIT__: string;
  * Both entry points funnel here. Nothing in this file, or anything it imports,
  * may touch a Node API — see `esbuild.mjs` for why that boundary matters.
  */
-export function activate(context: vscode.ExtensionContext, capabilities: HostCapabilities): void {
+export function activate(
+  context: vscode.ExtensionContext,
+  capabilities: HostCapabilities,
+  sdkProcess?: SdkProcessService,
+): void {
   const logger = new Logger();
   context.subscriptions.push(logger);
 
@@ -27,6 +33,8 @@ export function activate(context: vscode.ExtensionContext, capabilities: HostCap
   context.subscriptions.push(
     vscode.commands.registerCommand('zenwave.showOutput', () => logger.show()),
   );
+
+  registerSdkFeature(context, capabilities, logger, sdkProcess);
 }
 
 /**

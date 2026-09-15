@@ -45,7 +45,10 @@ model file that contains it, using these rules:
 
 - the plugin name is passed as the plugin to run, as the value of the SDK's
   plugin option (`-p`), not as a positional argument;
-- the plugin's own config options are passed as `name=value` pairs;
+- the plugin's own config options are passed as `name=value` pairs using the
+  semantic value reported by the ZDL parser; source-level quote delimiters are
+  not available from that API, so values containing whitespace are safely
+  re-quoted rather than claiming to preserve their original spelling;
 - the enclosing `config` block's options are inherited and passed the same way,
   unless the plugin opts out with `(inherit false)` after its name;
 - an option declared on the plugin overrides an inherited option of the same name;
@@ -107,6 +110,13 @@ model file that contains it, using these rules:
 - **WHEN** the user triggers its Run action
 - **THEN** the command carries the path of the containing file in place of that
   placeholder
+
+#### Scenario: A quoted option value containing spaces
+- **GIVEN** a plugin option declared as `displayName "Orders API"`
+- **WHEN** the user inspects or runs its command
+- **THEN** the command carries `displayName="Orders API"`, preserving the
+  parsed value even though the parser does not expose which quote delimiter was
+  used in the source
 
 ### Requirement: The user can read the command before running it
 The Run action SHALL make the full command line visible without running it, and

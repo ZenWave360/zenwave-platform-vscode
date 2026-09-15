@@ -27,6 +27,7 @@ const required = [
   'extension/resources/zenwave-logo.png',
   'extension/resources/zenwave-preview-dark.svg',
   'extension/resources/zenwave-preview-light.svg',
+  'extension/resources/sdk-plugin-catalogue.json',
 ];
 
 const forbidden = [

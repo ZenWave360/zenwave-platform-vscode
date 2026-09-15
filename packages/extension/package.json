@@ -102,15 +102,69 @@
         "command": "zenwave.showOutput",
         "title": "Show Output",
         "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.sdk.run",
+        "title": "Run SDK Plugin",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.sdk.refreshPlugins",
+        "title": "Refresh SDK Plugin Catalogue",
+        "category": "ZenWave"
       }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "zenwave.showOutput"
+        },
+        {
+          "command": "zenwave.sdk.run",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.sdk.refreshPlugins"
         }
       ]
     },
+    "taskDefinitions": [
+      {
+        "type": "zenwave-sdk",
+        "required": [
+          "plugin",
+          "cwd"
+        ],
+        "properties": {
+          "plugin": {
+            "type": "string",
+            "description": "Plugin class name used as this task's identity."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the SDK command."
+          },
+          "command": {
+            "type": "string",
+            "description": "Complete ZenWave SDK command line to execute."
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "inherited",
+              "loginShell"
+            ],
+            "default": "inherited",
+            "description": "Whether to use the editor environment or a configured login shell."
+          },
+          "loginShell": {
+            "type": "string",
+            "default": "",
+            "description": "Login shell executable when environment is loginShell."
+          }
+        }
+      }
+    ],
     "configuration": {
       "title": "ZenWave Platform",
       "properties": {
@@ -123,6 +177,41 @@
           ],
           "default": "info",
           "description": "Verbosity of the ZenWave output channel."
+        },
+        "zenwave.sdk.cliCommand": {
+          "type": "string",
+          "default": "jbang zw",
+          "scope": "resource",
+          "description": "Command used to invoke ZenWave SDK."
+        },
+        "zenwave.sdk.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Arguments appended verbatim to every ZenWave SDK plugin run."
+        },
+        "zenwave.sdk.environment": {
+          "type": "string",
+          "enum": [
+            "inherited",
+            "loginShell"
+          ],
+          "enumDescriptions": [
+            "Use the environment inherited when VS Code started.",
+            "Run through the configured shell with its login profile loaded."
+          ],
+          "default": "inherited",
+          "scope": "resource",
+          "description": "Environment used by SDK runs and plugin-catalogue discovery."
+        },
+        "zenwave.sdk.loginShell": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Shell executable used with -l -c when zenwave.sdk.environment is loginShell (for example /bin/bash or C:\\Program Files\\Git\\bin\\bash.exe)."
         }
       }
     }
@@ -132,8 +221,10 @@
     "build:smoke": "node esbuild.mjs --tests",
     "watch": "node esbuild.mjs --watch",
     "package": "node scripts/package.mjs",
+    "generate:sdk-catalogue": "node scripts/generate-sdk-catalogue.mjs",
     "verify:vsix": "node scripts/verify-vsix.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test test/unit/*.test.ts",
     "test:desktop": "npm run build && npm run build:smoke && node scripts/run-desktop-smoke.mjs",
     "test:browser": "npm run build && npm run build:smoke && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=.test-dist/browser/index.js fixtures",
     "run-in-browser": "npm run build && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. fixtures",
@@ -144,6 +235,10 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.0.0",
-    "ovsx": "^1.2.0"
+    "ovsx": "^1.2.0",
+    "tsx": "^4.23.13"
+  },
+  "dependencies": {
+    "@zenwave360/dsl": "1.9.0-SNAPSHOT"
   }
 }

@@ -1,6 +1,7 @@
 import type * as vscode from 'vscode';
 import { activate as activateShared, deactivate as deactivateShared } from '../activate.js';
 import { DESKTOP_CAPABILITIES } from '../host/capabilities.js';
+import { NodeSdkProcessService } from './sdk-process.js';
 
 /**
  * Desktop (Node extension host) entry point.
@@ -10,7 +11,7 @@ import { DESKTOP_CAPABILITIES } from '../host/capabilities.js';
  * feature code stay host-agnostic.
  */
 export function activate(context: vscode.ExtensionContext): void {
-  activateShared(context, DESKTOP_CAPABILITIES);
+  activateShared(context, DESKTOP_CAPABILITIES, new NodeSdkProcessService());
 }
 
 export function deactivate(): void {

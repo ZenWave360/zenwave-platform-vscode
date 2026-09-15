@@ -1,0 +1,23 @@
+@import("io.example:my-plugin:1.2.3")
+@import("./shared/common.zdl")
+
+config {
+  basePackage "io.example.orders"
+
+  plugins {
+    FirstPlugin {
+      targetFolder "build/generated"
+      sourceFile "${this.file.path}"
+      --force
+      --style=compact
+    }
+
+    SecondPlugin {
+      zdlFiles "orders.zdl,customers.zdl"
+    }
+
+    disabled DisabledPlugin {
+      targetFolder "ignored"
+    }
+  }
+}
