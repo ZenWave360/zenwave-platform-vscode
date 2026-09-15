@@ -9,6 +9,7 @@ import {
 } from './catalogue.js';
 import { buildSdkCommand, buildSdkInvocation } from './command.js';
 import { readSdkSettings, type SdkProcessService, type SdkSettings } from './host.js';
+import { loginShellArguments, resolveLoginShell } from './shell.js';
 import {
   isPluginNamePosition,
   ModelCache,
@@ -77,7 +78,7 @@ function createTask(
   const options: vscode.ShellExecutionOptions = { cwd: definition.cwd };
   if (definition.environment === 'loginShell') {
     options.executable = definition.loginShell;
-    options.shellArgs = ['-l', '-c'];
+    options.shellArgs = [...loginShellArguments(definition.loginShell)];
   }
   const execution =
     definition.executable !== undefined && definition.arguments !== undefined
@@ -127,7 +128,10 @@ function asTaskDefinition(value: vscode.TaskDefinition): ZenWaveTaskDefinition |
         ? { arguments: value.arguments as string[] }
         : {}),
       environment: value.environment === 'loginShell' ? 'loginShell' : 'inherited',
-      loginShell: typeof value.loginShell === 'string' ? value.loginShell : '',
+      loginShell: resolveLoginShell(
+        typeof value.loginShell === 'string' ? value.loginShell : undefined,
+        vscode.env.shell,
+      ),
     };
   }
   return undefined;

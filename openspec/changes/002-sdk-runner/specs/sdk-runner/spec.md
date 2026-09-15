@@ -191,7 +191,11 @@ SHALL NOT accumulate terminals.
 The extension SHALL invoke the SDK with the environment it inherits from the
 editor by default, and SHALL let the user choose instead to invoke it through a
 shell that loads their own profile. That choice SHALL apply both to running a
-plugin and to asking the SDK what it offers.
+plugin and to asking the SDK what it offers. An explicitly configured login
+shell SHALL take precedence; otherwise the extension SHALL use VS Code's
+preferred terminal shell and the login/command arguments appropriate to that
+shell family. It SHALL report a configuration error only when neither shell is
+usable.
 
 #### Scenario: A tool on the system path
 - **GIVEN** a user whose SDK command is on the path their editor was started with
@@ -203,6 +207,25 @@ plugin and to asking the SDK what it offers.
   it on the path — a version manager, or a shell-specific installation
 - **WHEN** they turn on invoking through their shell
 - **THEN** running a plugin finds the command
+
+#### Scenario: Reusing the preferred terminal shell
+- **GIVEN** a user who selects login-shell execution, has a preferred terminal
+  profile in VS Code, and does not configure `zenwave.sdk.loginShell`
+- **WHEN** the extension runs a plugin or asks the SDK what it offers
+- **THEN** it invokes VS Code's preferred terminal shell using that shell
+  family's login/command convention
+
+#### Scenario: Overriding the preferred terminal shell
+- **GIVEN** a user whose preferred terminal shell differs from the executable
+  configured in `zenwave.sdk.loginShell`
+- **WHEN** the extension runs a plugin or asks the SDK what it offers
+- **THEN** the explicitly configured shell is used
+
+#### Scenario: No usable login shell
+- **GIVEN** login-shell execution is selected, the explicit shell setting is
+  empty, and VS Code reports no preferred shell
+- **WHEN** the extension tries to run or query the SDK
+- **THEN** it reports that no usable login shell is available
 
 #### Scenario: Completion and running agree
 - **GIVEN** a user who has configured how the SDK is invoked

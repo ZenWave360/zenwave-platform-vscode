@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { resolveLoginShell } from './shell.js';
 
 export type SdkEnvironment = 'inherited' | 'loginShell';
 
@@ -35,12 +36,13 @@ export interface SdkSettings {
 
 export function readSdkSettings(uri?: vscode.Uri): SdkSettings {
   const configuration = vscode.workspace.getConfiguration('zenwave.sdk', uri);
+  const configuredLoginShell = configuration.get<string>('loginShell');
   return {
     cliCommand: configuration.get<string>('cliCommand', 'jbang zw'),
     extraArgs: configuration.get<readonly string[]>('extraArgs', []),
     invocation: {
       environment: configuration.get<SdkEnvironment>('environment', 'inherited'),
-      loginShell: configuration.get<string>('loginShell', ''),
+      loginShell: resolveLoginShell(configuredLoginShell, vscode.env.shell),
     },
   };
 }

@@ -1,6 +1,7 @@
 import { exec, execFile } from 'node:child_process';
 import process from 'node:process';
 import type { CommandProbe, ProcessResult, SdkInvocation, SdkProcessService } from '../sdk/host.js';
+import { loginShellArguments } from '../sdk/shell.js';
 
 const MAX_CATALOGUE_BYTES = 20 * 1024 * 1024;
 
@@ -64,7 +65,7 @@ export class NodeSdkProcessService implements SdkProcessService {
         }
         execFile(
           invocation.loginShell,
-          ['-l', '-c', catalogueCommand],
+          [...loginShellArguments(invocation.loginShell), catalogueCommand],
           { cwd, maxBuffer: MAX_CATALOGUE_BYTES, encoding: 'utf8' },
           callback,
         );

@@ -175,7 +175,12 @@ Two options are enough to cover everybody, and they are not the obvious two:
 | **Optional** | The task runs through a shell that loads the user's profile |
 
 The second uses `ShellExecutionOptions.executable` and `shellArgs` to run the
-task in a login shell. It keeps everything the Tasks API was chosen for.
+task in a login shell. An explicit ZenWave shell setting wins, but requiring a
+second copy of the user's existing VS Code terminal preference is needless:
+when the setting is empty, `vscode.env.shell` supplies the preferred terminal
+shell. The argument convention is selected by shell family (`-l -c` for POSIX
+shells, PowerShell command switches, cmd command switches, and the corresponding
+Nu/WSL forms). It keeps everything the Tasks API was chosen for.
 
 **Rejected: sending the command to the user's terminal.** It would also pick up
 their profile, and it gives back exactly what `terminal.sendText` cost us — no

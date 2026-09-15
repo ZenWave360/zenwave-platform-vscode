@@ -81,6 +81,9 @@
       looked for
 - [x] 6.11 Fixture: a Windows path with a space run through a bash shell — the
       backslash-as-escape case
+- [x] 6.12 Let an explicit login shell override VS Code's preferred terminal
+      shell; otherwise use the preferred shell with family-appropriate command
+      arguments, consistently for tasks and catalogue discovery
 
 ## 7. Plugin catalogue and completion
 

@@ -211,7 +211,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "Shell executable used with -l -c when zenwave.sdk.environment is loginShell (for example /bin/bash or C:\\Program Files\\Git\\bin\\bash.exe)."
+          "description": "Optional shell executable used when zenwave.sdk.environment is loginShell. When empty, ZenWave uses VS Code's preferred terminal shell."
         }
       }
     }
