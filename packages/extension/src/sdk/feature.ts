@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import type { HostCapabilities } from '../host/capabilities.js';
 import type { Logger } from '../host/logger.js';
-import { PluginCatalogue, type Catalogue, type CatalogueOption } from './catalogue.js';
+import {
+  catalogueCacheKey,
+  PluginCatalogue,
+  type Catalogue,
+  type CatalogueOption,
+} from './catalogue.js';
 import { buildSdkCommand, buildSdkInvocation } from './command.js';
 import { readSdkSettings, type SdkProcessService, type SdkSettings } from './host.js';
 import {
@@ -45,16 +50,6 @@ function directoryOf(uri: vscode.Uri): string {
   const filePath = uri.fsPath;
   const separator = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
   return separator < 0 ? filePath : filePath.slice(0, separator);
-}
-
-function catalogueKey(uri: vscode.Uri, settings: SdkSettings): string {
-  const folder = vscode.workspace.getWorkspaceFolder(uri)?.uri.toString() ?? uri.toString();
-  return [
-    folder,
-    settings.cliCommand,
-    settings.invocation.environment,
-    settings.invocation.loginShell,
-  ].join('\u0000');
 }
 
 function taskDefinition(
@@ -250,9 +245,10 @@ class SdkAuthoringProvider
     position: vscode.Position,
   ): vscode.CompletionItem[] | undefined {
     const settings = readSdkSettings(document.uri);
+    const cwd = this.capabilities.hasLocalFileSystem ? directoryOf(document.uri) : undefined;
     const catalogue = this.catalogue.get(
-      catalogueKey(document.uri, settings),
-      this.capabilities.hasLocalFileSystem ? directoryOf(document.uri) : undefined,
+      catalogueCacheKey(cwd, settings),
+      cwd,
       settings,
       this.capabilities.canRunProcesses && vscode.workspace.isTrusted,
     );
@@ -303,9 +299,10 @@ class SdkAuthoringProvider
       return undefined;
     }
     const settings = readSdkSettings(document.uri);
+    const cwd = this.capabilities.hasLocalFileSystem ? directoryOf(document.uri) : undefined;
     const catalogue = this.catalogue.get(
-      catalogueKey(document.uri, settings),
-      this.capabilities.hasLocalFileSystem ? directoryOf(document.uri) : undefined,
+      catalogueCacheKey(cwd, settings),
+      cwd,
       settings,
       this.capabilities.canRunProcesses && vscode.workspace.isTrusted,
     );

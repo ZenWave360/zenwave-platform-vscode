@@ -28,6 +28,15 @@ export interface Catalogue {
   readonly plugins: readonly CataloguePlugin[];
 }
 
+export function catalogueCacheKey(cwd: string | undefined, settings: SdkSettings): string {
+  return [
+    cwd ?? '<no-local-directory>',
+    settings.cliCommand,
+    settings.invocation.environment,
+    settings.invocation.loginShell,
+  ].join('\u0000');
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

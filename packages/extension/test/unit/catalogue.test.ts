@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseCatalogue, PluginCatalogue } from '../../src/sdk/catalogue.js';
+import {
+  catalogueCacheKey,
+  parseCatalogue,
+  PluginCatalogue,
+} from '../../src/sdk/catalogue.js';
 import type { SdkProcessService, SdkSettings } from '../../src/sdk/host.js';
 
 const RAW = {
@@ -122,4 +126,15 @@ test('hosts that cannot spawn processes use the marked shipped catalogue immedia
   const catalogue = catalogues.get('web', undefined, SETTINGS, false);
   assert.equal(catalogue?.origin, 'shipped');
   assert.match(catalogue?.source ?? '', /ZenWave SDK/);
+});
+
+test('catalogue cache identity includes the model working directory', () => {
+  assert.notEqual(
+    catalogueCacheKey('/work/first', SETTINGS),
+    catalogueCacheKey('/work/second', SETTINGS),
+  );
+  assert.equal(
+    catalogueCacheKey('/work/first', SETTINGS),
+    catalogueCacheKey('/work/first', SETTINGS),
+  );
 });
