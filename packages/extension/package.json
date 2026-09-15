@@ -129,15 +129,21 @@
   },
   "scripts": {
     "build": "node esbuild.mjs",
+    "build:smoke": "node esbuild.mjs --tests",
     "watch": "node esbuild.mjs --watch",
-    "package": "node esbuild.mjs --production && vsce package --no-dependencies",
+    "package": "node scripts/package.mjs",
+    "verify:vsix": "node scripts/verify-vsix.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:desktop": "npm run build && npm run build:smoke && node scripts/run-desktop-smoke.mjs",
+    "test:browser": "npm run build && npm run build:smoke && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=.test-dist/browser/index.js fixtures",
     "run-in-browser": "npm run build && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. fixtures",
     "serve-web": "npm run build && vscode-test-web --browser=none --quality=stable --extensionDevelopmentPath=. fixtures"
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
-    "@vscode/vsce": "^3.0.0"
+    "@vscode/vsce": "^3.0.0",
+    "ovsx": "^1.2.0"
   }
 }

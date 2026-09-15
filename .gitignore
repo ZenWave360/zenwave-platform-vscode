@@ -4,6 +4,9 @@ out/
 *.vsix
 .vscode-test/
 .vscode-test-web/
+.test-dist/
+.npm-cache/
+artifacts/
 *.tsbuildinfo
 .DS_Store
 tmp/

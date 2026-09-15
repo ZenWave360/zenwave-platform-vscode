@@ -6,6 +6,8 @@ import {
 } from './host/capabilities.js';
 import { Logger } from './host/logger.js';
 
+declare const __ZENWAVE_BUILD_COMMIT__: string;
+
 /**
  * Host-agnostic activation.
  *
@@ -16,7 +18,9 @@ export function activate(context: vscode.ExtensionContext, capabilities: HostCap
   const logger = new Logger();
   context.subscriptions.push(logger);
 
-  logger.info(`ZenWave Platform activated\n  ${describeCapabilities(capabilities)}`);
+  logger.info(
+    `ZenWave Platform activated\n  build commit:    ${__ZENWAVE_BUILD_COMMIT__}\n  ${describeCapabilities(capabilities)}`,
+  );
 
   void publishContextKeys(capabilities);
 

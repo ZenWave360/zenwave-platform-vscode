@@ -1,8 +1,46 @@
 import * as esbuild from 'esbuild';
+import * as fs from 'node:fs';
+import { builtinModules } from 'node:module';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const watch = process.argv.includes('--watch');
 const production = process.argv.includes('--production');
+const tests = process.argv.includes('--tests');
+const projectDir = path.dirname(fileURLToPath(import.meta.url));
+const buildCommit = process.env.ZENWAVE_BUILD_COMMIT?.trim() || 'development';
+const packageManifest = JSON.parse(
+  fs.readFileSync(path.join(projectDir, 'package.json'), 'utf8'),
+);
+
+if (production && !tests) {
+  // A development build leaves source maps in dist. Start a release build from
+  // an empty generated-output directory so stale files cannot enter the VSIX.
+  fs.rmSync(path.join(projectDir, 'dist'), { recursive: true, force: true });
+}
+
+const nodeBuiltins = new Set([
+  ...builtinModules,
+  ...builtinModules.map((name) => `node:${name}`),
+]);
+
+const rejectNodeApis = {
+  name: 'reject-node-apis',
+  setup(build) {
+    build.onResolve({ filter: /.*/ }, (args) => {
+      if (nodeBuiltins.has(args.path)) {
+        return {
+          errors: [
+            {
+              text: `Node API "${args.path}" is reachable from the browser bundle`,
+            },
+          ],
+        };
+      }
+      return undefined;
+    });
+  },
+};
 
 /**
  * Two bundles from one source tree.
@@ -13,22 +51,31 @@ const production = process.argv.includes('--production');
  * Web Worker host, where it is awkward to debug. Keeping the Node surface
  * confined to `src/node/` is what prevents that.
  */
-const targets = [
+const extensionTargets = [
   {
     name: 'node',
-    entryPoints: ['src/node/extension.ts'],
-    outfile: 'dist/node/extension.js',
+    entryPoints: [path.join(projectDir, 'src/node/extension.ts')],
+    outfile: path.join(projectDir, 'dist/node/extension.js'),
     platform: 'node',
     target: 'node20',
   },
   {
     name: 'browser',
-    entryPoints: ['src/browser/extension.ts'],
-    outfile: 'dist/browser/extension.js',
+    entryPoints: [path.join(projectDir, 'src/browser/extension.ts')],
+    outfile: path.join(projectDir, 'dist/browser/extension.js'),
     platform: 'browser',
     target: 'es2022',
   },
 ];
+
+const testTargets = extensionTargets.map((target) => ({
+  ...target,
+  name: `${target.name}-smoke`,
+  entryPoints: [path.join(projectDir, 'test/smoke.ts')],
+  outfile: path.join(projectDir, `.test-dist/${target.name}/index.js`),
+}));
+
+const targets = tests ? testTargets : extensionTargets;
 
 /**
  * Both targets build concurrently, but VS Code needs ONE begin/end pair per
@@ -98,6 +145,7 @@ const reporter = (name) => ({
 const contexts = await Promise.all(
   targets.map((target) =>
     esbuild.context({
+      absWorkingDir: projectDir,
       entryPoints: target.entryPoints,
       outfile: target.outfile,
       bundle: true,
@@ -109,7 +157,13 @@ const contexts = await Promise.all(
       sourcemap: production ? false : 'linked',
       minify: production,
       logLevel: 'silent',
-      plugins: [reporter(target.name)],
+      plugins: [
+        ...(target.platform === 'browser' ? [rejectNodeApis] : []),
+        reporter(target.name),
+      ],
+      define: {
+        __ZENWAVE_BUILD_COMMIT__: JSON.stringify(buildCommit),
+      },
     }),
   ),
 );
@@ -124,5 +178,18 @@ if (watch) {
   await Promise.all(contexts.map((context) => context.dispose()));
   if (results.some((result) => result.status === 'rejected')) {
     process.exitCode = 1;
+  } else if (!tests) {
+    fs.mkdirSync(path.join(projectDir, 'dist'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, 'dist/build-info.json'),
+      `${JSON.stringify(
+        {
+          version: packageManifest.version,
+          commit: buildCommit,
+        },
+        null,
+        2,
+      )}\n`,
+    );
   }
 }

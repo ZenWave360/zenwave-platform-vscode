@@ -1,0 +1,121 @@
+name: Build, verify and release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      ZENWAVE_BUILD_COMMIT: ${{ github.sha }}
+      VSIX: artifacts/zenwave-platform.vsix
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v6
+
+      - name: Use Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate OpenSpec changes
+        run: npx openspec validate --all --strict
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build both extension hosts
+        run: |
+          npm run build
+          test -s packages/extension/dist/node/extension.js
+          test -s packages/extension/dist/browser/extension.js
+
+      - name: Build smoke tests
+        run: npm run build:smoke --workspace packages/extension
+
+      - name: Exercise the desktop extension host
+        run: xvfb-run -a npm run test:desktop --workspace packages/extension
+
+      - name: Install Chromium for the browser-host check
+        run: npx playwright install --with-deps chromium
+
+      - name: Exercise the browser extension host
+        run: npm run test:browser --workspace packages/extension
+
+      - name: Classify release tag
+        if: github.ref_type == 'tag'
+        run: echo "ZENWAVE_RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      - name: Package the extension
+        run: npm run package --workspace packages/extension -- --out "../../$VSIX"
+
+      - name: Verify package contents and build identity
+        run: npm run verify:vsix -- "$VSIX"
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+
+      - name: Rebuild and compare package contents
+        run: |
+          npm run package --workspace packages/extension -- --out ../../artifacts/rebuilt.vsix
+          npm run verify:vsix -- "$VSIX" --compare artifacts/rebuilt.vsix
+
+      - name: Record package size
+        run: |
+          bytes=$(stat --format=%s "$VSIX")
+          echo "Packaged VSIX: $bytes bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve the verified VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenwave-platform-${{ github.sha }}
+          path: ${{ env.VSIX }}
+          if-no-files-found: error
+
+      - name: Publish to VS Code Marketplace
+        id: marketplace
+        if: github.ref_type == 'tag'
+        continue-on-error: true
+        run: |
+          prerelease=()
+          [[ "$GITHUB_REF_NAME" == *-pre ]] && prerelease=(--pre-release)
+          npx vsce publish --packagePath "$VSIX" "${prerelease[@]}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish the same VSIX to Open VSX
+        id: openvsx
+        if: github.ref_type == 'tag'
+        continue-on-error: true
+        run: npx ovsx publish "$VSIX"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      - name: Report registry outcomes
+        if: always() && github.ref_type == 'tag'
+        run: |
+          marketplace='${{ steps.marketplace.outcome }}'
+          openvsx='${{ steps.openvsx.outcome }}'
+          {
+            echo '## Registry publication'
+            echo '| Registry | Outcome |'
+            echo '| --- | --- |'
+            echo "| VS Code Marketplace | $marketplace |"
+            echo "| Open VSX | $openvsx |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [[ "$marketplace" == success && "$openvsx" == success ]]
