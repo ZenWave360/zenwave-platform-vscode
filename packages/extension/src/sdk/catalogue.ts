@@ -136,7 +136,7 @@ export class PluginCatalogue {
     cwd: string | undefined,
     settings: SdkSettings,
     maySpawn: boolean,
-  ): Catalogue | undefined {
+  ): Catalogue {
     if (!this.processService || !maySpawn) {
       return SHIPPED_CATALOGUE;
     }

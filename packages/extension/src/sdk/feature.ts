@@ -244,6 +244,15 @@ class SdkAuthoringProvider
     document: vscode.TextDocument,
     position: vscode.Position,
   ): vscode.CompletionItem[] | undefined {
+    const text = document.getText();
+    const offset = document.offsetAt(position);
+    const model = this.models.get(document.uri.toString(), document.version, text);
+    const declaration = model ? pluginAtOffset(model, offset) : undefined;
+    const pluginNamePosition = declaration ? false : isPluginNamePosition(text, offset);
+    if (!declaration && !pluginNamePosition) {
+      return [];
+    }
+
     const settings = readSdkSettings(document.uri);
     const cwd = this.capabilities.hasLocalFileSystem ? directoryOf(document.uri) : undefined;
     const catalogue = this.catalogue.get(
@@ -252,14 +261,6 @@ class SdkAuthoringProvider
       settings,
       this.capabilities.canRunProcesses && vscode.workspace.isTrusted,
     );
-    if (!catalogue) {
-      return undefined;
-    }
-
-    const text = document.getText();
-    const offset = document.offsetAt(position);
-    const model = this.models.get(document.uri.toString(), document.version, text);
-    const declaration = model ? pluginAtOffset(model, offset) : undefined;
     if (declaration) {
       const plugin = catalogue.plugins.find((candidate) => candidate.name === declaration.name);
       return plugin
@@ -276,9 +277,6 @@ class SdkAuthoringProvider
         : [];
     }
 
-    if (!isPluginNamePosition(text, offset)) {
-      return [];
-    }
     return catalogue.plugins.map((plugin) => {
       const item = new vscode.CompletionItem(plugin.name, vscode.CompletionItemKind.Class);
       item.insertText = new vscode.SnippetString(`${plugin.name} {\n\t\${0}\n}`);
