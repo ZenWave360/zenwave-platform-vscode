@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildSdkCommand } from '../../src/sdk/command.js';
+import { buildSdkCommand, buildSdkInvocation } from '../../src/sdk/command.js';
 import { parseModel } from '../../src/sdk/model.js';
 
 const MODEL = `
@@ -99,4 +99,44 @@ test('an injected Windows path is slash-normalized and quoted for bash', () => {
   assert.match(command, /sourceFile="C:\/Users\/Ada\/My Project\/orders\.zdl"/);
   assert.match(command, /zdlFile="C:\/Users\/Ada\/My Project\/orders\.zdl"/);
   assert.doesNotMatch(command, /\\Users/);
+});
+
+test('execution arguments preserve shell metacharacters as literal values', () => {
+  const dangerousPlugin = {
+    ...main,
+    config: {
+      ...main.config,
+      expression: 'a;b $(touch /tmp/should-not-run) `uname` "$HOME" *.zdl',
+    },
+  };
+  const invocation = buildSdkInvocation(model, dangerousPlugin, '/work/a;b/orders.zdl', settings);
+  assert.ok(
+    invocation.arguments.includes(
+      'expression=a;b $(touch /tmp/should-not-run) `uname` "$HOME" *.zdl',
+    ),
+  );
+  assert.ok(invocation.arguments.includes('zdlFile=/work/a;b/orders.zdl'));
+  assert.match(
+    invocation.commandLine,
+    /'expression=a;b \$\(touch \/tmp\/should-not-run\) `uname` "\$HOME" \*\.zdl'/,
+  );
+  assert.match(invocation.commandLine, /zdlFile="\/work\/a;b\/orders\.zdl"/);
+});
+
+test('a quoted CLI command is split into executable and literal prefix arguments', () => {
+  const invocation = buildSdkInvocation(model, main, '/work/orders.zdl', {
+    cliCommand: '"/opt/ZenWave SDK/jbang" zw',
+    extraArgs: [],
+  });
+  assert.equal(invocation.executable, '/opt/ZenWave SDK/jbang');
+  assert.equal(invocation.arguments[0], 'zw');
+  assert.match(invocation.commandLine, /^'\/opt\/ZenWave SDK\/jbang' zw /);
+});
+
+test('a quoted Windows executable path retains its backslashes', () => {
+  const invocation = buildSdkInvocation(model, main, '/work/orders.zdl', {
+    cliCommand: '"C:\\Program Files\\ZenWave\\zw.exe"',
+    extraArgs: [],
+  });
+  assert.equal(invocation.executable, 'C:\\Program Files\\ZenWave\\zw.exe');
 });

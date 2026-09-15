@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { HostCapabilities } from '../host/capabilities.js';
 import type { Logger } from '../host/logger.js';
 import { PluginCatalogue, type Catalogue, type CatalogueOption } from './catalogue.js';
-import { buildSdkCommand } from './command.js';
+import { buildSdkCommand, buildSdkInvocation } from './command.js';
 import { readSdkSettings, type SdkProcessService, type SdkSettings } from './host.js';
 import {
   isPluginNamePosition,
@@ -26,6 +26,8 @@ interface ZenWaveTaskDefinition extends vscode.TaskDefinition {
   readonly plugin: string;
   readonly cwd: string;
   readonly command: string;
+  readonly executable?: string;
+  readonly arguments?: readonly string[];
   readonly environment: SdkSettings['invocation']['environment'];
   readonly loginShell: string;
 }
@@ -58,14 +60,16 @@ function catalogueKey(uri: vscode.Uri, settings: SdkSettings): string {
 function taskDefinition(
   plugin: PluginDeclaration,
   cwd: string,
-  command: string,
+  invocation: ReturnType<typeof buildSdkInvocation>,
   settings: SdkSettings,
 ): ZenWaveTaskDefinition {
   return {
     type: TASK_TYPE,
     plugin: plugin.name,
     cwd,
-    command,
+    command: invocation.commandLine,
+    executable: invocation.executable,
+    arguments: invocation.arguments,
     environment: settings.invocation.environment,
     loginShell: settings.invocation.loginShell,
   };
@@ -80,12 +84,23 @@ function createTask(
     options.executable = definition.loginShell;
     options.shellArgs = ['-l', '-c'];
   }
+  const execution =
+    definition.executable !== undefined && definition.arguments !== undefined
+      ? new vscode.ShellExecution(
+          { value: definition.executable, quoting: vscode.ShellQuoting.Strong },
+          definition.arguments.map((argument) => ({
+            value: argument,
+            quoting: vscode.ShellQuoting.Strong,
+          })),
+          options,
+        )
+      : new vscode.ShellExecution(definition.command, options);
   const task = new vscode.Task(
     definition,
     scope,
     `Run ${definition.plugin}`,
     'ZenWave SDK',
-    new vscode.ShellExecution(definition.command, options),
+    execution,
     [],
   );
   task.presentationOptions = {
@@ -111,6 +126,11 @@ function asTaskDefinition(value: vscode.TaskDefinition): ZenWaveTaskDefinition |
       plugin: value.plugin,
       cwd: value.cwd,
       command: value.command,
+      ...(typeof value.executable === 'string' ? { executable: value.executable } : {}),
+      ...(Array.isArray(value.arguments) &&
+      value.arguments.every((argument: unknown) => typeof argument === 'string')
+        ? { arguments: value.arguments as string[] }
+        : {}),
       environment: value.environment === 'loginShell' ? 'loginShell' : 'inherited',
       loginShell: typeof value.loginShell === 'string' ? value.loginShell : '',
     };
@@ -364,8 +384,8 @@ async function runPlugin(
     return;
   }
 
-  const command = buildSdkCommand(model, plugin, uri.fsPath, settings);
-  await vscode.tasks.executeTask(createTask(taskDefinition(plugin, cwd, command, settings)));
+  const invocation = buildSdkInvocation(model, plugin, uri.fsPath, settings);
+  await vscode.tasks.executeTask(createTask(taskDefinition(plugin, cwd, invocation, settings)));
 }
 
 export function registerSdkFeature(
