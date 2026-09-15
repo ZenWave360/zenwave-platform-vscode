@@ -16,6 +16,11 @@ uploads that exact file to the VS Code Marketplace and Open VSX. It expects the
 repository secrets `VSCE_PAT` and `OVSX_PAT`. A maintainer with access to the
 corresponding publisher accounts must own rotation of those secrets.
 
+Put runtime files that are not bundled JavaScript under `resources/` or
+`syntaxes/`. Package verification inventories both trees recursively and
+requires every file to be present in the VSIX, so adding a runtime asset does
+not require maintaining a second filename list.
+
 If either registry rejects a publish, the workflow records both registry
 outcomes in its job summary and fails. A successful upload cannot be rolled
 back; cut a follow-up version to repair a partial publish.

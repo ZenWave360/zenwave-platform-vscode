@@ -1,5 +1,7 @@
 import AdmZip from 'adm-zip';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const vsixPath = args[0];
@@ -10,6 +12,18 @@ if (!vsixPath) {
   throw new Error('Usage: node scripts/verify-vsix.mjs <file.vsix> [--compare <file.vsix>]');
 }
 
+const extensionRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+function runtimeFiles(directory) {
+  const absoluteDirectory = path.join(extensionRoot, directory);
+  return fs.readdirSync(absoluteDirectory, { withFileTypes: true }).flatMap((entry) => {
+    const relative = path.posix.join(directory, entry.name);
+    return entry.isDirectory()
+      ? runtimeFiles(relative)
+      : [`extension/${relative}`];
+  });
+}
+
 const required = [
   'extension/package.json',
   'extension/readme.md',
@@ -18,16 +32,8 @@ const required = [
   'extension/dist/node/extension.js',
   'extension/dist/browser/extension.js',
   'extension/dist/build-info.json',
-  'extension/syntaxes/zdl.language-configuration.json',
-  'extension/syntaxes/zdl.tmLanguage.json',
-  'extension/syntaxes/zfl.language-configuration.json',
-  'extension/syntaxes/zfl.tmLanguage.json',
-  'extension/resources/zdl-file-icon.png',
-  'extension/resources/zdl-file-icon.svg',
-  'extension/resources/zenwave-logo.png',
-  'extension/resources/zenwave-preview-dark.svg',
-  'extension/resources/zenwave-preview-light.svg',
-  'extension/resources/sdk-plugin-catalogue.json',
+  ...runtimeFiles('resources'),
+  ...runtimeFiles('syntaxes'),
 ];
 
 const forbidden = [
