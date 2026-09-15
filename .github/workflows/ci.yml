@@ -62,15 +62,6 @@ jobs:
       - name: Build smoke tests
         run: npm run build:smoke --workspace packages/extension
 
-      - name: Exercise the desktop extension host
-        run: xvfb-run -a npm run test:desktop --workspace packages/extension
-
-      - name: Install Chromium for the browser-host check
-        run: npx playwright install --with-deps chromium
-
-      - name: Exercise the browser extension host
-        run: npm run test:browser --workspace packages/extension
-
       - name: Classify release tag
         if: github.ref_type == 'tag'
         run: echo "ZENWAVE_RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
@@ -82,6 +73,24 @@ jobs:
         run: npm run verify:vsix -- "$VSIX"
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
+
+      - name: Prepare the packaged browser extension
+        run: |
+          mkdir -p artifacts/smoke-extension
+          unzip -q "$VSIX" -d artifacts/smoke-extension
+
+      - name: Install and exercise the packaged desktop extension
+        run: xvfb-run -a npm run test:desktop --workspace packages/extension
+        env:
+          ZENWAVE_SMOKE_VSIX: ${{ github.workspace }}/${{ env.VSIX }}
+
+      - name: Install Chromium for the browser-host check
+        run: npx playwright install --with-deps chromium
+
+      - name: Exercise the packaged browser extension
+        run: npm run test:browser --workspace packages/extension
+        env:
+          ZENWAVE_SMOKE_EXTENSION_PATH: ${{ github.workspace }}/artifacts/smoke-extension/extension
 
       - name: Rebuild and compare package contents
         run: |

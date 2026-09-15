@@ -1,0 +1,10 @@
+{
+  "name": "zenwave-packaged-smoke-harness",
+  "displayName": "ZenWave Packaged Smoke Harness",
+  "version": "0.0.0",
+  "publisher": "zenwave-tests",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  }
+}

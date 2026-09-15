@@ -226,7 +226,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test test/unit/*.test.ts",
     "test:desktop": "npm run build && npm run build:smoke && node scripts/run-desktop-smoke.mjs",
-    "test:browser": "npm run build && npm run build:smoke && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. --extensionTestsPath=.test-dist/browser/index.js fixtures",
+    "test:browser": "npm run build && npm run build:smoke && node scripts/run-browser-smoke.mjs",
     "run-in-browser": "npm run build && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. fixtures",
     "serve-web": "npm run build && vscode-test-web --browser=none --quality=stable --extensionDevelopmentPath=. fixtures"
   },
