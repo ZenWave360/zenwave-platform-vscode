@@ -11,6 +11,11 @@ export interface SdkInvocation {
   readonly commandLine: string;
 }
 
+interface InvocationArgument {
+  readonly value: string;
+  readonly display?: string;
+}
+
 const MAVEN_COORDINATE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+$/;
 const FILE_PLACEHOLDER = /\$\{this\.file\.path\}/g;
 
@@ -118,6 +123,25 @@ function optionArgument(name: string, value: ModelValue, filePath: string): stri
   return `${name}=${formatted}`;
 }
 
+function cliOptionArgument(
+  option: PluginDeclaration['cliOptions'][number],
+  filePath: string,
+): InvocationArgument {
+  if (option.value === undefined) {
+    return { value: `--${option.name}` };
+  }
+  const substituted = option.value.replace(FILE_PLACEHOLDER, normalizedPath(filePath));
+  const parsed = splitCommandLine(substituted);
+  const semanticValue = parsed.length === 1 ? parsed[0]! : substituted;
+  const value = `--${option.name}=${semanticValue}`;
+  return {
+    value,
+    display: option.value.includes('${this.file.path}')
+      ? displayArgument(value)
+      : `--${option.name}=${option.value}`,
+  };
+}
+
 export function buildSdkInvocation(
   model: ParsedModel,
   plugin: PluginDeclaration,
@@ -142,35 +166,37 @@ export function buildSdkInvocation(
     .map((modelImport) => modelImport.value)
     .filter((value) => MAVEN_COORDINATE.test(value));
 
-  const arguments_: string[] = ['-p', plugin.name];
+  const arguments_: InvocationArgument[] = [{ value: '-p' }, { value: plugin.name }];
   if (dependencies.length > 0) {
-    arguments_.push('--deps', dependencies.join(','));
+    arguments_.push({ value: '--deps' }, { value: dependencies.join(',') });
   }
   for (const [name, value] of options) {
     if (defaultedZdlFile && name === 'zdlFile') {
-      arguments_.push(`${name}=${normalizedPath(filePath)}`);
+      arguments_.push({ value: `${name}=${normalizedPath(filePath)}` });
     } else {
-      arguments_.push(optionArgument(name, value, filePath));
+      arguments_.push({ value: optionArgument(name, value, filePath) });
     }
   }
   for (const option of plugin.cliOptions) {
-    arguments_.push(`--${option.name}${option.value === undefined ? '' : `=${option.value}`}`);
+    arguments_.push(cliOptionArgument(option, filePath));
   }
-  arguments_.push(...settings.extraArgs);
+  arguments_.push(...settings.extraArgs.map((value) => ({ value })));
 
   const command = splitCommandLine(settings.cliCommand);
   const executable = command[0] ?? '';
-  const invocationArguments = [
-    ...command.slice(1),
-    ...arguments_.filter((argument) => argument.length > 0),
+  const invocationArguments: InvocationArgument[] = [
+    ...command.slice(1).map((value) => ({ value })),
+    ...arguments_.filter((argument) => argument.value.length > 0),
   ];
   return {
     executable,
-    arguments: invocationArguments,
-    commandLine: [executable, ...invocationArguments]
-      .filter((part) => part.length > 0)
-      .map(displayArgument)
-      .join(' '),
+    arguments: invocationArguments.map((argument) => argument.value),
+    commandLine: [
+      ...(executable ? [displayArgument(executable)] : []),
+      ...invocationArguments.map(
+        (argument) => argument.display ?? displayArgument(argument.value),
+      ),
+    ].join(' '),
   };
 }
 

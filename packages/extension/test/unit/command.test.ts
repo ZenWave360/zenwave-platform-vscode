@@ -16,6 +16,8 @@ config {
       sourceFile "${'${this.file.path}'}"
       --force
       --style=compact
+      --label="Orders API"
+      --input="${'${this.file.path}'}"
     }
     FilesPlugin { zdlFiles "orders.zdl,customers.zdl" }
     StandalonePlugin (inherit false) { targetFolder "standalone" }
@@ -78,6 +80,15 @@ test('${this.file.path} is substituted from the containing document', () => {
 test('CLI options retain parser declaration order', () => {
   const command = buildSdkCommand(model, main, '/work/orders.zdl', settings);
   assert.ok(command.indexOf('--force') < command.indexOf('--style=compact'));
+  assert.ok(command.indexOf('--style=compact') < command.indexOf('--label="Orders API"'));
+});
+
+test('CLI options preserve source display but execute with semantic values', () => {
+  const invocation = buildSdkInvocation(model, main, '/work/My Project/orders.zdl', settings);
+  assert.match(invocation.commandLine, /--label="Orders API"/);
+  assert.ok(invocation.arguments.includes('--label=Orders API'));
+  assert.ok(invocation.arguments.includes('--input=/work/My Project/orders.zdl'));
+  assert.match(invocation.commandLine, /--input="\/work\/My Project\/orders\.zdl"/);
 });
 
 test('configured CLI and extra arguments wrap the assembled command', () => {
