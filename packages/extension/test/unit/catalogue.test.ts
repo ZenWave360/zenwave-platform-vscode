@@ -65,7 +65,7 @@ test('documentation is used only when the catalogue reports it', () => {
   assert.equal(withoutLink?.plugins[0]?.documentation, undefined);
 });
 
-test('the first request never waits and later requests use the installed catalogue without merging', async () => {
+test('the first request uses shipped knowledge without waiting and later requests replace it', async () => {
   let calls = 0;
   const processService: SdkProcessService = {
     async catalogue() {
@@ -77,7 +77,9 @@ test('the first request never waits and later requests use the installed catalog
     },
   };
   const catalogues = new PluginCatalogue(processService, logger);
-  assert.equal(catalogues.get('workspace', '/work', SETTINGS, true), undefined);
+  const first = catalogues.get('workspace', '/work', SETTINGS, true);
+  assert.equal(first?.origin, 'shipped');
+  assert.ok((first?.plugins.length ?? 0) > 0);
   await new Promise((resolve) => setTimeout(resolve, 0));
   const loaded = catalogues.get('workspace', '/work', SETTINGS, true);
   assert.equal(calls, 1);
@@ -106,7 +108,7 @@ test('a failed SDK query falls back to shipped knowledge and logs once', async (
     },
   };
   const catalogues = new PluginCatalogue(processService, isolatedLogger);
-  catalogues.get('workspace', '/work', SETTINGS, true);
+  assert.equal(catalogues.get('workspace', '/work', SETTINGS, true)?.origin, 'shipped');
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(catalogues.get('workspace', '/work', SETTINGS, true)?.origin, 'shipped');
   assert.equal(catalogues.get('workspace', '/work', SETTINGS, true)?.origin, 'shipped');

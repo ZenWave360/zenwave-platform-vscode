@@ -110,7 +110,7 @@ if (!parsedShippedCatalogue) {
 const SHIPPED_CATALOGUE: Catalogue = parsedShippedCatalogue;
 
 interface CatalogueState {
-  catalogue?: Catalogue;
+  catalogue: Catalogue;
   loading?: Promise<void>;
 }
 
@@ -132,9 +132,9 @@ export class PluginCatalogue {
       return SHIPPED_CATALOGUE;
     }
 
-    const state = this.states.get(key) ?? {};
+    const state = this.states.get(key) ?? { catalogue: SHIPPED_CATALOGUE };
     this.states.set(key, state);
-    if (!state.loading && !state.catalogue) {
+    if (!state.loading) {
       state.loading = this.load(state, cwd, settings);
     }
     return state.catalogue;
