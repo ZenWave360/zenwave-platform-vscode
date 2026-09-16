@@ -84,6 +84,8 @@
 - [x] 6.12 Let an explicit login shell override VS Code's preferred terminal
       shell; otherwise use the preferred shell with family-appropriate command
       arguments, consistently for tasks and catalogue discovery
+- [x] 6.13 Give `ShellExecution` the assembled command as one shell-ready string,
+      so the Tasks terminal echoes a command the user can copy and run by hand
 
 ## 7. Plugin catalogue and completion
 

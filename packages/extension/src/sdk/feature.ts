@@ -80,17 +80,7 @@ function createTask(
     options.executable = definition.loginShell;
     options.shellArgs = [...loginShellArguments(definition.loginShell)];
   }
-  const execution =
-    definition.executable !== undefined && definition.arguments !== undefined
-      ? new vscode.ShellExecution(
-          { value: definition.executable, quoting: vscode.ShellQuoting.Strong },
-          definition.arguments.map((argument) => ({
-            value: argument,
-            quoting: vscode.ShellQuoting.Strong,
-          })),
-          options,
-        )
-      : new vscode.ShellExecution(definition.command, options);
+  const execution = new vscode.ShellExecution(definition.command, options);
   const task = new vscode.Task(
     definition,
     scope,
