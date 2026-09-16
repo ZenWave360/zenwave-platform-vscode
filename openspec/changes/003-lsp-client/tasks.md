@@ -7,6 +7,9 @@ Track them here so the blocker is visible rather than discovered.
 
 - [ ] 1.1 `zenwave-lsp`: `lsp-js` with real sources — it is the server in both
       hosts, so nothing here starts without it
+      Still unavailable locally: the tracked module has its Gradle declaration
+      and `.gitkeep` placeholders only; no implementation source exists. Producer work
+      is queued in store `002-kmp-browser-support`, tasks 4.2/4.3.
 - [ ] 1.2 Agree how `@zenwave360/lsp-js` is versioned against this extension, and
       whether it is bundled into the VSIX or a dependency
 - [ ] 1.3 `zenwave-specs`: `002-kmp-browser-support` — the shared Kotlin
@@ -28,8 +31,10 @@ Track them here so the blocker is visible rather than discovered.
       boundary is enforced rather than remembered
 - [ ] 2.3 Extend `HostCapabilities.languageServer` to report the transport this
       host can actually use, and log it at activation
-- [ ] 2.4 A shared client supervisor taking a transport factory by injection:
+- [x] 2.4 A shared client supervisor taking a transport factory by injection:
       start, stop, restart, current state
+      `src/lsp/supervisor.ts`, covered by lifecycle/concurrency/crash unit tests.
+      Host activation integration remains open with the actual transports.
 
 ## 3. Transports
 
@@ -105,10 +110,14 @@ Track them here so the blocker is visible rather than discovered.
 
 ## 6. ZenWave requests
 
-- [ ] 6.1 A request helper returning a result that distinguishes *no server*,
+- [x] 6.1 A request helper returning a result that distinguishes *no server*,
       *unsupported*, *failed* and *ok*
-- [ ] 6.2 Read the server's advertised custom requests at initialisation and use
+- [x] 6.2 Read the server's advertised custom requests at initialisation and use
       them to answer *unsupported* without a round trip
+      Both covered by `lsp-supervisor.test.ts` and shared smoke using injected
+      test transports. Capability path verified against
+      `zenwave-lsp/lsp-jvm/.../ZenwaveLspServer.kt:253–266`; real JS wire validation
+      remains open (the JS server does not exist yet).
 - [ ] 6.3 Typed wrappers for the requests that exist today
       (`zenwave/workspaceStatus` first — it is the cheapest end-to-end proof)
 

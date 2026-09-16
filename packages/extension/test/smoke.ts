@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SHIPPED_CATALOGUE } from '../src/sdk/catalogue.js';
+import { LspSupervisor } from '../src/lsp/supervisor.js';
 
 const EXTENSION_ID = 'ZenWave360.zenwave-platform';
 
@@ -10,6 +11,28 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function sharedLspFoundation(): Promise<void> {
+  let requests = 0;
+  const payload = { futureField: ['unchanged'] };
+  const supervisor = new LspSupervisor(() => ({
+    start: async () => ({ capabilities: { experimental: { customRequests: ['zenwave/workspaceStatus'] } } }),
+    stop: async () => {},
+    sendRequest: async () => { requests++; return payload; },
+    onDidExit: () => ({ dispose: () => {} }),
+  }), { info: () => {}, warn: () => {}, error: () => {} });
+  assert((await supervisor.request('zenwave/workspaceStatus', undefined)).kind === 'no-server',
+    'Disconnected LSP helper did not return no-server');
+  await supervisor.start();
+  assert((await supervisor.request('zenwave/preview', undefined)).kind === 'unsupported',
+    'Unadvertised LSP request was not rejected locally');
+  const result = await supervisor.request('zenwave/workspaceStatus', undefined);
+  assert(result.kind === 'ok' && result.value === payload && requests === 1,
+    'Shared LSP helper must preserve results and avoid unsupported wire requests');
+  await supervisor.stop();
+  assert(supervisor.state.kind === 'unavailable', 'Shared LSP supervisor did not stop');
+  console.log('PASS: shared LSP supervisor and request gates with an injected test transport');
+}
 
 async function fixture(name: string): Promise<vscode.Uri> {
   const folder = vscode.workspace.workspaceFolders?.[0];
@@ -168,6 +191,7 @@ export async function run(): Promise<void> {
 
   await extension.activate();
   assert(extension.isActive, `${EXTENSION_ID} did not activate`);
+  await sharedLspFoundation();
 
   const document = await vscode.workspace.openTextDocument(await fixture('complete.zdl'));
   assert(document.languageId === 'zdl', `Expected zdl language id, got ${document.languageId}`);
