@@ -9,12 +9,17 @@
 - [x] 1.2 Record that installing from a clean checkout fails until it is
       published — it is not on the registry today, and `008`'s pipeline will go
       red the moment this change lands
-- [ ] 1.3 **Upstream (`dsl-kotlin`):** record plugin config options in
+- [x] 1.3 **Upstream (`dsl-kotlin`):** record plugin config options in
       `locations`, as the top-level `config` block already does. Without them a
       client cannot recover what was literally written and must re-quote from the
       semantic value, while IntelliJ reads the raw source text — so the two IDEs
       emit different command lines for the same declaration. This is the
       cross-IDE divergence `design.md` warned about, now real
+      Verified through `parseModel` by `parseModel exposes locally built DSL plugin
+      config option and value spans`; the linked build has spans, not yet published.
+- [ ] 1.4 The catalogue reports a documentation location for plugins — available
+      to me. Prerequisite: `../zenwave-specs/openspec/changes/001-ide-client-contracts/tasks.md`
+      task 3.2; the shipped catalogue currently reports no plugin documentation links.
 
 ## 2. Model access
 

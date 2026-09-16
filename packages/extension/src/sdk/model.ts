@@ -89,24 +89,24 @@ function locationNumbers(value: unknown): readonly number[] | undefined {
   return numbers.every((item) => typeof item === 'number') ? (numbers as number[]) : undefined;
 }
 
-/** Converts ANTLR's 1-based lines, 0-based inclusive columns to a VS Code-style range. */
-export function toSourceRange(value: unknown): SourceRange | undefined {
+/** Columns mix inclusive rule ends and exclusive token ends; offsets are exclusive. */
+export function toSourceRange(value: unknown, text: string): SourceRange | undefined {
   const tuple = locationNumbers(value);
   if (!tuple) {
     return undefined;
   }
-  const [, , startLine, startColumn, endLine, endColumn] = tuple;
+  const [, endOffset, startLine, startColumn] = tuple;
   if (
     startLine === undefined ||
     startColumn === undefined ||
-    endLine === undefined ||
-    endColumn === undefined
+    endOffset === undefined || endOffset < 0 || endOffset > text.length
   ) {
     return undefined;
   }
+  const endLines = text.slice(0, endOffset).split('\n');
   return {
     start: { line: Math.max(0, startLine - 1), character: startColumn },
-    end: { line: Math.max(0, endLine - 1), character: endColumn + 1 },
+    end: { line: endLines.length - 1, character: endLines.at(-1)?.length ?? 0 },
   };
 }
 
@@ -114,7 +114,7 @@ function locationOffsets(value: unknown): readonly [number, number] | undefined 
   const tuple = locationNumbers(value);
   const start = tuple?.[0];
   const end = tuple?.[1];
-  return start === undefined || end === undefined ? undefined : [start, end];
+  return start === undefined || end === undefined ? undefined : [start, end - 1];
 }
 
 function readsAsInheritance(value: unknown): boolean {
@@ -148,7 +148,7 @@ export function parseModel(text: string): ParsedModel | undefined {
   const rawLocations = isObject(value.locations) ? value.locations : {};
   const locations: Record<string, SourceRange> = {};
   for (const [key, rawLocation] of Object.entries(rawLocations)) {
-    const location = toSourceRange(rawLocation);
+    const location = toSourceRange(rawLocation, text);
     if (location) {
       locations[key] = location;
     }
@@ -162,7 +162,7 @@ export function parseModel(text: string): ParsedModel | undefined {
       }
       const name = typeof rawPlugin.name === 'string' ? rawPlugin.name : mapName;
       const rawLocation = rawLocations[`plugins.${name}`];
-      const location = toSourceRange(rawLocation);
+      const location = toSourceRange(rawLocation, text);
       const offsets = locationOffsets(rawLocation);
       if (!location || !offsets) {
         continue;
@@ -210,19 +210,24 @@ export function parseModel(text: string): ParsedModel | undefined {
 }
 
 export class ModelCache {
-  private cachedUri: string | undefined;
-  private cachedVersion: number | undefined;
-  private cachedModel: ParsedModel | undefined;
+  private readonly entries = new Map<string, { version: number; model: ParsedModel | undefined }>();
 
-  constructor(private readonly parser: Parser = parseModel) {}
+  constructor(private readonly parser: Parser = parseModel, private readonly capacity = 8) {
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new RangeError('ModelCache capacity must be a positive integer');
+    }
+  }
 
   get(uri: string, version: number, text: string): ParsedModel | undefined {
-    if (uri !== this.cachedUri || version !== this.cachedVersion) {
-      this.cachedUri = uri;
-      this.cachedVersion = version;
-      this.cachedModel = this.parser(text);
+    const previous = this.entries.get(uri);
+    const entry = previous?.version === version ? previous : { version, model: this.parser(text) };
+    this.entries.delete(uri);
+    this.entries.set(uri, entry);
+    if (this.entries.size > this.capacity) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest !== undefined) this.entries.delete(oldest);
     }
-    return this.cachedModel;
+    return entry.model;
   }
 }
 
