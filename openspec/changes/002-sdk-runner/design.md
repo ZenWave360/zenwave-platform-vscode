@@ -331,8 +331,14 @@ change is what it was written for.
 
 ## Risks / Trade-offs
 
-- **The assembly rules are duplicated in Kotlin and TypeScript.** Two
-  implementations of one contract will drift. Accepted for now — the alternative
+- **The assembly rules are duplicated in Kotlin and TypeScript, and have already
+  drifted.** `parseZdl` returns option values unquoted and records no source
+  range for them, while IntelliJ reads the raw source text — so
+  `targetFolder "src"` becomes `targetFolder="src"` there and `targetFolder=src`
+  here. Usually equivalent to a shell; not always. The fix is upstream and small
+  (record plugin options in `locations`, as the top-level `config` block already
+  does), and until it lands the two IDEs can be told apart, which is exactly what
+  this risk predicted. Two implementations of one contract will drift. Accepted for now — the alternative
   is blocking on a shared implementation — but this is a strong candidate for the
   `zenwave-specs` store, and eventually for the language server to own outright.
   The spec is written so a user could tell the two apart.

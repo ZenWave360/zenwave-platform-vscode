@@ -1,4 +1,4 @@
-@import("com.example:artifact:RELEASE")
+// @import("com.example:artifact:RELEASE")
 
 /**
  * ZenWave Online Food Delivery - Orders Module.

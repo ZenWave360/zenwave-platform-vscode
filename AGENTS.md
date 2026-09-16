@@ -43,9 +43,34 @@ a near-duplicate capability gets introduced.
 **Cross-repo contracts do not belong here.** This repo is its own OpenSpec root
 and references the shared `zenwave-specs` store read-only. Behaviour local to
 this VS Code client stays here; anything that binds repos together (LSP surface,
-view-model shapes, manifest semantics, SDK CLI contract) goes to the store with
-an explicit `--store zenwave-specs`. The test: would breaking it break another
-repo?
+view-model shapes, manifest semantics, SDK CLI contract, what the DSL parser
+returns) goes to the store with an explicit `--store zenwave-specs`. The test:
+would breaking it break another repo?
+
+**When the blocker is upstream, file it — do not just report it.** This client
+sits downstream of four moving repositories, and most of what blocks it is in one
+of them. Writing "blocked on X" into a run report leaves a person to carry the
+message to another repository, which is how a blocker sits for a month.
+
+Instead:
+
+1. Record the need in the store as a requirement — what a consumer must be able
+   to rely on, in the store's own vocabulary, not as a patch for this client.
+2. Add the work to that store change's task section for the repository that owns
+   it, with the evidence: the file, the line, and what breaks without it.
+3. Leave the local prerequisite in this repo's `tasks.md` phrased as *"this is
+   available to me"*, and tick it when it is — not when somebody upstream says
+   they did it.
+
+The store is the queue. An upstream repository's agent reads its own section,
+does the work, and ticks it there. Nobody carries anything between repositories
+by hand.
+
+**Small additive upstream fixes may be made directly.** Mirroring a pattern that
+already exists in that repository, with a test, and changing nothing an existing
+consumer sees — that is cheaper to do than to file. Anything that changes a shape
+another consumer reads is not: an agent that knows only this client will design
+for this client, and the other IDE finds out when it breaks.
 
 **Do not put implementation detail in a spec.** The test: could a user or a
 neighbouring system notice it? Command ids, activation conditions, rendered
