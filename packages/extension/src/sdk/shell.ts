@@ -1,3 +1,6 @@
+/** The shells whose quoting rules the command line is written for. */
+export type ShellFamily = 'posix' | 'powershell';
+
 export function resolveLoginShell(
   configuredShell: string | undefined,
   preferredTerminalShell: string,
@@ -5,26 +8,43 @@ export function resolveLoginShell(
   return configuredShell?.trim() || preferredTerminalShell.trim();
 }
 
-export function loginShellArguments(shellPath: string): readonly string[] {
-  const normalized = shellPath.replaceAll('\\', '/');
-  const executable = normalized.slice(normalized.lastIndexOf('/') + 1).toLowerCase();
-  switch (executable) {
+function executableName(shellPath: string): string {
+  const normalized = shellPath.trim().replaceAll('\\', '/');
+  return normalized
+    .slice(normalized.lastIndexOf('/') + 1)
+    .toLowerCase()
+    .replace(/\.exe$/, '');
+}
+
+/**
+ * The quoting family of a shell, or `undefined` for a shell the command line
+ * cannot be quoted safely for — `cmd.exe` above all, which has no quoting that
+ * reliably keeps a value from being interpreted.
+ */
+export function shellFamily(shellPath: string): ShellFamily | undefined {
+  switch (executableName(shellPath)) {
+    case 'bash':
+    case 'sh':
+    case 'zsh':
+    case 'dash':
+    case 'ksh':
+    case 'fish':
+      return 'posix';
     case 'pwsh':
-    case 'pwsh.exe':
+    case 'powershell':
+      return 'powershell';
+    default:
+      return undefined;
+  }
+}
+
+export function loginShellArguments(shellPath: string): readonly string[] | undefined {
+  switch (executableName(shellPath)) {
+    case 'pwsh':
       return ['-Login', '-Command'];
     case 'powershell':
-    case 'powershell.exe':
       return ['-NoLogo', '-Command'];
-    case 'cmd':
-    case 'cmd.exe':
-      return ['/s', '/c'];
-    case 'nu':
-    case 'nu.exe':
-      return ['--login', '--commands'];
-    case 'wsl':
-    case 'wsl.exe':
-      return ['--exec', 'sh', '-lc'];
     default:
-      return ['-l', '-c'];
+      return shellFamily(shellPath) === 'posix' ? ['-l', '-c'] : undefined;
   }
 }

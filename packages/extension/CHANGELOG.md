@@ -5,8 +5,8 @@
 ### Added
 - Run CodeLens actions for enabled ZenWave SDK plugin declarations in trusted
   desktop workspaces, with task-backed execution and configurable environment.
-- SDK-backed plugin and option completion and hover help, with a shipped
-  catalogue fallback for browser and unavailable-SDK authoring.
+- Plugin and option completion and hover help from a ZenWave SDK plugin
+  catalogue shipped with the extension, on desktop and in the browser.
 
 ## [0.1.0] - 2026-09-15
 

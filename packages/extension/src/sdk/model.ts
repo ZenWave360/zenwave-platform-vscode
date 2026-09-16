@@ -48,6 +48,16 @@ function asModelValue(value: unknown): ModelValue | undefined {
   ) {
     return value;
   }
+  if (
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) !== Object.prototype &&
+    Object.getPrototypeOf(value) !== null
+  ) {
+    // Kotlin/JS reports integers as Long objects; their string form is exact.
+    const text = String(value);
+    return text === '[object Object]' ? undefined : text;
+  }
   if (Array.isArray(value)) {
     const values = value.map(asModelValue);
     return values.every((item) => item !== undefined) ? (values as ModelValue[]) : undefined;

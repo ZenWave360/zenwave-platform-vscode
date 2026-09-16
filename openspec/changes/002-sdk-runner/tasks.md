@@ -67,15 +67,15 @@
 
 ## 6. Running
 
-- [x] 6.1 Contribute a `zenwave-sdk` task type, whose definition includes the
-      plugin name and the working directory — so a plugin is a task a user can
-      bind or write in `tasks.json`
+- [x] 6.1 Contribute a `zenwave-sdk` task type whose definition is only the
+      plugin name and its model file — nothing that changes when the declaration
+      is edited — so a plugin is a task a user can bind or write in `tasks.json`
 - [x] 6.2 A task provider building a `ShellExecution` with the model file's
       directory as `cwd`
 - [x] 6.3 The `zenwave.sdk.run` command: re-check `canRunProcesses`, check
       workspace trust, then execute the task
-- [x] 6.4 Check workspace trust before the catalogue too — it spawns a process
-      rather than a task, so the platform does not block it
+- [x] 6.4 ~~Check workspace trust before the catalogue too~~ — superseded: no
+      catalogue process is started (see 11.3)
 - [x] 6.5 Surface a non-zero exit as a failed run
 - [x] 6.6 `TaskPanelKind.Dedicated`, so repeated runs of one plugin reuse their
       terminal instead of opening another
@@ -83,48 +83,52 @@
 - [ ] 6.8 Check what running a plugin does while its previous run is still going
 - [x] 6.9 A setting choosing between the inherited environment and a login shell,
       honoured by the runner **and** the catalogue
-- [x] 6.10 Diagnose a command that cannot be found: what was run, and where it was
-      looked for
+- [x] 6.10 Diagnose a command that cannot be found, without starting the SDK:
+      look the executable up on the inherited PATH before the run; through a
+      login shell, report exit status 127 after it
 - [x] 6.11 Fixture: a Windows path with a space run through a bash shell — the
       backslash-as-escape case
 - [x] 6.12 Let an explicit login shell override VS Code's preferred terminal
       shell; otherwise use the preferred shell with family-appropriate command
-      arguments, consistently for tasks and catalogue discovery
+      arguments
 - [x] 6.13 Give `ShellExecution` the assembled command as one shell-ready string,
       so the Tasks terminal echoes a command the user can copy and run by hand
 
 ## 7. Plugin catalogue and completion
 
-- [x] 7.1 Invoke the configured SDK for its catalogue — IntelliJ appends `-h json`
-      to the configured command — capturing stdout rather than using a terminal
+- [x] 7.1 ~~Invoke the configured SDK for its catalogue~~ — superseded: the
+      installed SDK is not asked (see 11.3)
 - [x] 7.2 Parse the result: plugins by `configClassName`, each with its `options`
       map of `defaultValue`, `description`, `type`, `values`
 - [x] 7.3 Present a plugin as its class name without the SDK package prefix, as
       IntelliJ does, so declarations match between the two IDEs
-- [x] 7.4 Cache per session; re-read when `zenwave.sdk.cliCommand` changes
+- [x] 7.4 ~~Cache per session; re-read when `zenwave.sdk.cliCommand` changes~~
+      — superseded (see 11.3)
 - [x] 7.5 Ship the catalogue of a standard release as an asset, and use it when
       the installed SDK cannot be asked
-- [x] 7.6 Never merge the two; an installed SDK's answer replaces the shipped one
+- [x] 7.6 ~~Never merge the two~~ — superseded: there is only the shipped
+      catalogue (see 11.3)
 - [x] 7.7 Mark suggestions and explanations that come from the shipped catalogue,
       so a user can tell them from their own SDK's
 - [x] 7.8 Regenerate the shipped catalogue at release time, and record which SDK
       release it came from
-- [x] 7.9 `zenwave.sdk.refreshPlugins` command
+- [x] 7.9 ~~`zenwave.sdk.refreshPlugins` command~~ — removed with the installed
+      catalogue (see 11.3)
 - [x] 7.10 A completion provider for `zdl`: plugin names where a plugin may be
       declared, options inside a declared plugin
 - [x] 7.11 Option items carry description, type, default and allowed values
-- [x] 7.12 Resolve the catalogue asynchronously — never block a completion request
-      on the CLI, and answer with nothing until it is ready
-- [x] 7.13 A missing or failing CLI falls back to the shipped catalogue, logged
-      once rather than per keystroke
+- [x] 7.12 ~~Resolve the catalogue asynchronously~~ — superseded: the shipped
+      catalogue is available synchronously (see 11.3)
+- [x] 7.13 ~~A missing or failing CLI falls back to the shipped catalogue~~ —
+      superseded (see 11.3)
 - [x] 7.14 A hover provider for `zdl`: plugin names and plugin options, from the
       same catalogue
 - [x] 7.15 Hover content: what the SDK reports, plus a documentation link when reported
 - [x] 7.16 Take the documentation location from the catalogue; never construct
       one from a plugin's name — a workspace's own plugins have no such convention
 - [x] 7.17 Offer no link when the catalogue reports none
-- [x] 7.18 Gate installed-catalogue process execution on `canRunProcesses` and
-      workspace trust, while retaining the shipped authoring fallback
+- [x] 7.18 ~~Gate installed-catalogue process execution~~ — superseded: authoring
+      starts no process on any host (see 11.3)
 
 ## 8. Contributions and settings
 
@@ -143,22 +147,41 @@
       directory, and running the same plugin twice reuses one terminal
 - [ ] 9.4 Desktop: a failing plugin reports failure
 - [ ] 9.5 Restricted Mode: the run refuses and explains
-- [ ] 9.6 Desktop: plugin-name and option completion match what the configured
-      SDK reports; a second request does not re-invoke the CLI
+- [ ] 9.6 Desktop: plugin-name and option completion and hover come from the
+      shipped catalogue, marked with its SDK version, and start no process
 - [ ] 9.7 Hover a plugin and an option: what the SDK reports, and a link that
       resolves
 - [ ] 9.8 A workspace declaring a plugin of its own: explained on the same terms,
       with no invented link
 - [ ] 9.9 `npm run run-in-browser`: a plugins block can be written and understood
       from the shipped catalogue, marked as such, and nothing offers to run it
-- [ ] 9.10 An unreachable SDK command: Run reports it, completion is silent, and
-      the output channel says why once
+- [ ] 9.10 An unreachable SDK command: Run reports what was looked for and
+      where, before any terminal opens; completion is unaffected
 - [ ] 9.11 With the login-shell option on, a tool installed only by a shell
-      version manager is found by both the runner and the catalogue
-- [ ] 9.12 `npm run run-in-browser`: no lenses or process-backed SDK query,
-      shipped-catalogue completion remains available, no errors in the console,
-      highlighting unaffected
+      version manager is found by the runner, and a missing one is reported after
+      the run
+- [ ] 9.12 `npm run run-in-browser`: no lenses, shipped-catalogue completion
+      available, no errors in the console, highlighting unaffected
 - [x] 9.13 `openspec validate 002-sdk-runner --strict`
+
+## 11. Review follow-ups (2026-09-16)
+
+- [x] 11.1 Keep the assembled command out of the task definition, so running a
+      plugin after editing it reuses its terminal
+- [x] 11.2 Quote every model and settings value for the task's shell — POSIX or
+      PowerShell — including CLI options; refuse `cmd.exe` and other shells, and
+      PowerShell arguments containing a double quote, with an explanation
+- [x] 11.3 Stop invoking `-h json`: no Run preflight and no installed catalogue;
+      completion and hover use only the catalogue generated in CI
+- [x] 11.4 Pass numeric option values as their digits (the parser reports Kotlin
+      `Long` objects)
+- [ ] 11.5 **Upstream (`dsl-kotlin`):** numbers are JS numbers in `parseZdl`
+      output, and a negative number keeps its sign — filed in `zenwave-specs`
+      `001-ide-client-contracts` task 4.6
+- [ ] 11.6 Desktop: run the same plugin, edit an option, run it again — one
+      terminal; with tasks defaulting to `cmd`, Run refuses and explains
+- [ ] 11.7 Decide whether and when an installed SDK is asked for its catalogue
+      (design: "The installed SDK is not asked, for now")
 
 ## 10. Archive
 

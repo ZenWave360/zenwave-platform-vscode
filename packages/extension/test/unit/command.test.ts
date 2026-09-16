@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildSdkCommand, buildSdkInvocation } from '../../src/sdk/command.js';
+import {
+  buildSdkArguments,
+  buildSdkCommand,
+  findUnquotableArgument,
+  splitCommandLine,
+} from '../../src/sdk/command.js';
 import { parseModel } from '../../src/sdk/model.js';
 
 const MODEL = `
@@ -14,6 +19,7 @@ config {
       targetFolder "build/generated"
       displayName "Orders API"
       sourceFile "${'${this.file.path}'}"
+      maxDepth 3
       --force
       --style=compact
       --label="Orders API"
@@ -21,78 +27,83 @@ config {
     }
     FilesPlugin { zdlFiles "orders.zdl,customers.zdl" }
     StandalonePlugin (inherit false) { targetFolder "standalone" }
+    InjectedPlugin {
+      expression "a;b $(touch should-not-run) it's"
+      --cli="$(touch should-not-run)"
+    }
   }
 }`;
 
 const model = parseModel(MODEL);
 assert.ok(model);
-const main = model.plugins.find((plugin) => plugin.name === 'MainPlugin');
-const files = model.plugins.find((plugin) => plugin.name === 'FilesPlugin');
-const standalone = model.plugins.find((plugin) => plugin.name === 'StandalonePlugin');
-assert.ok(main && files && standalone);
+const plugin = (name: string) => {
+  const found = model.plugins.find((candidate) => candidate.name === name);
+  assert.ok(found, name);
+  return found;
+};
+const main = plugin('MainPlugin');
+const files = plugin('FilesPlugin');
+const standalone = plugin('StandalonePlugin');
+const injected = plugin('InjectedPlugin');
 
 const settings = { cliCommand: 'jbang zw', extraArgs: [] } as const;
+const posix = (declaration = main, filePath = '/work/orders.zdl', configured = settings) =>
+  buildSdkCommand(model, declaration, filePath, configured, 'posix');
+
+/** What a POSIX shell would pass to the SDK for a command line. */
+const posixWords = (commandLine: string) => splitCommandLine(commandLine);
 
 test('the plugin is passed with -p', () => {
-  assert.match(buildSdkCommand(model, main, '/work/orders.zdl', settings), /^jbang zw -p MainPlugin /);
+  assert.match(posix(), /^jbang zw -p MainPlugin /);
 });
 
 test('config options are inherited and plugin options override them once', () => {
-  const command = buildSdkCommand(model, main, '/work/orders.zdl', settings);
+  const command = posix();
   assert.match(command, /basePackage=io\.example\.orders/);
   assert.equal(command.match(/targetFolder=/g)?.length, 1);
   assert.match(command, /targetFolder=build\/generated/);
 });
 
 test('parser-normalized string values containing spaces are safely re-quoted', () => {
-  assert.match(
-    buildSdkCommand(model, main, '/work/orders.zdl', settings),
-    /displayName="Orders API"/,
-  );
+  assert.match(posix(), /displayName="Orders API"/);
+});
+
+test('numeric option values are passed as their digits', () => {
+  assert.match(posix(), / maxDepth=3 /);
 });
 
 test('(inherit false) omits enclosing config options', () => {
-  const command = buildSdkCommand(model, standalone, '/work/orders.zdl', settings);
+  const command = posix(standalone);
   assert.doesNotMatch(command, /basePackage=/);
   assert.match(command, /targetFolder=standalone/);
 });
 
 test('zdlFile is defaulted unless zdlFile or zdlFiles is declared', () => {
-  assert.match(buildSdkCommand(model, main, '/work/orders.zdl', settings), /zdlFile=\/work\/orders\.zdl/);
-  const declared = buildSdkCommand(model, files, '/work/orders.zdl', settings);
+  assert.match(posix(), /zdlFile=\/work\/orders\.zdl/);
+  const declared = posix(files);
   assert.match(declared, /zdlFiles=orders\.zdl,customers\.zdl/);
   assert.doesNotMatch(declared, /zdlFile=/);
 });
 
 test('only Maven-coordinate imports become one --deps argument', () => {
-  const command = buildSdkCommand(model, main, '/work/orders.zdl', settings);
+  const command = posix();
   assert.match(command, /--deps io\.example:my-plugin:1\.2\.3/);
   assert.doesNotMatch(command, /shared\/common/);
 });
 
 test('${this.file.path} is substituted from the containing document', () => {
-  assert.match(
-    buildSdkCommand(model, main, '/work/orders.zdl', settings),
-    /sourceFile=\/work\/orders\.zdl/,
-  );
+  assert.match(posix(), /sourceFile=\/work\/orders\.zdl/);
 });
 
-test('CLI options retain parser declaration order', () => {
-  const command = buildSdkCommand(model, main, '/work/orders.zdl', settings);
+test('CLI options keep declaration order and are quoted like any other value', () => {
+  const command = posix(main, '/work/My Project/orders.zdl');
   assert.ok(command.indexOf('--force') < command.indexOf('--style=compact'));
   assert.ok(command.indexOf('--style=compact') < command.indexOf('--label="Orders API"'));
-});
-
-test('CLI options preserve source display but execute with semantic values', () => {
-  const invocation = buildSdkInvocation(model, main, '/work/My Project/orders.zdl', settings);
-  assert.match(invocation.commandLine, /--label="Orders API"/);
-  assert.ok(invocation.arguments.includes('--label=Orders API'));
-  assert.ok(invocation.arguments.includes('--input=/work/My Project/orders.zdl'));
-  assert.match(invocation.commandLine, /--input="\/work\/My Project\/orders\.zdl"/);
+  assert.match(command, /--input="\/work\/My Project\/orders\.zdl"/);
 });
 
 test('configured CLI and extra arguments wrap the assembled command', () => {
-  const command = buildSdkCommand(model, main, '/work/orders.zdl', {
+  const command = posix(main, '/work/orders.zdl', {
     cliCommand: 'zw',
     extraArgs: ['--debug', '--profile=local'],
   });
@@ -101,53 +112,60 @@ test('configured CLI and extra arguments wrap the assembled command', () => {
 });
 
 test('an injected Windows path is slash-normalized and quoted for bash', () => {
-  const command = buildSdkCommand(
-    model,
-    main,
-    'C:\\Users\\Ada\\My Project\\orders.zdl',
-    settings,
-  );
+  const command = posix(main, 'C:\\Users\\Ada\\My Project\\orders.zdl');
   assert.match(command, /sourceFile="C:\/Users\/Ada\/My Project\/orders\.zdl"/);
   assert.match(command, /zdlFile="C:\/Users\/Ada\/My Project\/orders\.zdl"/);
   assert.doesNotMatch(command, /\\Users/);
 });
 
-test('execution arguments preserve shell metacharacters as literal values', () => {
-  const dangerousPlugin = {
-    ...main,
-    config: {
-      ...main.config,
-      expression: 'a;b $(touch /tmp/should-not-run) `uname` "$HOME" *.zdl',
-    },
-  };
-  const invocation = buildSdkInvocation(model, dangerousPlugin, '/work/a;b/orders.zdl', settings);
-  assert.ok(
-    invocation.arguments.includes(
-      'expression=a;b $(touch /tmp/should-not-run) `uname` "$HOME" *.zdl',
-    ),
-  );
-  assert.ok(invocation.arguments.includes('zdlFile=/work/a;b/orders.zdl'));
-  assert.match(
-    invocation.commandLine,
-    /'expression=a;b \$\(touch \/tmp\/should-not-run\) `uname` "\$HOME" \*\.zdl'/,
-  );
-  assert.match(invocation.commandLine, /zdlFile="\/work\/a;b\/orders\.zdl"/);
+test('POSIX: model values that look like shell syntax reach the SDK literally', () => {
+  const command = posix(injected, '/work/a;b/orders.zdl');
+  const expected = buildSdkArguments(model, injected, '/work/a;b/orders.zdl', settings);
+  assert.deepEqual(posixWords(command), ['jbang', 'zw', ...expected]);
+  assert.ok(expected.includes("expression=a;b $(touch should-not-run) it's"));
+  assert.ok(expected.includes('--cli=$(touch should-not-run)'));
+  assert.match(command, /'expression=a;b \$\(touch should-not-run\) it'\\''s'/);
+  assert.match(command, /'--cli=\$\(touch should-not-run\)'/);
+  assert.match(command, /zdlFile="\/work\/a;b\/orders\.zdl"/);
 });
 
-test('a quoted CLI command is split into executable and literal prefix arguments', () => {
-  const invocation = buildSdkInvocation(model, main, '/work/orders.zdl', {
+test('PowerShell: values are single-quoted with doubled quotes and never expand', () => {
+  const command = buildSdkCommand(model, injected, '/work/orders.zdl', settings, 'powershell');
+  assert.match(command, /'expression=a;b \$\(touch should-not-run\) it''s'/);
+  assert.match(command, /'--cli=\$\(touch should-not-run\)'/);
+  assert.doesNotMatch(command, /"[^"]*\$/);
+});
+
+test('PowerShell: an argument containing a double quote is refused, POSIX runs it', () => {
+  const quoted = { ...injected, config: { value: 'x"&calc&"' } };
+  assert.equal(
+    findUnquotableArgument(model, quoted, '/work/orders.zdl', settings, 'powershell'),
+    'value=x"&calc&"',
+  );
+  assert.equal(findUnquotableArgument(model, quoted, '/work/orders.zdl', settings, 'posix'), undefined);
+  assert.equal(findUnquotableArgument(model, main, '/work/orders.zdl', settings, 'powershell'), undefined);
+});
+
+test('PowerShell: commas are quoted, since they build arrays', () => {
+  const command = buildSdkCommand(model, files, '/work/orders.zdl', settings, 'powershell');
+  assert.match(command, /zdlFiles="orders\.zdl,customers\.zdl"/);
+});
+
+test('a quoted CLI command path is quoted for POSIX', () => {
+  const command = posix(main, '/work/orders.zdl', {
     cliCommand: '"/opt/ZenWave SDK/jbang" zw',
     extraArgs: [],
   });
-  assert.equal(invocation.executable, '/opt/ZenWave SDK/jbang');
-  assert.equal(invocation.arguments[0], 'zw');
-  assert.match(invocation.commandLine, /^'\/opt\/ZenWave SDK\/jbang' zw /);
+  assert.match(command, /^'\/opt\/ZenWave SDK\/jbang' zw -p /);
 });
 
-test('a quoted Windows executable path retains its backslashes', () => {
-  const invocation = buildSdkInvocation(model, main, '/work/orders.zdl', {
-    cliCommand: '"C:\\Program Files\\ZenWave\\zw.exe"',
-    extraArgs: [],
-  });
-  assert.equal(invocation.executable, 'C:\\Program Files\\ZenWave\\zw.exe');
+test('a Windows CLI command path is invoked, not echoed, in PowerShell', () => {
+  const command = buildSdkCommand(
+    model,
+    main,
+    '/work/orders.zdl',
+    { cliCommand: '"C:\\Program Files\\jbang\\jbang.cmd" zw', extraArgs: [] },
+    'powershell',
+  );
+  assert.match(command, /^& 'C:\\Program Files\\jbang\\jbang\.cmd' zw -p MainPlugin /);
 });

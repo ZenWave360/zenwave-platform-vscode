@@ -8,24 +8,14 @@ export interface SdkInvocation {
   readonly loginShell: string;
 }
 
-export interface ProcessResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
-}
-
-export interface CommandProbe {
-  readonly found: boolean;
-  readonly diagnosis: string;
-}
-
+/** What only a host that can spawn processes knows. Implemented under `src/node/`. */
 export interface SdkProcessService {
-  catalogue(
-    command: string,
-    cwd: string | undefined,
-    invocation: SdkInvocation,
-  ): Promise<ProcessResult>;
-  probe(command: string, cwd: string, invocation: SdkInvocation): Promise<CommandProbe>;
+  /** `process.platform` of the extension host. */
+  readonly platform: string;
+  /** The PATH the editor inherited, for diagnostics. */
+  searchPath(): string;
+  /** Resolves an executable as the inherited environment would, without running it. */
+  findExecutable(executable: string, cwd: string): string | undefined;
 }
 
 export interface SdkSettings {
@@ -45,4 +35,24 @@ export function readSdkSettings(uri?: vscode.Uri): SdkSettings {
       loginShell: resolveLoginShell(configuredLoginShell, vscode.env.shell),
     },
   };
+}
+
+const AUTOMATION_PROFILE_OS: Readonly<Record<string, string>> = {
+  win32: 'windows',
+  darwin: 'osx',
+};
+
+/** The shell a task will run in: the login shell, or VS Code's automation shell. */
+export function taskShell(settings: SdkSettings, platform: string): string {
+  if (settings.invocation.environment === 'loginShell') {
+    return settings.invocation.loginShell;
+  }
+  const profile = vscode.workspace
+    .getConfiguration('terminal.integrated')
+    .get<{ readonly path?: unknown }>(
+      `automationProfile.${AUTOMATION_PROFILE_OS[platform] ?? 'linux'}`,
+    );
+  return typeof profile?.path === 'string' && profile.path.trim()
+    ? profile.path.trim()
+    : vscode.env.shell;
 }

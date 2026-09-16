@@ -107,11 +107,6 @@
         "command": "zenwave.sdk.run",
         "title": "Run SDK Plugin",
         "category": "ZenWave"
-      },
-      {
-        "command": "zenwave.sdk.refreshPlugins",
-        "title": "Refresh SDK Plugin Catalogue",
-        "category": "ZenWave"
       }
     ],
     "menus": {
@@ -122,9 +117,6 @@
         {
           "command": "zenwave.sdk.run",
           "when": "false"
-        },
-        {
-          "command": "zenwave.sdk.refreshPlugins"
         }
       ]
     },
@@ -133,34 +125,16 @@
         "type": "zenwave-sdk",
         "required": [
           "plugin",
-          "cwd"
+          "file"
         ],
         "properties": {
           "plugin": {
             "type": "string",
-            "description": "Plugin class name used as this task's identity."
+            "description": "Name of the plugin declared in the model file."
           },
-          "cwd": {
+          "file": {
             "type": "string",
-            "description": "Working directory for the SDK command."
-          },
-          "command": {
-            "type": "string",
-            "description": "Complete ZenWave SDK command line to execute."
-          },
-          "environment": {
-            "type": "string",
-            "enum": [
-              "inherited",
-              "loginShell"
-            ],
-            "default": "inherited",
-            "description": "Whether to use the editor environment or a configured login shell."
-          },
-          "loginShell": {
-            "type": "string",
-            "default": "",
-            "description": "Login shell executable when environment is loginShell."
+            "description": "Model file declaring the plugin, absolute or relative to the workspace folder. The command is assembled from the declaration when the task runs."
           }
         }
       }
@@ -191,7 +165,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "Arguments appended verbatim to every ZenWave SDK plugin run."
+          "description": "Arguments appended to every ZenWave SDK plugin run, each passed to the SDK as one literal argument."
         },
         "zenwave.sdk.environment": {
           "type": "string",
@@ -205,7 +179,7 @@
           ],
           "default": "inherited",
           "scope": "resource",
-          "description": "Environment used by SDK runs and plugin-catalogue discovery."
+          "description": "Environment used by SDK runs."
         },
         "zenwave.sdk.loginShell": {
           "type": "string",
