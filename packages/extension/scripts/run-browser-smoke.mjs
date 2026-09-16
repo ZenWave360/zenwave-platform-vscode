@@ -8,6 +8,8 @@ const extensionDevelopmentPath = process.env.ZENWAVE_SMOKE_EXTENSION_PATH
   : projectDir;
 
 try {
+  // The shared suite exercises shipped authoring and absence of SDK Run lenses
+  // in the actual Web Worker host, including when CI supplies a packaged build.
   await runTests({
     browserType: 'chromium',
     quality: 'stable',

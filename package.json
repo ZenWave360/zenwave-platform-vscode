@@ -20,6 +20,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint packages --ext .ts,.tsx",
     "test": "npm run test --workspaces --if-present",
+    "test:desktop": "npm run test:desktop --workspace packages/extension",
+    "test:browser": "npm run test:browser --workspace packages/extension",
     "package": "npm run package --workspace packages/extension",
     "verify:vsix": "node packages/extension/scripts/verify-vsix.mjs",
     "run-in-browser": "npm run run-in-browser --workspace packages/extension",

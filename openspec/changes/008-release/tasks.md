@@ -15,7 +15,9 @@
       rule is the first line, this is the second
 - [ ] 2.4 Launch the desktop host and confirm the extension activates on a
       fixture
+      Local `npm run test:desktop` passes; CI execution remains unavailable (no remote).
 - [ ] 2.5 Launch the browser host through `@vscode/test-web` and confirm the same
+      Local `npm run test:browser` passes; CI execution remains unavailable (no remote).
 - [x] 2.6 Cache dependencies so the checks stay cheap enough to run always
 
 ## 3. Packaging
@@ -58,6 +60,9 @@
 - [ ] 6.4 Confirm switching back to stable works
 - [ ] 6.5 Break the browser bundle deliberately on a branch and confirm the
       release checks catch it
+      Local probe on deleted branch `codex/browser-node-api-probe`: importing
+      `node:fs` in `src/activate.ts` makes `npm run build` exit 1 with the browser
+      Node API diagnostic (`tmp/browser-node-api-probe.log`); CI evidence still needed.
 - [x] 6.6 Remove a runtime asset deliberately and confirm packaging catches it
       (removed from the build and from the package; unit-tested in
       `test/unit/vsix-contents.test.ts`)

@@ -146,6 +146,12 @@
 
 ## 9. Verification
 
+Automated portions of 9.3, 9.6, 9.9, 9.10, 9.12 and 11.6 pass locally in
+`test/smoke.ts`: enabled-only desktop lenses, no browser lenses, shipped plugin
+and option completion/hover, option-edit terminal reuse with a fixture CLI,
+unsupported-shell refusal, and missing-executable refusal with PATH diagnostics.
+These tasks stay open for the human's real-SDK and UI checks.
+
 - [x] 9.1 `npm run typecheck`, `npm run lint`, `npm run build`
 - [x] 9.2 Browser bundle still free of Node APIs after adding `@zenwave360/dsl`
 - [ ] 9.3 Desktop: lenses appear on the fixture, a run generates into the right

@@ -128,6 +128,8 @@ jobs:
         id: openvsx
         if: github.ref_type == 'tag'
         continue-on-error: true
+        # ovsx ignores --pre-release for a prepackaged extension. Open VSX reads
+        # Microsoft.VisualStudio.Code.PreRelease from the uploaded VSIX manifest.
         run: npx ovsx publish "$VSIX"
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}

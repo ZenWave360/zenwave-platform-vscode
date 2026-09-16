@@ -16,6 +16,11 @@ uploads that exact file to the VS Code Marketplace and Open VSX. It expects the
 repository secrets `VSCE_PAT` and `OVSX_PAT`. A maintainer with access to the
 corresponding publisher accounts must own rotation of those secrets.
 
+Pre-release tags package the VSIX with `vsce --pre-release`. Upload that same file
+with `ovsx publish <vsix>`: its CLI [ignores `--pre-release` for prepackaged files](https://github.com/eclipse-openvsx/openvsx/blob/main/cli/src/publish.ts),
+and the server [reads `Microsoft.VisualStudio.Code.PreRelease` from the VSIX manifest](https://github.com/eclipse-openvsx/openvsx/blob/main/server/src/main/java/org/eclipse/openvsx/ExtensionProcessor.java).
+No extra Open VSX publish flag is needed.
+
 Every runtime file is named in `runtime-files.json`. Package verification fails if a
 listed file, or a file `package.json` refers to, is missing from the VSIX, and if
 `dist/`, `resources/` or `syntaxes/` contains a file the list does not name. Adding
