@@ -1,7 +1,6 @@
 {
   "source": "ZenWave SDK 2.8.0-SNAPSHOT",
   "version": "2.8.0-SNAPSHOT",
-  "generatedBy": "jbang zw -h json",
   "plugins": [
     {
       "name": "AsyncAPIGeneratorPlugin",

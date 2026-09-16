@@ -22,7 +22,8 @@
 
 - [x] 3.1 Build the VSIX in CI, not locally
 - [x] 3.2 Assert the package contains the runtime assets it needs — positively,
-      by name, so a future asset that is forgotten fails the build
+      by name, so a future asset that is forgotten fails the build —
+      `runtime-files.json`, checked both ways by `scripts/vsix-contents.mjs`
 - [x] 3.3 Assert it contains no source, test, fixture or development
       configuration
 - [ ] 3.4 Install the built VSIX into a clean editor and confirm it activates
@@ -58,6 +59,8 @@
 - [ ] 6.5 Break the browser bundle deliberately on a branch and confirm the
       release checks catch it
 - [x] 6.6 Remove a runtime asset deliberately and confirm packaging catches it
+      (removed from the build and from the package; unit-tested in
+      `test/unit/vsix-contents.test.ts`)
 - [x] 6.7 `openspec validate 008-release --strict`
 
 ## 7. Archive

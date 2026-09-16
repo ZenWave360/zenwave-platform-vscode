@@ -16,10 +16,10 @@ uploads that exact file to the VS Code Marketplace and Open VSX. It expects the
 repository secrets `VSCE_PAT` and `OVSX_PAT`. A maintainer with access to the
 corresponding publisher accounts must own rotation of those secrets.
 
-Put runtime files that are not bundled JavaScript under `resources/` or
-`syntaxes/`. Package verification inventories both trees recursively and
-requires every file to be present in the VSIX, so adding a runtime asset does
-not require maintaining a second filename list.
+Every runtime file is named in `runtime-files.json`. Package verification fails if a
+listed file, or a file `package.json` refers to, is missing from the VSIX, and if
+`dist/`, `resources/` or `syntaxes/` contains a file the list does not name. Adding
+or removing a runtime asset therefore means editing that list in the same change.
 
 If either registry rejects a publish, the workflow records both registry
 outcomes in its job summary and fails. A successful upload cannot be rolled

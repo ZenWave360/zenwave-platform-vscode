@@ -2,6 +2,7 @@ import AdmZip from 'adm-zip';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkPackageContents, RUNTIME_DIRECTORIES } from './vsix-contents.mjs';
 
 const args = process.argv.slice(2);
 const vsixPath = args[0];
@@ -13,35 +14,18 @@ if (!vsixPath) {
 }
 
 const extensionRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const readJson = (file) => JSON.parse(fs.readFileSync(path.join(extensionRoot, file), 'utf8'));
 
-function runtimeFiles(directory) {
+function filesUnder(directory) {
   const absoluteDirectory = path.join(extensionRoot, directory);
+  if (!fs.existsSync(absoluteDirectory)) {
+    return [];
+  }
   return fs.readdirSync(absoluteDirectory, { withFileTypes: true }).flatMap((entry) => {
     const relative = path.posix.join(directory, entry.name);
-    return entry.isDirectory()
-      ? runtimeFiles(relative)
-      : [`extension/${relative}`];
+    return entry.isDirectory() ? filesUnder(relative) : [relative];
   });
 }
-
-const required = [
-  'extension/package.json',
-  'extension/readme.md',
-  'extension/changelog.md',
-  'extension/LICENSE.txt',
-  'extension/dist/node/extension.js',
-  'extension/dist/browser/extension.js',
-  'extension/dist/build-info.json',
-  ...runtimeFiles('resources'),
-  ...runtimeFiles('syntaxes'),
-];
-
-const forbidden = [
-  /^extension\/(src|test|tests|fixtures|scripts)\//,
-  /^extension\/\.vscode/,
-  /^extension\/.*\.(?:ts|tsx|map|tsbuildinfo)$/,
-  /^extension\/(?:esbuild\.mjs|tsconfig\.json)$/,
-];
 
 function readArchive(file) {
   const zip = new AdmZip(path.resolve(file));
@@ -54,16 +38,14 @@ function readArchive(file) {
 }
 
 const archive = readArchive(vsixPath);
-for (const file of required) {
-  if (!archive.has(file)) {
-    throw new Error(`VSIX is missing required runtime file: ${file}`);
-  }
-}
-
-for (const file of archive.keys()) {
-  if (forbidden.some((pattern) => pattern.test(file))) {
-    throw new Error(`VSIX contains development-only file: ${file}`);
-  }
+const problems = checkPackageContents({
+  listed: readJson('runtime-files.json').files,
+  manifest: readJson('package.json'),
+  onDisk: RUNTIME_DIRECTORIES.flatMap(filesUnder),
+  packaged: [...archive.keys()],
+});
+if (problems.length > 0) {
+  throw new Error(`Package verification failed:\n  ${problems.join('\n  ')}`);
 }
 
 const buildInfo = JSON.parse(archive.get('extension/dist/build-info.json').toString('utf8'));

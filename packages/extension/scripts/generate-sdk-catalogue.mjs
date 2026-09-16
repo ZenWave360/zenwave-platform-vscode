@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const command = process.env.ZENWAVE_SDK_CATALOGUE_COMMAND?.trim() || 'jbang zw';
+const command = process.env.ZENWAVE_SDK_CATALOGUE_COMMAND?.trim() || 'jbang snapshots@zenwave360/zenwave-sdk';
 const { stdout, stderr } = await execAsync(`${command} -h json`, {
   cwd: projectDir,
   maxBuffer: 20 * 1024 * 1024,
@@ -72,7 +72,6 @@ const version = optionalString(raw.version) ?? 'unknown';
 const catalogue = {
   source: `ZenWave SDK ${version}`,
   version,
-  generatedBy: `${command} -h json`,
   plugins,
 };
 const output = path.join(projectDir, 'resources/sdk-plugin-catalogue.json');
