@@ -1,11 +1,14 @@
 {
-  "$comment": "Every file the extension needs at runtime, by name. The release fails if one is missing from the VSIX, and if a file in dist/, resources/ or syntaxes/ is not listed here. Adding or removing a runtime asset means editing this list.",
+  "$comment": "Every file the extension needs at runtime, by name. The release fails if one is missing from the VSIX, and if a file in dist/, resources/ or syntaxes/ is not listed here. Adding or removing a runtime asset means editing this list. A * in the last path segment matches files whose names change per build (content hashes); such an entry must match at least one packaged file.",
   "files": [
     "dist/node/extension.js",
     "dist/browser/extension.js",
     "dist/build-info.json",
     "dist/server/node/zenwave-lsp-server.js",
     "dist/server/browser/zenwave-lsp-worker.js",
+    "dist/eventflow-webview/index.html",
+    "dist/eventflow-webview/assets/index-*.js",
+    "dist/eventflow-webview/assets/index-*.css",
     "resources/sdk-plugin-catalogue.json",
     "resources/zdl-file-icon.png",
     "resources/zdl-file-icon.svg",

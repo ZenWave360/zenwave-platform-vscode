@@ -31,6 +31,15 @@ Event Storming board.
   `zenwave.workspace.manifest` or from `project-manifest` in
   `.zenwave/config.yml`. A status bar item shows whether language features are
   available and why not; **ZenWave: Restart Language Server** restarts it.
+- An EventFlow diagram for ZFL flows, drawn by the same renderer the IntelliJ
+  plugin embeds: from the ZenWave icon in a flow's editor title bar, open it
+  beside the text or in its place (**Reopen Editor With…** or **Show ZFL Text**
+  goes back). The diagram follows edits as you type, keeps the last diagram on
+  screen while the flow cannot be read, and switches between the flow and
+  service views and humanized labels from its own title bar
+  (`zenwave.eventflow.defaultView`, `zenwave.eventflow.humanizeLabels` set how it
+  opens). When it has nothing to draw it says why. Clicking a node does not
+  navigate to its source yet.
 
 More is on the way; see the repository for what is planned.
 
@@ -68,6 +77,23 @@ environment variable is the dependable route:
 ```console
 npm install --no-save --workspace packages/extension ../zenwave-lsp/lsp-js/build/npm-pack/zenwave360-lsp-js-0.1.0-SNAPSHOT.tgz
 ```
+
+The EventFlow diagram page, `@zenwave360/vistas-eventflow-webview@0.1.0`, is not
+published either. The build copies its `webview/` page into
+`dist/eventflow-webview`, pinned in `package.json` under
+`zenwaveEventFlowWebview` together with the page protocol version it must state,
+and fails, naming what to do, until it is available. Build it in
+`zenwave-architectural-vistas` and point the build at the package directory:
+
+```console
+# in zenwave-architectural-vistas
+pnpm --filter @zenwave360/vistas-eventflow-webview build
+# here; absolute path
+export ZENWAVE_VISTAS_WEBVIEW_DIR="$PWD/../zenwave-architectural-vistas/packages/eventflow-webview"
+```
+
+A packed tarball works too: extract it (`tar -xzf zenwave360-vistas-eventflow-webview-0.1.0.tgz`)
+and point `ZENWAVE_VISTAS_WEBVIEW_DIR` at the extracted `package` directory.
 
 ## Replaces
 

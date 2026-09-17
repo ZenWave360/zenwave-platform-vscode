@@ -19,6 +19,20 @@ function normalize(file) {
   return file.replace(/^\.\//, '').replaceAll('\\', '/');
 }
 
+/** An entry with `*` in its last segment names files whose names change per build, such as content hashes. */
+function isPattern(entry) {
+  return entry.includes('*');
+}
+
+function patternRegex(entry) {
+  const slash = entry.lastIndexOf('/');
+  if (entry.slice(0, slash + 1).includes('*')) {
+    throw new Error(`runtime-files.json entry ${entry}: * is allowed only in the file name`);
+  }
+  const escape = (text) => text.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escape(entry.slice(0, slash + 1))}${entry.slice(slash + 1).split('*').map(escape).join('[^/]+')}$`);
+}
+
 /** Files the manifest itself points at: entry points, icons, grammars, language configuration. */
 export function manifestReferences(manifest) {
   const contributes = manifest.contributes ?? {};
@@ -47,22 +61,30 @@ export function manifestReferences(manifest) {
  */
 export function checkPackageContents({ listed, manifest, onDisk, packaged }) {
   const problems = [];
-  const listedSet = new Set(listed.map(normalize));
+  const entries = listed.map(normalize);
+  const patterns = entries.filter(isPattern).map((entry) => ({ entry, regex: patternRegex(entry) }));
+  const listedSet = new Set(entries.filter((entry) => !isPattern(entry)));
   const packagedSet = new Set(packaged.map(normalize));
+  const isListed = (file) => listedSet.has(file) || patterns.some(({ regex }) => regex.test(file));
 
   for (const file of manifestReferences(manifest)) {
-    if (!listedSet.has(file)) {
+    if (!isListed(file)) {
       problems.push(`package.json refers to ${file}, which runtime-files.json does not list`);
     }
   }
   for (const file of onDisk.map(normalize)) {
-    if (!file.endsWith('.map') && !listedSet.has(file)) {
+    if (!file.endsWith('.map') && !isListed(file)) {
       problems.push(`${file} is a runtime file that runtime-files.json does not list`);
     }
   }
   for (const file of [...ALWAYS_REQUIRED, ...listedSet]) {
     if (!packagedSet.has(`extension/${file}`)) {
       problems.push(`VSIX is missing required runtime file: extension/${file}`);
+    }
+  }
+  for (const { entry, regex } of patterns) {
+    if (![...packagedSet].some((file) => file.startsWith('extension/') && regex.test(file.slice('extension/'.length)))) {
+      problems.push(`VSIX is missing required runtime file: extension/${entry}`);
     }
   }
   for (const file of packagedSet) {

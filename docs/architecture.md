@@ -55,6 +55,8 @@ src/lsp/credential*.ts origin-matched answers to zenwave/credential
 src/model/actions.ts   editor commands over zenwave/* requests (references, organize)
 src/model/navigation.ts opens server locations (uri + range) the editor's way
 src/explorer/*          Architecture and Model trees over zenwave/hierarchy; DiagramPanels seam for 004
+src/eventflow/*         EventFlow diagram custom editor: hosts the vistas page, relays eventFlowViews verbatim
+src/model/active-document.ts  the model document in the active tab (text or custom editor)
 ```
 
 Shared code imports only *types* from `vscode-languageclient`: its bare entry is

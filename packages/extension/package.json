@@ -43,6 +43,12 @@
     "package": "@zenwave360/lsp-js",
     "version": "0.1.0-SNAPSHOT"
   },
+  "zenwaveEventFlowWebview": {
+    "package": "@zenwave360/vistas-eventflow-webview",
+    "version": "0.1.0",
+    "protocol": "zenwave.eventflow.webview",
+    "protocolVersion": 1
+  },
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
@@ -282,6 +288,48 @@
         "command": "zenwave.explorer.openManifest",
         "title": "Open Architecture Manifest",
         "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.eventflow.openToSide",
+        "title": "Open EventFlow Diagram to the Side",
+        "category": "ZenWave",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "zenwave.eventflow.open",
+        "title": "Open EventFlow Diagram",
+        "category": "ZenWave",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "zenwave.eventflow.showText",
+        "title": "Show ZFL Text",
+        "category": "ZenWave",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "zenwave.eventflow.showServiceView",
+        "title": "Showing Flow View: Switch to Service View",
+        "category": "ZenWave",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "zenwave.eventflow.showFlowView",
+        "title": "Showing Service View: Switch to Flow View",
+        "category": "ZenWave",
+        "icon": "$(server-process)"
+      },
+      {
+        "command": "zenwave.eventflow.showLabelsAsWritten",
+        "title": "Showing Humanized Labels: Show Labels as Written",
+        "category": "ZenWave",
+        "icon": "$(case-sensitive)"
+      },
+      {
+        "command": "zenwave.eventflow.showHumanizedLabels",
+        "title": "Showing Labels as Written: Humanize Labels",
+        "category": "ZenWave",
+        "icon": "$(symbol-text)"
       }
     ],
     "menus": {
@@ -333,6 +381,34 @@
         {
           "command": "zenwave.explorer.openManifest",
           "when": "zenwave.manifestAvailable"
+        },
+        {
+          "command": "zenwave.eventflow.openToSide",
+          "when": "resourceExtname == .zfl && activeCustomEditorId != zenwave.eventflow"
+        },
+        {
+          "command": "zenwave.eventflow.open",
+          "when": "resourceExtname == .zfl && activeCustomEditorId != zenwave.eventflow"
+        },
+        {
+          "command": "zenwave.eventflow.showText",
+          "when": "activeCustomEditorId == zenwave.eventflow"
+        },
+        {
+          "command": "zenwave.eventflow.showServiceView",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowViewMode == flow"
+        },
+        {
+          "command": "zenwave.eventflow.showFlowView",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowViewMode == services"
+        },
+        {
+          "command": "zenwave.eventflow.showLabelsAsWritten",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowHumanizeLabels"
+        },
+        {
+          "command": "zenwave.eventflow.showHumanizedLabels",
+          "when": "activeCustomEditorId == zenwave.eventflow && !zenwave.eventflowHumanizeLabels"
         }
       ],
       "editor/context": [
@@ -364,6 +440,50 @@
           "command": "zenwave.explorer.openRelated",
           "when": "(view == zenwave.architecture || view == zenwave.model) && viewItem =~ /\\.related$/",
           "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "submenu": "zenwave.modelViews",
+          "when": "resourceExtname == .zfl",
+          "group": "navigation@90"
+        },
+        {
+          "command": "zenwave.eventflow.showServiceView",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowViewMode == flow",
+          "group": "navigation@80"
+        },
+        {
+          "command": "zenwave.eventflow.showFlowView",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowViewMode == services",
+          "group": "navigation@80"
+        },
+        {
+          "command": "zenwave.eventflow.showLabelsAsWritten",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowHumanizeLabels",
+          "group": "navigation@81"
+        },
+        {
+          "command": "zenwave.eventflow.showHumanizedLabels",
+          "when": "activeCustomEditorId == zenwave.eventflow && !zenwave.eventflowHumanizeLabels",
+          "group": "navigation@81"
+        }
+      ],
+      "zenwave.modelViews": [
+        {
+          "command": "zenwave.eventflow.openToSide",
+          "when": "resourceExtname == .zfl && activeCustomEditorId != zenwave.eventflow",
+          "group": "1_eventflow@1"
+        },
+        {
+          "command": "zenwave.eventflow.open",
+          "when": "resourceExtname == .zfl && activeCustomEditorId != zenwave.eventflow",
+          "group": "1_eventflow@2"
+        },
+        {
+          "command": "zenwave.eventflow.showText",
+          "when": "activeCustomEditorId == zenwave.eventflow",
+          "group": "0_text@1"
         }
       ]
     },
@@ -518,9 +638,51 @@
               }
             }
           }
+        },
+        "zenwave.eventflow.defaultView": {
+          "type": "string",
+          "enum": [
+            "flow",
+            "services"
+          ],
+          "enumDescriptions": [
+            "The event flow: triggers, commands, events and policies in order.",
+            "The service map: commands grouped by the system and service that handle them."
+          ],
+          "default": "flow",
+          "scope": "resource",
+          "description": "Which view an EventFlow diagram opens on. Each open diagram can be switched from its title bar afterwards."
+        },
+        "zenwave.eventflow.humanizeLabels": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Whether an EventFlow diagram opens with humanized labels (CheckoutStarted shown as \"Checkout Started\"). Each open diagram can be switched from its title bar afterwards."
         }
       }
-    }
+    },
+    "customEditors": [
+      {
+        "viewType": "zenwave.eventflow",
+        "displayName": "ZenWave EventFlow Diagram",
+        "selector": [
+          {
+            "filenamePattern": "*.zfl"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "zenwave.modelViews",
+        "label": "ZenWave: View Model",
+        "icon": {
+          "light": "./resources/zenwave-preview-light.svg",
+          "dark": "./resources/zenwave-preview-dark.svg"
+        }
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",

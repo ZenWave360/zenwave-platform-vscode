@@ -6,6 +6,7 @@ import {
 } from './host/capabilities.js';
 import { Logger } from './host/logger.js';
 import type { LanguageServerHost } from './lsp/client.js';
+import { registerEventFlowEditor, type EventFlowApi } from './eventflow/feature.js';
 import { registerModelExplorer, type ModelExplorerApi } from './explorer/feature.js';
 import { registerLanguageServer, type LanguageServerApi } from './lsp/feature.js';
 import { registerModelActions } from './model/actions.js';
@@ -14,10 +15,11 @@ import type { SdkProcessService } from './sdk/host.js';
 
 declare const __ZENWAVE_BUILD_COMMIT__: string;
 
-/** What the extension returns from `activate`: the shared language server connection and the explorer trees. */
+/** What the extension returns from `activate`: the shared language server connection, the explorer trees and the diagram editors. */
 export interface ZenwaveExtensionApi {
   readonly languageServer: LanguageServerApi;
   readonly explorer: ModelExplorerApi;
+  readonly eventflow: EventFlowApi;
 }
 
 export interface HostServices {
@@ -58,7 +60,8 @@ export function activate(
   );
   registerModelActions(context, languageServer, logger);
   const explorer = registerModelExplorer(context, languageServer, logger);
-  return { languageServer, explorer };
+  const eventflow = registerEventFlowEditor(context, languageServer, logger, explorer.diagramPanels);
+  return { languageServer, explorer, eventflow };
 }
 
 /**

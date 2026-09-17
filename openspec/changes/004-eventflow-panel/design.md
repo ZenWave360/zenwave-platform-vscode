@@ -193,6 +193,86 @@ keep the previous diagram on screen while a new one is in flight, and never
 render an empty state on the way from one good diagram to the next. That is what
 makes a live diagram usable while typing rather than a strobe light.
 
+### Decision (task 1.5): how the bundle version is pinned
+
+Decided by agent on 2026-09-17, pending review.
+
+`@zenwave360/vistas-eventflow-webview` (zenwave-architectural-vistas 2e60d25)
+exists as a packable npm package but is not published. The page states the
+protocol it speaks: `webview/protocol.json`
+(`{"protocol":"zenwave.eventflow.webview","protocolVersion":1}`), the same
+values as meta tags in `index.html`, and `webviewReady` carries them as its
+payload. The pin works at three points, so a protocol change breaks visibly at
+the earliest one it reaches:
+
+1. **Exact package version, pinned in `package.json`, not a dependency.**
+   `"zenwaveEventFlowWebview": {"package": "@zenwave360/vistas-eventflow-webview",
+   "version": "0.1.0", "protocol": "zenwave.eventflow.webview", "protocolVersion": 1}`,
+   the same shape and reasons as 003's `zenwaveLanguageServer` (003 design
+   §Decision (task 1.2)): an unpublished package cannot be a lockfile entry that
+   resolves anywhere but the machine that linked it. The build takes the
+   package from `ZENWAVE_VISTAS_WEBVIEW_DIR` (or an installed copy) and fails,
+   naming what to do, when it is missing or another version. Once the package is
+   published it becomes an exact-version dependency and the lockfile carries
+   the pin; the build check stays.
+2. **Protocol version at build time.** The build reads `webview/protocol.json`
+   and fails when the page states another protocol or version than the one
+   pinned. Upgrading to a page with a new protocol version is therefore a
+   deliberate change to this repository (the pin and the code that speaks it),
+   never a side effect of taking a newer bundle.
+3. **Protocol version at run time.** The editor treats `webviewReady` as the
+   page having loaded only when its payload states protocol version 1
+   (`src/eventflow/protocol.ts` `readiness`). A page that states no version
+   (older than versioning) or another one is a load failure whose message names
+   both versions.
+
+The bundle bytes are copied from the package into `dist/eventflow-webview`
+(`index.html` and `assets/*.{js,css}`), never committed here. The hashed asset
+names are listed in `runtime-files.json` by pattern.
+
+Why not only a runtime check: the VSIX would ship a page the extension cannot
+drive, and the first person to learn it would be a user. Why not a version range:
+a renderer is not a library with a stable surface; the protocol version is the
+compatibility statement, and the exact package version is what makes a build
+reproducible.
+
+What is not decided here: whether vistas bumps `protocolVersion` for additive
+messages (it states the payload is additive) — that is vistas' 001 1.6.
+
+### Implementation notes
+
+- **Host script.** The editor adds one nonce'd inline script and style to the
+  page (`src/eventflow/page.ts`). The script calls `acquireVsCodeApi()` once and
+  sets `window.__zenwaveVsCodeApi` before the page's module script runs, so the
+  page reuses it. It reports asset load failures (`zenwave.host.loadError`),
+  shows the explained states over or above the diagram
+  (`zenwave.host.state`), and answers `zenwave.host.probe` with what the page
+  rendered (node ids, highlighted ids, text, stylesheets, CSP violations), which
+  is how the smoke test reads the rendered page in both hosts. These
+  `zenwave.host.*` messages are this extension's; the vistas protocol is not
+  changed, and the page ignores unknown message types. The script never
+  intercepts or reads the page's messages.
+- **CSP.** `default-src 'none'; script-src <cspSource> 'nonce-…'; style-src
+  <cspSource> 'nonce-…'; img-src <cspSource> data:; font-src <cspSource>`. No
+  `connect-src`, nothing remote, no `unsafe-inline`.
+- **Explained states live in the webview, drawn by the host script,** not by the
+  upstream page: an overlay when there is nothing to show, a banner above the last
+  diagram when there is. Their buttons run only the commands the state offers.
+- **Send after ready.** `renderBundle` is posted after `webviewReady` (vistas
+  handoff: messages posted before the module script evaluates can be lost). A
+  page that does not report ready within 30 s while visible is a load failure.
+- **In place** is implemented as: open the diagram in the text tab's group, close
+  the text tab (unless it has unsaved changes, which keeps it open), and move the
+  diagram to the index the text had. **Show ZFL Text** does the reverse; VS Code's
+  *Reopen Editor With…* works as well.
+- **The document stays open as text** while a diagram shows it
+  (`workspace.openTextDocument`), so a server that reads only open documents (the
+  browser worker) has it after the text tab is replaced.
+- **The shared submenu** is `zenwave.modelViews` in `editor/title`
+  (`when: resourceExtname == .zfl`), groups `0_text` (back to text) and
+  `1_eventflow`; 005 adds its entries as `2_preview` and widens the `when` to its
+  file types.
+
 ## Risks / Trade-offs
 
 - **Three upstream dependencies, all moving.** The server request, the bundle's

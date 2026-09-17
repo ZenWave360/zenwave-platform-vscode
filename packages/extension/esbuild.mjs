@@ -64,6 +64,70 @@ function languageServerPackage() {
   });
 }
 
+/**
+ * The EventFlow diagram page is `@zenwave360/vistas-eventflow-webview`, built in
+ * zenwave-architectural-vistas and shipped inside the VSIX: its `webview/` page
+ * (index.html plus content-hashed assets) is copied into dist/eventflow-webview.
+ * As with the language server, the exact package version and the page protocol
+ * version are pinned in package.json (`zenwaveEventFlowWebview`) rather than
+ * declared as a dependency, because the package is not on the npm registry yet.
+ * The build fails when the page states another protocol version than the one
+ * pinned, so a protocol change cannot reach the VSIX silently; at runtime the
+ * editor checks the version the page announces as well. See 004 design
+ * §Decision (task 1.5).
+ */
+function eventFlowWebviewPackage() {
+  const pinned = packageManifest.zenwaveEventFlowWebview;
+  const help = [
+    `${pinned.package}@${pinned.version} is needed to build the extension and is not on the npm registry yet.`,
+    'Point ZENWAVE_VISTAS_WEBVIEW_DIR (absolute path) at the unpacked package, either',
+    '  <zenwave-architectural-vistas>/packages/eventflow-webview after `pnpm --filter @zenwave360/vistas-eventflow-webview build`,',
+    `  or the package/ directory extracted from zenwave360-vistas-eventflow-webview-${pinned.version}.tgz.`,
+  ].join(NEWLINE_INDENT);
+  let directory = process.env.ZENWAVE_VISTAS_WEBVIEW_DIR?.trim();
+  if (directory) {
+    directory = path.resolve(directory);
+  } else {
+    try {
+      directory = path.dirname(createRequire(path.join(projectDir, 'package.json')).resolve(`${pinned.package}/package.json`));
+    } catch {
+      throw new Error(`${pinned.package} is not installed.${NEWLINE_INDENT}${help}`);
+    }
+  }
+  const manifestFile = path.join(directory, 'package.json');
+  if (!fs.existsSync(manifestFile)) {
+    throw new Error(`ZENWAVE_VISTAS_WEBVIEW_DIR=${directory} holds no package.json.${NEWLINE_INDENT}${help}`);
+  }
+  const found = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  if (found.name !== pinned.package || found.version !== pinned.version) {
+    throw new Error(`Found ${found.name}@${found.version} in ${directory}, expected ${pinned.package}@${pinned.version}.${NEWLINE_INDENT}${help}`);
+  }
+  const page = path.join(directory, 'webview');
+  const protocolFile = path.join(page, 'protocol.json');
+  if (!fs.existsSync(path.join(page, 'index.html')) || !fs.existsSync(protocolFile)) {
+    throw new Error(`${pinned.package}@${pinned.version} in ${directory} has no built webview/index.html and webview/protocol.json.${NEWLINE_INDENT}${help}`);
+  }
+  const protocol = JSON.parse(fs.readFileSync(protocolFile, 'utf8'));
+  if (protocol.protocol !== pinned.protocol || protocol.protocolVersion !== pinned.protocolVersion) {
+    throw new Error(`${pinned.package}@${pinned.version} speaks ${protocol.protocol} version ${protocol.protocolVersion}; ` +
+      `this extension is pinned to ${pinned.protocol} version ${pinned.protocolVersion}.`);
+  }
+  return page;
+}
+
+function copyEventFlowWebview(page) {
+  const target = path.join(projectDir, 'dist/eventflow-webview');
+  // Asset names carry content hashes: stale ones from an earlier build must not linger.
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(path.join(target, 'assets'), { recursive: true });
+  fs.copyFileSync(path.join(page, 'index.html'), path.join(target, 'index.html'));
+  for (const entry of fs.readdirSync(path.join(page, 'assets'))) {
+    if (/\.(js|css)$/.test(entry)) fs.copyFileSync(path.join(page, 'assets', entry), path.join(target, 'assets', entry));
+  }
+  const pinned = packageManifest.zenwaveEventFlowWebview;
+  console.log(`[eventflow] copied ${pinned.package}@${pinned.version} (protocol version ${pinned.protocolVersion})`);
+}
+
 function copyLanguageServer(bundles) {
   for (const { source, target } of bundles) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -73,9 +137,11 @@ function copyLanguageServer(bundles) {
 }
 
 let serverBundles = [];
+let eventFlowPage;
 if (!tests) {
   try {
     serverBundles = languageServerPackage();
+    eventFlowPage = eventFlowWebviewPackage();
   } catch (error) {
     console.error(`error: ${error.message}`);
     process.exit(1);
@@ -239,6 +305,7 @@ const contexts = await Promise.all(
 
 if (watch) {
   copyLanguageServer(serverBundles);
+  copyEventFlowWebview(eventFlowPage);
   await Promise.all(contexts.map((context) => context.watch()));
 } else {
   // esbuild throws on a failed build. The reporter plugin has already printed
@@ -250,6 +317,7 @@ if (watch) {
     process.exitCode = 1;
   } else if (!tests) {
     copyLanguageServer(serverBundles);
+    copyEventFlowWebview(eventFlowPage);
     fs.mkdirSync(path.join(projectDir, 'dist'), { recursive: true });
     fs.writeFileSync(
       path.join(projectDir, 'dist/build-info.json'),

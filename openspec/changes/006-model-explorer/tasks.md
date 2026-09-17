@@ -28,9 +28,10 @@
 - [ ] 1.6 Reconsider the Model tree's scope once `003` lands and the Outline
       shows the same hierarchy for an open document
       Reconsidered: keep the full scope (design.md §Decision (task 1.6), decided by agent on 2026-09-17, pending review).
-- [ ] 1.7 `004-eventflow-panel` for the selection-sync tasks only; everything
+- [x] 1.7 `004-eventflow-panel` for the selection-sync tasks only; everything
       else here is independent
-      Open: 004 is not implemented. The seam it fills exists (`src/explorer/diagram-selection.ts`, see 6.4).
+      Available on vscode-platform/client-004: the EventFlow diagram editor registers each diagram with
+      `DiagramPanels` once its page reports `webviewReady`, and posts `highlightNode` to it (see 6.4).
 
 ## 2. Container and views
 
@@ -112,9 +113,12 @@
       `lsp/orders/model.zdl` as the active tab; the tree still shows `checkout.zfl`.
 - [x] 5.3 Name the shown document in the view's description
       Smoke: `view.description === 'checkout.zfl'`.
-- [ ] 5.4 Verify it stays populated while a preview or a diagram has focus —
+- [x] 5.4 Verify it stays populated while a preview or a diagram has focus —
       the scenario the standard Outline cannot serve
-      Open: needs 004/005 custom editors. Automated part: a focused webview panel keeps the tree populated (smoke).
+      Smoke, both hosts (client-004): with the `checkout.zfl` EventFlow diagram focused (a `TabInputCustom`, no
+      active text editor) the model tree shows `checkout.zfl` in state `ready`; focusing the `place-order-flow.zfl`
+      diagram retargets it there. A focused plain webview keeps the tree too. The preview (005) is the same tab
+      shape and should repeat this check when it lands.
 
 ## 6. Navigation and selection
 
@@ -128,12 +132,14 @@
 - [x] 6.3 Cursor movement in a model document reveals the matching node
       `nodeAt` (unit test) + `revealCursor`. Smoke, both hosts: cursor in `when OrderCreated` selects that policy;
       in `start CheckoutStarted` the start node.
-- [ ] 6.4 Tree selection posts `highlightNode` to a diagram open for the same
+- [x] 6.4 Tree selection posts `highlightNode` to a diagram open for the same
       document; clearing the selection clears the highlight
-      Open, blocked on 004. Implemented against `DiagramPanels` (`src/explorer/diagram-selection.ts`), which 004
-      fills: `register(documentUri, { highlightNode(viewNodeId | null) })`; exported as
-      `ZenwaveExtensionApi.explorer.diagramPanels`. Unit test with fake panels (highlight, clear, no counterpart
-      clears, other documents untouched); smoke with a fake panel in both hosts.
+      `DiagramPanels` (`src/explorer/diagram-selection.ts`), filled by the 004 editor (`src/eventflow/feature.ts`).
+      Smoke, both hosts, against the real vistas page (the fake panel is gone): the cursor in `start CheckoutStarted`
+      selects the node and the page renders `event:CheckoutStarted` with `eventflow-node-highlighted`; selecting
+      `startOrderCheckout` in the place-order tree highlights `command:startOrderCheckout`, and selecting a node
+      without a counterpart clears the page's highlight. Closing the diagram unregisters it. An emptied selection
+      sending `null` is unit-tested (the tree API cannot empty a selection).
 - [x] 6.5 Selecting with no diagram open still navigates, and reports nothing
       Unit test (`no-diagram`, no panel called); smoke navigations run with no panel registered and show nothing.
 
@@ -155,10 +161,10 @@
       Open: needs a human with IntelliJ.
 - [x] 7.5 Navigate to a node declared in another file
       See 6.1 and 5.2c.
-- [ ] 7.6 Focus a diagram: the model tree stays populated
-      Open: blocked on 004.
-- [ ] 7.7 Select in the tree: the diagram highlights
-      Open: blocked on 004 (see 6.4).
+- [x] 7.6 Focus a diagram: the model tree stays populated
+      See 5.4 (smoke, both hosts, client-004).
+- [x] 7.7 Select in the tree: the diagram highlights
+      See 6.4 (smoke, both hosts, client-004: the highlight is read back from the rendered page).
 - [x] 7.8 With the server stopped: both trees explain themselves
       Desktop smoke: `zenwave.lsp.enabled` off → both trees `no-server` with no nodes (welcome entry per state,
       unit test), both repopulate when it is back on.
