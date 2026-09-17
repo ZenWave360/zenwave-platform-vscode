@@ -4,6 +4,7 @@ import { LspSupervisor } from '../src/lsp/supervisor.js';
 import type { ZenwaveExtensionApi } from '../src/activate.js';
 import type { LanguageServerApi } from '../src/lsp/feature.js';
 import { documentFailure } from '../src/lsp/requests.js';
+import type { OrganizeOutcome, ReferencesOutcome } from '../src/model/actions.js';
 
 const EXTENSION_ID = 'ZenWave360.zenwave-platform';
 
@@ -181,6 +182,129 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
     subscription.dispose();
   }
   console.log('PASS: zenwave.lsp.restart reconnects and requests work again');
+}
+
+/** 007 model actions against the real server, in both hosts. Writes nothing to disk (untitled documents only). */
+async function modelActions(api: LanguageServerApi): Promise<void> {
+  await connected(api, 'Model actions');
+  const commands = await vscode.commands.getCommands(true);
+  for (const command of ['zenwave.model.forwardReferences', 'zenwave.model.reverseReferences', 'zenwave.zfl.organizeServices']) {
+    assert(commands.includes(command), `${command} was not registered`);
+  }
+  assert(!commands.includes('zenwave.model.conceptsAt'), 'conceptsAt must not exist while no server answers it');
+
+  const checkout = await vscode.workspace.openTextDocument(await fixture('lsp/checkout.zfl'));
+  await vscode.window.showTextDocument(checkout);
+  const checkoutText = checkout.getText();
+  // Cursor on `when CheckoutStarted do createOrder`: the command's forward reference is the ZDL that declares it.
+  const forward = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences', checkout.uri, { line: 14, character: 30 });
+  assert(forward.kind === 'navigated' && forward.targets.length === 1 && forward.targets[0]!.relationType === 'uses',
+    `forwardReferences from a ZFL command: ${JSON.stringify(forward)}`);
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.path.endsWith('/lsp/orders/model.zdl'),
+    `A single forward reference did not open the other document: ${vscode.window.activeTextEditor?.document.uri.toString()}`, 10000);
+  await vscode.window.showTextDocument(checkout);
+  const system = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences', checkout.uri, { line: 2, character: 6 });
+  assert(system.kind === 'navigated' && system.targets[0]?.relationType === 'declares-domain', `forwardReferences from a system: ${JSON.stringify(system)}`);
+  await vscode.window.showTextDocument(checkout);
+  // The cursor in the active editor is used when no position is passed.
+  const editor = vscode.window.activeTextEditor!;
+  editor.selection = new vscode.Selection(14, 30, 14, 30);
+  const fromCursor = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences');
+  assert(fromCursor.kind === 'navigated', `forwardReferences from the cursor: ${JSON.stringify(fromCursor)}`);
+  await vscode.window.showTextDocument(checkout);
+  const reverse = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences', checkout.uri, { line: 14, character: 30 });
+  // lsp-js d7156e7 reports no reverse references for any concept of these fixtures (zenwave-specs 001 task 2.19).
+  // When the server starts finding them, this assertion is the one to update.
+  assert(reverse.kind === 'none' && reverse.targets.length === 0, `reverseReferences: ${JSON.stringify(reverse)}`);
+  assert(vscode.window.activeTextEditor?.document.uri.toString() === checkout.uri.toString(), 'No reverse references must not navigate');
+  const blank = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences', checkout.uri, { line: 8, character: 0 });
+  assert(blank.kind === 'no-symbol', `A blank line must resolve to nothing, quietly: ${JSON.stringify(blank)}`);
+  assert(vscode.window.activeTextEditor?.document.uri.toString() === checkout.uri.toString(), 'A blank line must not navigate');
+  console.log(`PASS: forward references open the declaring ZDL directly; no reverse references is reported as none; a blank line does nothing`);
+
+  const flow = await vscode.workspace.openTextDocument({ language: 'zfl', content: checkoutText });
+  const flowEditor = await vscode.window.showTextDocument(flow);
+  await waitFor(async () => (await api.requests.preview(flow.uri.toString())).kind === 'ok', 'The server did not receive the untitled flow', 30000);
+  flowEditor.selection = new vscode.Selection(27, 8, 27, 8);
+  const organized = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices');
+  assert(organized.kind === 'organized', `organize: ${JSON.stringify(organized)}`);
+  assert(flow.getText().includes('commands: createOrder, notifyCustomer') && flow.getText() !== checkoutText,
+    `The server's arrangement was not applied: ${flow.getText()}`);
+  assert(flowEditor.selection.active.line === 27 && flowEditor.selection.active.character === 8,
+    `A cursor after the change moved: ${JSON.stringify(flowEditor.selection.active)}`);
+  const organizedText = flow.getText();
+  const versionBefore = flow.version;
+  const again = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', flow.uri);
+  assert(again.kind === 'unchanged' && flow.version === versionBefore && flow.getText() === organizedText,
+    `Organizing an organized flow must change nothing: ${JSON.stringify(again)} v${versionBefore}→${flow.version}`);
+  await vscode.window.showTextDocument(flow);
+  await vscode.commands.executeCommand('undo');
+  assert(flow.getText() === checkoutText, `One undo did not restore the document exactly:\n${flow.getText()}`);
+  console.log('PASS: organize applies the server arrangement as one edit, keeps a later cursor, is idempotent, and one undo restores the text');
+
+  const broken = await vscode.workspace.openTextDocument({ language: 'zfl', content: 'flow Broken {\n    when {{ do\n' });
+  await vscode.window.showTextDocument(broken);
+  const brokenVersion = broken.version;
+  const refused = await waitFor(async () => {
+    const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', broken.uri);
+    return outcome.kind === 'failed' && outcome.message.includes('is not open') ? undefined : outcome;
+  }, 'Organize never reached the broken flow', 30000);
+  assert(refused.kind === 'not-organizable' && refused.message.includes('left unchanged'), `organize a broken flow: ${JSON.stringify(refused)}`);
+  assert(broken.version === brokenVersion && broken.getText() === 'flow Broken {\n    when {{ do\n', 'A broken flow was modified');
+  const model = await vscode.workspace.openTextDocument({ language: 'zdl', content: 'entity A {}\n' });
+  await vscode.window.showTextDocument(model);
+  const notZfl = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices');
+  assert(notZfl.kind === 'no-document' && model.getText() === 'entity A {}\n', `organize on a ZDL: ${JSON.stringify(notZfl)}`);
+  for (const document of [flow, broken, model]) {
+    await vscode.window.showTextDocument(document);
+    await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+  }
+  console.log('PASS: organize leaves a flow the server cannot process unchanged and says why; ZDL is refused');
+}
+
+/** Desktop only: organizes a copied fixture file on disk, and runs the commands with the server turned off. */
+async function modelActionsOnDisk(api: LanguageServerApi): Promise<void> {
+  const placeOrder = await vscode.workspace.openTextDocument(await fixture('place-order-flow.zfl'));
+  await vscode.window.showTextDocument(placeOrder);
+  const original = placeOrder.getText();
+  assert(!placeOrder.isDirty, 'place-order-flow.zfl starts dirty');
+  const organized = await waitFor(async () => {
+    const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', placeOrder.uri);
+    return outcome.kind === 'failed' ? undefined : outcome;
+  }, 'Organize never reached place-order-flow.zfl', 30000);
+  assert(organized.kind === 'organized' && placeOrder.isDirty && placeOrder.getText() !== original, `organize place-order-flow.zfl: ${JSON.stringify(organized)}`);
+  const organizedText = placeOrder.getText();
+  await vscode.commands.executeCommand('undo');
+  assert(placeOrder.getText() === original && !placeOrder.isDirty, 'One undo did not restore place-order-flow.zfl exactly and clean');
+
+  const copy = vscode.Uri.joinPath(await fixture('lsp'), 'organized-copy.zfl');
+  await vscode.workspace.fs.writeFile(copy, new TextEncoder().encode(organizedText));
+  try {
+    const document = await vscode.workspace.openTextDocument(copy);
+    await vscode.window.showTextDocument(document);
+    const version = document.version;
+    const unchanged = await waitFor(async () => {
+      const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', copy);
+      return outcome.kind === 'failed' ? undefined : outcome;
+    }, 'Organize never reached the organized copy', 30000);
+    assert(unchanged.kind === 'unchanged' && !document.isDirty && document.version === version,
+      `An already-organized file was touched: ${JSON.stringify(unchanged)} dirty=${document.isDirty}`);
+    console.log('PASS: organize place-order-flow.zfl on disk, one undo restores it clean; an organized file is not dirtied');
+
+    await vscode.workspace.getConfiguration('zenwave').update('lsp.enabled', false, vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.status.kind === 'disabled', 'zenwave.lsp.enabled=false did not stop the server');
+    const noServer = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', placeOrder.uri);
+    assert(noServer.kind === 'no-server' && noServer.message.includes('needs the ZenWave language server') && placeOrder.getText() === original,
+      `organize without a server: ${JSON.stringify(noServer)}`);
+    const noServerReferences = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences', placeOrder.uri, { line: 3, character: 6 });
+    assert(noServerReferences.kind === 'no-server', `references without a server: ${JSON.stringify(noServerReferences)}`);
+    console.log('PASS: invoked without a server, the model actions change nothing and say they need the language server');
+  } finally {
+    await vscode.workspace.getConfiguration('zenwave').update('lsp.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.workspace.fs.delete(copy);
+  }
+  await connected(api, 'Re-enabled after model actions');
 }
 
 /** Desktop only: it edits workspace settings, which the browser host would write into the fixtures on disk. */
@@ -370,6 +494,8 @@ export async function run(): Promise<void> {
   const api = (extension.exports as ZenwaveExtensionApi).languageServer;
   const desktop = vscode.env.uiKind === vscode.UIKind.Desktop;
   await realLanguageServer(api, desktop);
+  await modelActions(api);
+  if (desktop) await modelActionsOnDisk(api);
   if (desktop) await languageServerSettings(api);
 
   const document = await vscode.workspace.openTextDocument(await fixture('complete.zdl'));

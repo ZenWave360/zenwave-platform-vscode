@@ -146,7 +146,10 @@ export class ZenwaveRequests {
       await this.issuer.request(ZENWAVE_REQUESTS.reverseReferences, { uri, semanticId }), isArray);
   }
 
-  /** The reorganised ZFL text, or `null` when there is nothing to change. */
+  /**
+   * The whole ZFL text with its services organised (equal to the current text when nothing changes), or `null`
+   * when the server could not process the document, e.g. a syntax error (observed with lsp-js d7156e7).
+   */
   async organizeZflServices(uri: string): Promise<RequestResult<string | null>> {
     return expect(ZENWAVE_REQUESTS.organizeZflServices,
       await this.issuer.request(ZENWAVE_REQUESTS.organizeZflServices, { uri }),

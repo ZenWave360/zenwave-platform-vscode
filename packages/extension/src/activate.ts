@@ -7,6 +7,7 @@ import {
 import { Logger } from './host/logger.js';
 import type { LanguageServerHost } from './lsp/client.js';
 import { registerLanguageServer, type LanguageServerApi } from './lsp/feature.js';
+import { registerModelActions } from './model/actions.js';
 import { registerSdkFeature } from './sdk/feature.js';
 import type { SdkProcessService } from './sdk/host.js';
 
@@ -53,6 +54,7 @@ export function activate(
     logger,
     capabilities.languageServer === 'none' ? undefined : services.languageServer,
   );
+  registerModelActions(context, languageServer, logger);
   return { languageServer };
 }
 

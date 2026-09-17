@@ -14,6 +14,9 @@
   settings, and credential commands for content the server may ask for.
 - Restricted Mode now also holds back the language server, content resolution
   and credentials; trusting the workspace enables them without a reload.
+- ZenWave: Go to What This References / Go to What References This, from the
+  editor context menu and the palette, and ZenWave: Organize ZFL Services as one
+  undoable edit. Offered only while a language server supporting them is connected.
 
 ## [0.1.0] - 2026-09-15
 

@@ -52,6 +52,8 @@ src/lsp/supervisor.ts  one lifecycle; requests answer ok | no-server | unsupport
 src/lsp/requests.ts    typed zenwave/* wrappers for feature code
 src/lsp/manifest*.ts   setting → .zenwave/config.yml → none, through vscode.workspace.fs
 src/lsp/credential*.ts origin-matched answers to zenwave/credential
+src/model/actions.ts   editor commands over zenwave/* requests (references, organize)
+src/model/navigation.ts opens server locations (uri + range) the editor's way
 ```
 
 Shared code imports only *types* from `vscode-languageclient`: its bare entry is
