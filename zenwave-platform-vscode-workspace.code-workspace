@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../dsl-kotlin"
+		},
+		{
+			"path": "../json-schema-ref-parser-kmp"
+		},
+		{
+			"path": "../zenwave-architectural-vistas"
+		},
+		{
+			"path": "../zenwave-lsp"
+		},
+		{
+			"path": "../zenwave-specs"
+		}
+	],
+	"settings": {}
+}
