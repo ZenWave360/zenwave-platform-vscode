@@ -1,0 +1,51 @@
+{
+  "error": {
+    "code": -32803,
+    "message": "file:///workspace/broken.zfl cannot be read: mismatched input '{' expecting {'when', OPTION_NAME}",
+    "data": {
+      "kind": "documentUnreadable",
+      "diagnostics": [
+        {
+          "range": {
+            "start": {
+              "line": 1,
+              "character": 9
+            },
+            "end": {
+              "line": 1,
+              "character": 9
+            }
+          },
+          "severity": 1,
+          "code": "syntax",
+          "source": "zenwave-lsp",
+          "message": "mismatched input '{' expecting {'when', OPTION_NAME}",
+          "data": {
+            "semanticPath": "syntax",
+            "language": "zfl"
+          }
+        },
+        {
+          "range": {
+            "start": {
+              "line": 2,
+              "character": 0
+            },
+            "end": {
+              "line": 2,
+              "character": 0
+            }
+          },
+          "severity": 1,
+          "code": "syntax",
+          "source": "zenwave-lsp",
+          "message": "mismatched input '<EOF>' expecting {'when', OPTION_NAME}",
+          "data": {
+            "semanticPath": "syntax",
+            "language": "zfl"
+          }
+        }
+      ]
+    }
+  }
+}

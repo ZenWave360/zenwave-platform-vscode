@@ -303,3 +303,95 @@ show their empty state, with a reason.
   source — so a file with uncommitted changes that the user has *not* opened
   resolves to its published version. Acceptable, and worth knowing before someone
   reports it as a bug.
+
+## Decisions recorded during implementation
+
+### Decision (task 1.2): `@zenwave360/lsp-js` is bundled into the VSIX, pinned by exact version, and is not an npm dependency
+
+Decided by agent on 2026-09-17, pending review
+
+**Chosen option:** the extension ships the server. The build copies the
+package's two self-contained bundles — `exports["./node"]` and
+`exports["./worker"]` — into `dist/server/node/zenwave-lsp-server.js` and
+`dist/server/browser/zenwave-lsp-worker.js`, which `runtime-files.json` lists
+and the VSIX carries. The version the extension is built and tested against is
+pinned exactly, `0.1.0-SNAPSHOT` today, in `packages/extension/package.json`
+under `zenwaveLanguageServer: { package, version }`. The build fails, naming
+what to do, when the package is missing or is any other version.
+
+- **Versioning.** One extension version ships exactly one server version. The
+  server is not a separately updated component, so there is no compatibility
+  range to maintain; capability discovery (`customRequests`) still guards the
+  client against a contributor's `zenwave.lsp.serverPath` build being older or
+  newer.
+- **Not a runtime dependency.** Nothing `require`s the package at run time: the
+  Node host forks a file, the web host starts a Worker from a URL. The VSIX is
+  packaged `--no-dependencies`, so a runtime dependency would add nothing.
+- **Why not `devDependencies` today.** The package is not on the npm registry, so
+  declaring it would need a lockfile entry that resolves only on the machine that
+  linked it — which `002` accepted for `@zenwave360/dsl` and which this change
+  does not repeat. The local link is `ZENWAVE_LSP_JS_DIR` (the unpacked package)
+  or `npm install --no-save` of the tarball; see the extension README.
+- **When it is published:** move the pin to an exact-version `devDependencies`
+  entry with a registry lockfile entry, have the build resolve it from
+  `node_modules` only, and drop the `zenwaveLanguageServer` field. A clean
+  checkout still fails until then, as it already does for `@zenwave360/dsl`
+  (`002` task 1.2), and `008`'s pipeline stays red for the same reason.
+- **Size.** Each bundle is ~6 MB uncompressed (elkjs included). Both are always
+  shipped, because one VSIX serves both hosts.
+- **Licences.** The bundles embed third-party code (vscode-languageserver, elkjs
+  under EPL-2.0, Kotlin/JS runtime). Their notices are the package's to carry;
+  today it ships none — raised for review, not decided here.
+
+### Decision (task 4.4): when several workspace folders offer a manifest, the first folder in workspace order wins, and the rest are named
+
+Decided by agent on 2026-09-17, pending review
+
+A manifest setting in any folder outranks every `.zenwave/config.yml`; within
+a route, the first folder in `workspace.workspaceFolders` order wins. Every
+offer that was not used is written to the output channel next to the resolved
+manifest (`note: … ignored, folder "a" comes first`), and the same setting
+inherited by every folder is not reported as a conflict. Workspace order is
+something the user can see and change, which a filesystem-derived rule is not.
+
+### Decision: a changed resolution restarts the server; a changed file is notified
+
+Decided by agent on 2026-09-17, pending review
+
+When the manifest setting, a `.zenwave/config.yml` or the workspace folders
+change, the client resolves again. If the server would be initialised with a
+different `configUri` or `projectManifestUri`, the client restarts it with the
+new initialization options — no protocol is invented for "the manifest moved",
+and it works with today's server. If only the content of the configuration or
+the manifest changed, the language client forwards the standard
+`workspace/didChangeWatchedFiles`; open documents already reach the server
+through `didChange`. The server ignores both notifications today (store
+`001-ide-client-contracts` task 2.9), so a saved edit to a manifest that is not
+open is not yet taken up without a restart.
+
+### Decision: credential authorisation lives in user settings only
+
+Decided by agent on 2026-09-17, pending review
+
+`zenwave.credentials.origins` is `application`-scoped, so a repository cannot
+authorise an origin for itself through `.vscode/settings.json`. Each entry is a
+bare origin plus how the credential is applied; `source: github` takes the
+token from `vscode.authentication` (silently, adding an Accounts-menu sign-in
+request rather than a modal prompt when there is no session, and forcing a new
+session when the server reports the token was rejected); `source: stored`
+takes it from `SecretStorage`, recorded with **ZenWave: Record Credential**.
+The default authorises the three GitHub origins for GitHub sign-in. A request is
+matched on the origin of its own URL, which must also equal the origin the
+server states. The handler follows store decision 1.4's wire shape and the
+client advertises `clientCapabilities.credentialRequest: true`; no server sends
+the request yet (store tasks 2.12/2.13).
+
+### Implementation note: selecting the manifest by URI
+
+The manifest's document filter is `{ scheme, pattern: <fsPath> }`. VS Code
+scores a pattern equal to a document's `fsPath` as a match before treating it as
+a glob, so exactly that file is selected whatever its name contains; a
+`RelativePattern` object is not accepted by the language client's protocol-typed
+selector. Evidence that the precision matters beyond noise: sending the
+fixture `modules/…/openapi.yml` to `@zenwave360/lsp-js` 0.1.0-SNAPSHOT makes the
+server stop answering every request (filed in the store, `001` task 2.17).

@@ -18,6 +18,11 @@ export class Logger implements vscode.Disposable {
     this.channel = vscode.window.createOutputChannel(name, { log: true });
   }
 
+  /** The channel itself, for the language client's own logging and protocol trace. */
+  get outputChannel(): vscode.LogOutputChannel {
+    return this.channel;
+  }
+
   private get level(): TraceLevel {
     return vscode.workspace.getConfiguration('zenwave').get<TraceLevel>('trace.level', 'info');
   }

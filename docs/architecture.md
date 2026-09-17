@@ -20,7 +20,7 @@ do not.
          ┌─────────────────┼──────────────────┐
          │                 │                  │
    @zenwave360/dsl   @zenwave360/lsp-js   zenwave-sdk
-   (Kotlin/JS)       (Kotlin/JS, stub)    (JVM via JBang)
+   (Kotlin/JS)       (Kotlin/JS)          (JVM via JBang)
    parse ZDL/ZFL     language server      code generation
    desktop + web     desktop + web        DESKTOP ONLY
 ```
@@ -35,16 +35,35 @@ Kotlin/JS npm package** (from `dsl-kotlin`) exposing `parseZdl` / `parseZfl` as
 an ES module with pure-JS dependencies, and `zdl-vscode` already consumed it
 successfully inside the browser extension host.
 
-`@zenwave360/lsp-js` applies the same pattern to the language server. It is
-currently a **stub** — `zenwave-lsp/lsp-js` has a build file declaring the npm
-packaging but an empty `src/`.
+`@zenwave360/lsp-js` applies the same pattern to the language server. It ships
+two self-contained bundles, a Node entry spoken to over child-process IPC and a
+classic Web Worker script using `BrowserMessageReader` / `BrowserMessageWriter`.
+The build copies both into `dist/server`; the extension does not `require` the
+package.
 
-> **Known upstream gap.** `lsp-js` declares only a `nodejs()` Kotlin/JS target.
-> Running a language server in the VS Code *web* host means running it in a Web
-> Worker and speaking LSP over `vscode-languageserver/browser`'s
-> `BrowserMessageReader` / `BrowserMessageWriter`. Before web LSP can work,
-> `zenwave-lsp` needs a browser-safe target — or at minimum, no Node-only API use
-> plus browser message transports.
+## The language server connection
+
+```
+src/node/extension.ts ── NodeLanguageServerHost ──┐   vscode-languageclient/node, fork + IPC
+src/browser/extension.ts ─ WorkerLanguageServerHost ┤   vscode-languageclient/browser, new Worker
+                                                   ▼
+src/lsp/feature.ts     trust, settings, manifest, status bar, context keys, commands
+src/lsp/supervisor.ts  one lifecycle; requests answer ok | no-server | unsupported | failed
+src/lsp/requests.ts    typed zenwave/* wrappers for feature code
+src/lsp/manifest*.ts   setting → .zenwave/config.yml → none, through vscode.workspace.fs
+src/lsp/credential*.ts origin-matched answers to zenwave/credential
+```
+
+Shared code imports only *types* from `vscode-languageclient`: its bare entry is
+the Node build. Each host entry supplies a `LanguageServerHost` that finds its
+server and constructs the client with its own sub-path, and ESLint enforces who
+may import which.
+
+Feature code reaches the server only through the `LanguageServerApi` that
+`activate` returns (`requests`, `status`, `onDidChange`, `manifest`). A request
+never throws and never hangs: absence of a server, an unadvertised request and a
+failed request are different answers, because they are different things to tell
+the user.
 
 ## Two hosts, one activation
 

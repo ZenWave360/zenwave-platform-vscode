@@ -1,0 +1,30 @@
+systems {
+    @zdl("orders/model.zdl")
+    Orders {
+        service OrderService {
+            commands: createOrder
+        }
+    }
+}
+
+flow CheckoutFlow {
+    @actor(Customer)
+    start CheckoutStarted {
+    }
+
+    when CheckoutStarted do createOrder {
+        service Orders.OrderService
+        emits OrderCreated
+        emits OrderRejected
+    }
+
+    when OrderCreated do notifyCustomer {
+        service Orders.OrderService
+        emits CustomerNotified
+    }
+
+    end {
+        completed: CustomerNotified
+        rejected: OrderRejected
+    }
+}

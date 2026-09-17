@@ -1,6 +1,6 @@
 import * as esbuild from 'esbuild';
 import * as fs from 'node:fs';
-import { builtinModules } from 'node:module';
+import { builtinModules, createRequire } from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +12,75 @@ const buildCommit = process.env.ZENWAVE_BUILD_COMMIT?.trim() || 'development';
 const packageManifest = JSON.parse(
   fs.readFileSync(path.join(projectDir, 'package.json'), 'utf8'),
 );
+
+/**
+ * The language server is `@zenwave360/lsp-js`, shipped inside the VSIX: its two
+ * self-contained bundles are copied into dist/server. The version is pinned in
+ * package.json (`zenwaveLanguageServer`) rather than declared as a dependency,
+ * because the package is not on the npm registry yet and a lockfile entry for it
+ * would resolve only on the machine that linked it. See README "Development
+ * dependencies" and 003 design §Decision (task 1.2).
+ */
+const SERVER_BUNDLES = [
+  { exportName: './node', target: 'dist/server/node/zenwave-lsp-server.js' },
+  { exportName: './worker', target: 'dist/server/browser/zenwave-lsp-worker.js' },
+];
+
+const NEWLINE_INDENT = '\n  ';
+
+function languageServerPackage() {
+  const pinned = packageManifest.zenwaveLanguageServer;
+  const help = [
+    `${pinned.package}@${pinned.version} is needed to build the extension and is not on the npm registry yet.`,
+    'Link a local build without saving it:',
+    `  npm install --no-save --workspace packages/extension <zenwave-lsp>/lsp-js/build/npm-pack/zenwave360-lsp-js-${pinned.version}.tgz`,
+    `or point ZENWAVE_LSP_JS_DIR at the unpacked package (<zenwave-lsp>/lsp-js/build/npm-package).`,
+  ].join(NEWLINE_INDENT);
+  let directory = process.env.ZENWAVE_LSP_JS_DIR?.trim();
+  if (directory) {
+    directory = path.resolve(directory);
+  } else {
+    try {
+      directory = path.dirname(createRequire(path.join(projectDir, 'package.json')).resolve(`${pinned.package}/package.json`));
+    } catch {
+      throw new Error(`${pinned.package} is not installed.${NEWLINE_INDENT}${help}`);
+    }
+  }
+  const manifestFile = path.join(directory, 'package.json');
+  if (!fs.existsSync(manifestFile)) {
+    throw new Error(`ZENWAVE_LSP_JS_DIR=${directory} holds no package.json.${NEWLINE_INDENT}${help}`);
+  }
+  const found = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  if (found.name !== pinned.package || found.version !== pinned.version) {
+    throw new Error(`Found ${found.name}@${found.version} in ${directory}, expected ${pinned.package}@${pinned.version}.${NEWLINE_INDENT}${help}`);
+  }
+  return SERVER_BUNDLES.map(({ exportName, target }) => {
+    const entry = found.exports?.[exportName];
+    const source = typeof entry === 'string' ? path.join(directory, entry) : undefined;
+    if (!source || !fs.existsSync(source)) {
+      throw new Error(`${pinned.package}@${pinned.version} in ${directory} has no "${exportName}" bundle.${NEWLINE_INDENT}${help}`);
+    }
+    return { source, target: path.join(projectDir, target) };
+  });
+}
+
+function copyLanguageServer(bundles) {
+  for (const { source, target } of bundles) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+  }
+  console.log(`[server] copied ${packageManifest.zenwaveLanguageServer.package}@${packageManifest.zenwaveLanguageServer.version}`);
+}
+
+let serverBundles = [];
+if (!tests) {
+  try {
+    serverBundles = languageServerPackage();
+  } catch (error) {
+    console.error(`error: ${error.message}`);
+    process.exit(1);
+  }
+}
 
 if (production && !tests) {
   // A development build leaves source maps in dist. Start a release build from
@@ -169,6 +238,7 @@ const contexts = await Promise.all(
 );
 
 if (watch) {
+  copyLanguageServer(serverBundles);
   await Promise.all(contexts.map((context) => context.watch()));
 } else {
   // esbuild throws on a failed build. The reporter plugin has already printed
@@ -179,6 +249,7 @@ if (watch) {
   if (results.some((result) => result.status === 'rejected')) {
     process.exitCode = 1;
   } else if (!tests) {
+    copyLanguageServer(serverBundles);
     fs.mkdirSync(path.join(projectDir, 'dist'), { recursive: true });
     fs.writeFileSync(
       path.join(projectDir, 'dist/build-info.json'),

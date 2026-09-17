@@ -1,0 +1,8 @@
+entity Customer {
+    name String required
+}
+
+entity CustomerOrder {
+    customer Customer
+    total Integer
+}

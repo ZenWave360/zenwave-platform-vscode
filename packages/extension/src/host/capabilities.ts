@@ -27,13 +27,11 @@ export interface HostCapabilities {
   readonly hasLocalFileSystem: boolean;
 
   /**
-   * Which language server transport is usable here.
-   *
-   * Reported as `none` today: change 001 deliberately ships no LSP client. The
-   * field exists so that the `lsp-client` change extends a value rather than
-   * introducing the concept and reshaping every caller.
+   * Which language server transport is usable here: `ipc` for a Node child
+   * process (desktop), `worker` for a Web Worker (web), `none` when this host or
+   * build has no server to run. The same `@zenwave360/lsp-js` server in both.
    */
-  readonly languageServer: 'jvm' | 'worker' | 'none';
+  readonly languageServer: 'ipc' | 'worker' | 'none';
 }
 
 export const DESKTOP_CAPABILITIES: HostCapabilities = {
@@ -41,7 +39,7 @@ export const DESKTOP_CAPABILITIES: HostCapabilities = {
   canRunProcesses: true,
   canUseTerminal: true,
   hasLocalFileSystem: true,
-  languageServer: 'none',
+  languageServer: 'ipc',
 };
 
 export const WEB_CAPABILITIES: HostCapabilities = {
@@ -49,7 +47,7 @@ export const WEB_CAPABILITIES: HostCapabilities = {
   canRunProcesses: false,
   canUseTerminal: false,
   hasLocalFileSystem: false,
-  languageServer: 'none',
+  languageServer: 'worker',
 };
 
 /**
@@ -70,6 +68,10 @@ export function describeCapabilities(capabilities: HostCapabilities): string {
     `processes:       ${capabilities.canRunProcesses}`,
     `terminal tasks:  ${capabilities.canUseTerminal}`,
     `local files:     ${capabilities.hasLocalFileSystem}`,
-    `language server: ${capabilities.languageServer}`,
+    `language server: ${capabilities.languageServer}${{
+      ipc: ' (Node child process)',
+      worker: ' (Web Worker)',
+      none: ' (no server in this host or build: highlighting and editing only)',
+    }[capabilities.languageServer]}`,
   ].join('\n  ');
 }

@@ -1,0 +1,260 @@
+{
+  "result": {
+    "flowGraph": {
+      "schema": "zfl.eventflow.view@1",
+      "nodes": [
+        {
+          "id": "event:CheckoutStarted",
+          "type": "START",
+          "label": "CheckoutStarted",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          },
+          "position": {
+            "x": 32,
+            "y": 37.333333333333336
+          },
+          "dimensions": {
+            "width": 180,
+            "height": 56
+          }
+        },
+        {
+          "id": "command:createOrder",
+          "type": "COMMAND",
+          "label": "createOrder",
+          "system": "Orders",
+          "service": "OrderService",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          },
+          "position": {
+            "x": 292,
+            "y": 37.333333333333336
+          },
+          "dimensions": {
+            "width": 180,
+            "height": 56
+          }
+        },
+        {
+          "id": "event:OrderCreated",
+          "type": "EVENT",
+          "label": "OrderCreated",
+          "system": "Orders",
+          "service": "OrderService",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          },
+          "endOutcomeLabels": [
+            "completed"
+          ],
+          "position": {
+            "x": 552,
+            "y": 32
+          },
+          "dimensions": {
+            "width": 160,
+            "height": 48
+          }
+        },
+        {
+          "id": "event:OrderRejected",
+          "type": "EVENT",
+          "label": "OrderRejected",
+          "system": "Orders",
+          "service": "OrderService",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          },
+          "endOutcomeLabels": [
+            "rejected"
+          ],
+          "position": {
+            "x": 552,
+            "y": 200
+          },
+          "dimensions": {
+            "width": 160,
+            "height": 48
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "from[event:CheckoutStarted]to[event:CheckoutStarted]",
+          "source": "event:CheckoutStarted",
+          "target": "event:CheckoutStarted",
+          "type": "TRIGGER",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          }
+        },
+        {
+          "id": "from[command:createOrder]to[event:OrderCreated]",
+          "source": "command:createOrder",
+          "target": "event:OrderCreated",
+          "type": "CAUSATION",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          }
+        },
+        {
+          "id": "from[command:createOrder]to[event:OrderRejected]",
+          "source": "command:createOrder",
+          "target": "event:OrderRejected",
+          "type": "CAUSATION",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          }
+        },
+        {
+          "id": "from[event:CheckoutStarted]to[command:createOrder]",
+          "source": "event:CheckoutStarted",
+          "target": "command:createOrder",
+          "type": "TRIGGER",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 15,
+            "column": 5
+          }
+        }
+      ],
+      "layout": {
+        "engine": "elk-layered",
+        "direction": "LR",
+        "rankSpacing": 80,
+        "nodeSpacing": 120
+      },
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 732,
+        "height": 268
+      },
+      "systemGroups": [
+        {
+          "systemName": "Orders",
+          "bounds": {
+            "x": 252,
+            "y": -8,
+            "width": 500,
+            "height": 296
+          }
+        }
+      ]
+    },
+    "serviceGraph": {
+      "schema": "zfl.services.view@1",
+      "groups": [
+        {
+          "id": "group:Orders>OrderService",
+          "label": "Orders\nOrderService",
+          "path": "Orders/OrderService",
+          "position": {
+            "x": 40,
+            "y": 40
+          },
+          "dimensions": {
+            "width": 534,
+            "height": 332
+          }
+        }
+      ],
+      "nodes": [
+        {
+          "id": "command:createOrder",
+          "type": "COMMAND",
+          "label": "createOrder",
+          "groupId": "group:Orders>OrderService",
+          "system": "Orders",
+          "service": "OrderService",
+          "servicePath": "Orders/OrderService",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          },
+          "position": {
+            "x": 64,
+            "y": 64
+          },
+          "dimensions": {
+            "width": 156,
+            "height": 92
+          }
+        },
+        {
+          "id": "event:OrderCreated@Orders>OrderService",
+          "type": "EVENT",
+          "label": "OrderCreated",
+          "groupId": "group:Orders>OrderService",
+          "system": "Orders",
+          "service": "OrderService",
+          "servicePath": "Orders/OrderService",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          },
+          "position": {
+            "x": 394,
+            "y": 64
+          },
+          "dimensions": {
+            "width": 156,
+            "height": 92
+          }
+        },
+        {
+          "id": "event:OrderRejected@Orders>OrderService",
+          "type": "EVENT",
+          "label": "OrderRejected",
+          "groupId": "group:Orders>OrderService",
+          "system": "Orders",
+          "service": "OrderService",
+          "servicePath": "Orders/OrderService",
+          "sourceRef": {
+            "file": "<zfl>",
+            "line": 10,
+            "column": 1
+          },
+          "position": {
+            "x": 394,
+            "y": 174
+          },
+          "dimensions": {
+            "width": 156,
+            "height": 92
+          }
+        }
+      ],
+      "layout": {
+        "engine": "zfl-services-grid",
+        "direction": "LR",
+        "rankSpacing": 72,
+        "nodeSpacing": 18
+      },
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 614,
+        "height": 412
+      }
+    }
+  }
+}

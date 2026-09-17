@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "zenwave/hierarchy",
+    "params": {
+      "uri": "file:///workspace/missing.zdl"
+    }
+  },
+  "error": {
+    "code": -32803,
+    "message": "file:///workspace/missing.zdl is not open and cannot be read",
+    "data": {
+      "kind": "documentNotFound"
+    }
+  }
+}

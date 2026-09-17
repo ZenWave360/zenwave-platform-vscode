@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "zenwave/symbolAt",
+    "params": {
+      "textDocument": {
+        "uri": "file:///workspace/checkout.zfl"
+      },
+      "position": {
+        "line": 14,
+        "character": 30
+      }
+    }
+  },
+  "result": {
+    "uri": "file:///workspace/checkout.zfl",
+    "semanticId": "file:///workspace/checkout.zfl#flows.CheckoutFlow.commands.createOrder",
+    "range": {
+      "start": {
+        "line": 14,
+        "character": 4
+      },
+      "end": {
+        "line": 18,
+        "character": 4
+      }
+    }
+  }
+}

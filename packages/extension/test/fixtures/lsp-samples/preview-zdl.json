@@ -1,0 +1,13 @@
+{
+  "result": {
+    "representations": [
+      {
+        "id": "class-diagram",
+        "title": "Class diagram",
+        "format": "MERMAID",
+        "content": "classDiagram\n    class Customer {\n        String name\n    }\n    class CustomerOrder {\n        Customer customer\n        Integer total\n    }\n    CustomerOrder --> Customer : customer\n"
+      }
+    ],
+    "defaultRepresentationId": "class-diagram"
+  }
+}

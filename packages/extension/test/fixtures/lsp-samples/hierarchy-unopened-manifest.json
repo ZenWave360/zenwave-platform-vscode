@@ -1,0 +1,75 @@
+{
+  "request": {
+    "method": "zenwave/hierarchy",
+    "params": {
+      "uri": "file:///workspace/zenwave-architecture.yml"
+    }
+  },
+  "result": [
+    {
+      "id": "file:///workspace/zenwave-architecture.yml#manifest",
+      "label": "manifest",
+      "kind": "manifest",
+      "language": "manifest",
+      "sourceUri": "file:///workspace/zenwave-architecture.yml",
+      "sourceRange": {
+        "start": {
+          "line": 0,
+          "character": 0
+        },
+        "end": {
+          "line": 0,
+          "character": 0
+        }
+      },
+      "children": [
+        {
+          "id": "file:///workspace/zenwave-architecture.yml#$.domains.orders",
+          "label": "orders",
+          "kind": "domain",
+          "language": "manifest",
+          "sourceUri": "file:///workspace/zenwave-architecture.yml",
+          "sourceRange": {
+            "start": {
+              "line": 2,
+              "character": 4
+            },
+            "end": {
+              "line": 5,
+              "character": 0
+            }
+          },
+          "children": [
+            {
+              "id": "file:///workspace/zenwave-architecture.yml#$.domains.orders.services['orders-api']",
+              "label": "orders-api",
+              "kind": "service",
+              "language": "manifest",
+              "sourceUri": "file:///workspace/zenwave-architecture.yml",
+              "sourceRange": {
+                "start": {
+                  "line": 4,
+                  "character": 8
+                },
+                "end": {
+                  "line": 5,
+                  "character": 0
+                }
+              },
+              "children": [],
+              "relatedResources": [],
+              "uiHints": {},
+              "viewNodeIds": []
+            }
+          ],
+          "relatedResources": [],
+          "uiHints": {},
+          "viewNodeIds": []
+        }
+      ],
+      "relatedResources": [],
+      "uiHints": {},
+      "viewNodeIds": []
+    }
+  ]
+}

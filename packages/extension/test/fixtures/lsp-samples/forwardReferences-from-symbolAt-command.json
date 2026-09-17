@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "zenwave/forwardReferences",
+    "params": {
+      "uri": "file:///workspace/checkout.zfl",
+      "semanticId": "file:///workspace/checkout.zfl#flows.CheckoutFlow.commands.createOrder"
+    }
+  },
+  "result": [
+    {
+      "targetKind": "reference",
+      "label": "createOrder",
+      "uri": "file:///workspace/orders/model.zdl",
+      "relationType": "uses"
+    }
+  ]
+}

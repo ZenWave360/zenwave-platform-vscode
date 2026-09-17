@@ -14,13 +14,28 @@
   "rules": {
     "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/consistent-type-imports": "warn",
-    "no-restricted-imports": [
+    "@typescript-eslint/no-restricted-imports": [
       "error",
       {
+        "paths": [
+          {
+            "name": "vscode-languageclient",
+            "allowTypeImports": true,
+            "message": "The bare vscode-languageclient entry is its Node build. Import types only from shared code; values come from vscode-languageclient/node in src/node/ or vscode-languageclient/browser in src/browser/."
+          }
+        ],
         "patterns": [
           {
             "group": ["node:*", "fs", "path", "child_process", "os", "crypto"],
             "message": "Node APIs are only allowed in src/node/. Shared code must run in the Web Worker host too - see AGENTS.md."
+          },
+          {
+            "group": ["vscode-languageclient/node", "vscode-languageclient/lib/node/*"],
+            "message": "vscode-languageclient/node reaches child_process: only src/node/ may import it - see AGENTS.md."
+          },
+          {
+            "group": ["vscode-languageclient/browser", "vscode-languageclient/lib/browser/*"],
+            "message": "vscode-languageclient/browser is the Web Worker transport: only src/browser/ may import it."
           }
         ]
       }
@@ -30,13 +45,50 @@
     {
       "files": ["packages/extension/src/node/**/*.ts"],
       "rules": {
-        "no-restricted-imports": "off"
+        "@typescript-eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["vscode-languageclient/browser", "vscode-languageclient/lib/browser/*"],
+                "message": "vscode-languageclient/browser is the Web Worker transport: only src/browser/ may import it."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/extension/src/browser/**/*.ts"],
+      "rules": {
+        "@typescript-eslint/no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "vscode-languageclient",
+                "allowTypeImports": true,
+                "message": "The bare vscode-languageclient entry is its Node build; use vscode-languageclient/browser."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["node:*", "fs", "path", "child_process", "os", "crypto"],
+                "message": "Node APIs are only allowed in src/node/. Shared code must run in the Web Worker host too - see AGENTS.md."
+              },
+              {
+                "group": ["vscode-languageclient/node", "vscode-languageclient/lib/node/*"],
+                "message": "vscode-languageclient/node reaches child_process: only src/node/ may import it - see AGENTS.md."
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "files": ["packages/extension/test/unit/**/*.ts"],
       "rules": {
-        "no-restricted-imports": "off"
+        "@typescript-eslint/no-restricted-imports": "off"
       }
     }
   ]

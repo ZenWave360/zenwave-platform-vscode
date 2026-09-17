@@ -20,13 +20,29 @@ export type RequestResult<T = unknown> =
   | { readonly kind: 'ok'; readonly value: T }
   | { readonly kind: 'no-server'; readonly reason: string }
   | { readonly kind: 'unsupported'; readonly method: string }
-  | { readonly kind: 'failed'; readonly reason: string };
+  | FailedRequest;
+
+/**
+ * A request the server answered with an error. `code` and `data` are the
+ * JSON-RPC error's, when the transport reported one — `data.kind` is how the
+ * ZenWave requests say *why* (`documentUnreadable`, `documentNotFound`, …).
+ */
+export interface FailedRequest {
+  readonly kind: 'failed';
+  readonly reason: string;
+  readonly code?: number;
+  readonly data?: unknown;
+}
+
+/** JSON-RPC "method not found": a server too old for the request, not a failure. */
+export const METHOD_NOT_FOUND = -32601;
 
 interface Session {
   readonly transport: LspTransport;
   readonly ended: AbortController;
   readonly exit: { dispose(): void };
   requests: ReadonlySet<string>;
+  initializeResult: unknown;
 }
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -44,9 +60,19 @@ export function advertisedRequests(initializeResult: unknown): ReadonlySet<strin
     : []);
 }
 
+/** Reads a JSON-RPC error's code and data without depending on a transport's error class. */
+export function responseError(error: unknown): { code?: number; data?: unknown } {
+  const value = object(error);
+  const code = typeof value?.code === 'number' ? value.code : undefined;
+  return {
+    ...(code === undefined ? {} : { code }),
+    ...(value && value.data !== undefined ? { data: value.data } : {}),
+  };
+}
+
 type Outcome<T> =
   | { kind: 'ok'; value: T }
-  | { kind: 'failed'; reason: string }
+  | { kind: 'failed'; reason: string; error: unknown }
   | { kind: 'ended' }
   | { kind: 'timeout' };
 
@@ -61,7 +87,7 @@ async function bounded<T>(action: () => Promise<T>, milliseconds: number, signal
         return action();
       }).then(
         (value): Outcome<T> => ({ kind: 'ok', value }),
-        (error: unknown): Outcome<T> => ({ kind: 'failed', reason: error instanceof Error ? error.message : 'Transport operation failed' }),
+        (error: unknown): Outcome<T> => ({ kind: 'failed', reason: error instanceof Error ? error.message : 'Transport operation failed', error }),
       ),
       new Promise<Outcome<T>>((resolve) => {
         timer = setTimeout(() => resolve({ kind: 'timeout' }), milliseconds);
@@ -100,6 +126,16 @@ export class LspSupervisor {
     return { dispose: () => { this.listeners.delete(listener); } };
   }
 
+  /** The `zenwave/*` requests the connected server advertised; empty when none is connected. */
+  get advertisedRequests(): ReadonlySet<string> {
+    return this.state.kind === 'connected' ? this.current?.requests ?? new Set() : new Set();
+  }
+
+  /** The connected server's initialize result, unchanged. */
+  get initializeResult(): unknown {
+    return this.state.kind === 'connected' ? this.current?.initializeResult : undefined;
+  }
+
   supports(method: string): boolean {
     return this.state.kind === 'connected' && (this.current?.requests.has(method) ?? false);
   }
@@ -135,9 +171,23 @@ export class LspSupervisor {
     const result = await bounded(() => session.transport.sendRequest(method, params), this.timeoutMs, session.ended.signal);
     if (this.current !== session || session.ended.signal.aborted || result.kind === 'ended') return this.unavailable();
     if (result.kind === 'ok') return { kind: 'ok', value: result.value };
-    const reason = result.kind === 'timeout' ? `Language server request ${method} timed out` : result.reason;
-    this.log.error(`Language server request ${method} failed: ${reason}`);
-    return { kind: 'failed', reason };
+    if (result.kind === 'timeout') {
+      const reason = `Language server request ${method} timed out`;
+      this.log.error(`Language server request ${method} failed: ${reason}`);
+      return { kind: 'failed', reason };
+    }
+    const { code, data } = responseError(result.error);
+    if (code === METHOD_NOT_FOUND) {
+      this.log.warn(`Language server advertised ${method} but does not implement it`);
+      return { kind: 'unsupported', method };
+    }
+    this.log.error(`Language server request ${method} failed: ${result.reason}`);
+    return {
+      kind: 'failed',
+      reason: result.reason,
+      ...(code === undefined ? {} : { code }),
+      ...(data === undefined ? {} : { data }),
+    };
   }
 
   private unavailable(): RequestResult<never> {
@@ -175,13 +225,14 @@ export class LspSupervisor {
         this.setState({ kind: 'failed', reason });
         this.log.error(`Language server stopped unexpectedly: ${reason}`);
       });
-      session = { transport, ended, exit, requests: new Set() };
+      session = { transport, ended, exit, requests: new Set(), initializeResult: undefined };
       this.current = session;
       if (generation !== this.stopGeneration) ended.abort();
       const result = await bounded(() => transport.start(), this.timeoutMs, ended.signal);
       if (result.kind === 'ended' || this.current !== session) return;
       if (result.kind !== 'ok') throw new Error(result.kind === 'timeout' ? 'Language server startup timed out' : result.reason);
       session.requests = advertisedRequests(result.value);
+      session.initializeResult = result.value;
       this.setState({ kind: 'connected' });
     } catch (error: unknown) {
       const reason = error instanceof Error ? error.message : 'Language server failed to start';

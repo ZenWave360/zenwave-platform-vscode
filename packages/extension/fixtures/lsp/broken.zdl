@@ -1,0 +1,6 @@
+entity Customer {
+    name String required
+}
+
+aggregate CustomerAggregate(MissingEntity) {
+}

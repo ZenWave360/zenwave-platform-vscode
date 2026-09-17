@@ -1,0 +1,10 @@
+{
+  "request": {
+    "method": "zenwave/hierarchy",
+    "params": {}
+  },
+  "error": {
+    "code": -32602,
+    "message": "uri is required"
+  }
+}

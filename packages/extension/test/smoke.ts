@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { SHIPPED_CATALOGUE } from '../src/sdk/catalogue.js';
 import { LspSupervisor } from '../src/lsp/supervisor.js';
+import type { ZenwaveExtensionApi } from '../src/activate.js';
+import type { LanguageServerApi } from '../src/lsp/feature.js';
+import { documentFailure } from '../src/lsp/requests.js';
 
 const EXTENSION_ID = 'ZenWave360.zenwave-platform';
 
@@ -51,6 +54,178 @@ async function bounded<T>(promise: PromiseLike<T>, message: string): Promise<T> 
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+async function waitFor<T>(probe: () => T | undefined | false | Promise<T | undefined | false>, message: string, ms = 90000): Promise<T> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = await probe();
+    if (value !== undefined && value !== false) return value;
+    if (Date.now() > deadline) throw new Error(message);
+    await delay(250);
+  }
+}
+
+function hoverText(hovers: vscode.Hover[] | undefined): string {
+  return (hovers ?? []).flatMap((hover) => hover.contents)
+    .map((content) => typeof content === 'string' ? content : content.value).join('\n');
+}
+
+async function serverHover(uri: vscode.Uri, position: vscode.Position): Promise<string> {
+  return waitFor(async () => {
+    const text = hoverText(await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', uri, position));
+    return text.trim().length > 0 ? text : undefined;
+  }, `No hover from the language server for ${uri.toString()}`, 30000);
+}
+
+async function connected(api: LanguageServerApi, message: string): Promise<void> {
+  await api.settled();
+  await waitFor(() => api.status.kind === 'connected' || api.status.kind === 'failed' || api.status.kind === 'no-server',
+    `${message}: language server did not settle`);
+  assert(api.status.kind === 'connected', `${message}: ${JSON.stringify(api.status)}`);
+}
+
+const EXPECTED_REQUESTS = ['zenwave/hierarchy', 'zenwave/forwardReferences', 'zenwave/reverseReferences',
+  'zenwave/organizeZflServices', 'zenwave/eventFlowViews', 'zenwave/preview', 'zenwave/symbolAt'];
+
+/** The real @zenwave360/lsp-js server, over IPC on the desktop and in a Web Worker in the browser. */
+async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Promise<void> {
+  assert(api.transport === (desktop ? 'ipc' : 'worker'), `Expected ${desktop ? 'ipc' : 'worker'} transport, got ${api.transport}`);
+  await connected(api, 'Initial start');
+  assert(api.serverInfo?.name === 'zenwave-lsp', `Unexpected server ${JSON.stringify(api.serverInfo)}`);
+  for (const method of EXPECTED_REQUESTS) {
+    assert(api.advertisedRequests.includes(method), `Server did not advertise ${method}: ${api.advertisedRequests.join(', ')}`);
+  }
+  assert(api.manifest.route === 'config' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml') &&
+    api.manifest.configUri?.endsWith('/.zenwave/config.yml'), `Manifest not resolved from .zenwave/config.yml: ${JSON.stringify(api.manifest)}`);
+  console.log(`PASS: ${api.transport} server connected, customRequests discovered, manifest resolved from .zenwave/config.yml`);
+
+  const broken = await vscode.workspace.openTextDocument(await fixture('lsp/broken.zdl'));
+  await vscode.window.showTextDocument(broken);
+  const diagnostics = await waitFor(() => {
+    const found = vscode.languages.getDiagnostics(broken.uri);
+    return found.length > 0 ? found : undefined;
+  }, 'No diagnostics from the language server for an aggregate of an unknown entity');
+  assert(diagnostics[0]!.range.start.line >= 0, 'Diagnostic has no location');
+  const orders = await vscode.workspace.openTextDocument(await fixture('lsp/orders.zdl'));
+  await vscode.window.showTextDocument(orders);
+  await serverHover(orders.uri, new vscode.Position(5, 15));
+  const definitions = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+    'vscode.executeDefinitionProvider', orders.uri, new vscode.Position(5, 15));
+  const target = definitions?.[0];
+  const targetRange = target && ('targetRange' in target ? target.targetRange : target.range);
+  assert(targetRange?.start.line === 0, `Go to Definition did not reach entity Customer: ${JSON.stringify(definitions)}`);
+  console.log(`PASS: diagnostic (${diagnostics[0]!.message}), hover and Go to Definition from the real server`);
+
+  const manifestDocument = await vscode.workspace.openTextDocument(await fixture('zenwave-architecture.yml'));
+  await vscode.window.showTextDocument(manifestDocument);
+  const manifestHover = await serverHover(manifestDocument.uri, new vscode.Position(1, 4));
+  assert(manifestHover.includes('###'), `Manifest hover is not the server's: ${manifestHover}`);
+  const unrelated = await vscode.workspace.openTextDocument(await fixture('modules/orders/modules/orders/src/main/resources/apis/openapi.yml'));
+  await vscode.window.showTextDocument(unrelated);
+  await delay(1000);
+  const unrelatedHover = hoverText(await vscode.commands.executeCommand<vscode.Hover[]>(
+    'vscode.executeHoverProvider', unrelated.uri, new vscode.Position(2, 4)));
+  assert(unrelatedHover.trim() === '', `Unrelated YAML was served: ${unrelatedHover}`);
+  console.log('PASS: the resolved manifest is served by URI and unrelated YAML is not');
+
+  const checkout = await vscode.workspace.openTextDocument(await fixture('lsp/checkout.zfl'));
+  await vscode.window.showTextDocument(checkout);
+  const uri = checkout.uri.toString();
+  const preview = await waitFor(async () => {
+    const result = await api.requests.preview(uri);
+    return result.kind === 'ok' ? result.value : undefined;
+  }, 'zenwave/preview did not answer for the open flow', 30000);
+  assert(preview.representations.some((item) => item.id === preview.defaultRepresentationId && item.format === 'MERMAID'),
+    'Preview has no default Mermaid representation');
+  const views = await api.requests.eventFlowViews(uri);
+  assert(views.kind === 'ok' && views.value.flowGraph.schema === 'zfl.eventflow.view@1' &&
+    views.value.serviceGraph.schema === 'zfl.services.view@1', `eventFlowViews: ${JSON.stringify(views).slice(0, 300)}`);
+  const symbol = await api.requests.symbolAt(uri, { line: 14, character: 30 });
+  assert(symbol.kind === 'ok' && symbol.value?.semanticId.endsWith('#flows.CheckoutFlow.commands.createOrder'),
+    `symbolAt: ${JSON.stringify(symbol)}`);
+  const forward = await api.requests.forwardReferences(symbol.value!.uri, symbol.value!.semanticId);
+  assert(forward.kind === 'ok', `forwardReferences: ${JSON.stringify(forward)}`);
+  const reverse = await api.requests.reverseReferences(symbol.value!.uri, symbol.value!.semanticId);
+  assert(reverse.kind === 'ok', `reverseReferences: ${JSON.stringify(reverse)}`);
+  const hierarchy = await api.requests.hierarchy(uri);
+  assert(hierarchy.kind === 'ok' && hierarchy.value.length > 0, `hierarchy: ${JSON.stringify(hierarchy).slice(0, 300)}`);
+  const organized = await api.requests.organizeZflServices(uri);
+  assert(organized.kind === 'ok', `organizeZflServices: ${JSON.stringify(organized)}`);
+  const unopened = await api.requests.hierarchy((await fixture('lsp/orders/model.zdl')).toString());
+  if (desktop) {
+    assert(unopened.kind === 'ok' && unopened.value.length > 0, `hierarchy of an unopened file: ${JSON.stringify(unopened).slice(0, 300)}`);
+  } else {
+    // A worker server cannot read editor-owned schemes it was not sent (zenwave-lsp d7156e7).
+    assert(documentFailure(unopened)?.kind === 'documentNotFound', `worker hierarchy of an unopened document: ${JSON.stringify(unopened)}`);
+  }
+  const unsupported = await api.request('zenwave/workspaceStatus', {});
+  assert(unsupported.kind === 'unsupported', `Unadvertised request: ${JSON.stringify(unsupported)}`);
+  const notOpen = await api.requests.preview(`${uri.slice(0, uri.lastIndexOf('/'))}/never-opened.zfl`);
+  assert(documentFailure(notOpen)?.kind === 'documentNotFound', `preview of an unopened flow: ${JSON.stringify(notOpen)}`);
+  console.log('PASS: typed wrappers for all seven zenwave/* requests over the real wire; unsupported and documentNotFound distinguishable');
+
+  const refused = await api.answerCredential({ uri: 'https://github.com.attacker.example/x', origin: 'https://github.com.attacker.example', attempt: 'initial' });
+  assert(refused === null, 'A credential was released to an unauthorised origin');
+  console.log('PASS: credential request for an unauthorised origin refused');
+
+  let changes = 0;
+  const subscription = api.onDidChange(() => { changes++; });
+  try {
+    await vscode.commands.executeCommand('zenwave.lsp.restart');
+    await connected(api, 'Restart');
+    assert(changes > 0, 'Restart did not signal a change');
+    const again = await api.requests.preview(uri);
+    assert(again.kind === 'ok', `Request after restart: ${JSON.stringify(again).slice(0, 300)}`);
+  } finally {
+    subscription.dispose();
+  }
+  console.log('PASS: zenwave.lsp.restart reconnects and requests work again');
+}
+
+/** Desktop only: it edits workspace settings, which the browser host would write into the fixtures on disk. */
+async function languageServerSettings(api: LanguageServerApi): Promise<void> {
+  const workspace = vscode.workspace.getConfiguration('zenwave');
+  const alternative = vscode.Uri.joinPath(await fixture('lsp'), 'alternative-architecture.yml');
+  await vscode.workspace.fs.writeFile(alternative, new TextEncoder().encode('domains:\n  billing:\n    services: {}\n'));
+  try {
+    await workspace.update('lsp.trace.server', 'messages', vscode.ConfigurationTarget.Workspace);
+    await workspace.update('workspace.manifest', 'lsp/alternative-architecture.yml', vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.manifest.route === 'setting' && api.manifest.manifestUri?.endsWith('/lsp/alternative-architecture.yml'),
+      `Setting did not take over manifest resolution: ${JSON.stringify(api.manifest)}`);
+    await connected(api, 'Restart with the configured manifest');
+    const document = await vscode.workspace.openTextDocument(alternative);
+    await vscode.window.showTextDocument(document);
+    assert((await serverHover(alternative, new vscode.Position(1, 4))).includes('###'), 'Configured manifest is not served');
+    // A change to the manifest file reaches the server as workspace/didChangeWatchedFiles (the runner checks the trace).
+    await vscode.workspace.fs.writeFile(alternative, new TextEncoder().encode('domains:\n  billing:\n    services: {}\n  shipping:\n    services: {}\n'));
+    await delay(3000);
+    console.log('PASS: zenwave.workspace.manifest is authoritative and the server is re-initialised without a reload');
+
+    await workspace.update('lsp.serverPath', 'no-such-server.js', vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.status.kind === 'failed' ? api.status : undefined, `A missing server did not fail: ${JSON.stringify(api.status)}`);
+    assert('reason' in api.status && api.status.reason.includes('not a file'), `Failure reason: ${JSON.stringify(api.status)}`);
+    const stillEditing = await vscode.workspace.openTextDocument(await fixture('lsp/orders.zdl'));
+    assert(stillEditing.languageId === 'zdl', 'Editor lost the language without a server');
+    assert((await api.requests.hierarchy(stillEditing.uri.toString())).kind === 'no-server', 'Requests must report no-server');
+    await workspace.update('lsp.serverPath', undefined, vscode.ConfigurationTarget.Workspace);
+    await connected(api, 'Back to the shipped server');
+
+    await workspace.update('lsp.enabled', false, vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.status.kind === 'disabled', 'zenwave.lsp.enabled=false did not stop the server');
+    await api.settled();
+    assert(api.state.kind === 'unavailable', `Disabled server still ${api.state.kind}`);
+    await workspace.update('lsp.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+    await connected(api, 'Re-enabled');
+    console.log('PASS: an invalid serverPath fails once with its reason, and zenwave.lsp.enabled turns the server off and on');
+  } finally {
+    await workspace.update('workspace.manifest', undefined, vscode.ConfigurationTarget.Workspace);
+    await workspace.update('lsp.serverPath', undefined, vscode.ConfigurationTarget.Workspace);
+    await workspace.update('lsp.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+    await workspace.update('lsp.trace.server', undefined, vscode.ConfigurationTarget.Workspace);
+  }
+  await waitFor(() => api.manifest.route === 'config', 'Manifest resolution did not return to .zenwave/config.yml');
+  await connected(api, 'Restored configuration');
 }
 
 async function authoring(): Promise<void> {
@@ -192,6 +367,10 @@ export async function run(): Promise<void> {
   await extension.activate();
   assert(extension.isActive, `${EXTENSION_ID} did not activate`);
   await sharedLspFoundation();
+  const api = (extension.exports as ZenwaveExtensionApi).languageServer;
+  const desktop = vscode.env.uiKind === vscode.UIKind.Desktop;
+  await realLanguageServer(api, desktop);
+  if (desktop) await languageServerSettings(api);
 
   const document = await vscode.workspace.openTextDocument(await fixture('complete.zdl'));
   assert(document.languageId === 'zdl', `Expected zdl language id, got ${document.languageId}`);
@@ -205,7 +384,6 @@ export async function run(): Promise<void> {
     'vscode.executeCodeLensProvider', plugins.uri,
   );
   const sdkLenses = (lenses ?? []).filter((lens) => lens.command?.command === 'zenwave.sdk.run');
-  const desktop = vscode.env.uiKind === vscode.UIKind.Desktop;
   assert(sdkLenses.length === (desktop ? 2 : 0), `Expected ${desktop ? 2 : 0} SDK lenses, got ${sdkLenses.length}`);
   if (desktop) {
     assert(sdkLenses.map((lens) => (lens.command?.arguments?.[0] as { plugin: string }).plugin)

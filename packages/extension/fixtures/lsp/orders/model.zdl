@@ -1,0 +1,7 @@
+entity Order {
+    total Integer
+}
+
+service OrderService for (Order) {
+    createOrder(Order) Order
+}

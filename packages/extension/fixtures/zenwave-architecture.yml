@@ -1,0 +1,5 @@
+domains:
+  orders:
+    services:
+      orders-api:
+        repository: "file:///workspace/orders-api"

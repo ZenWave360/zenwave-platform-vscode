@@ -5,10 +5,22 @@ import {
   type HostCapabilities,
 } from './host/capabilities.js';
 import { Logger } from './host/logger.js';
+import type { LanguageServerHost } from './lsp/client.js';
+import { registerLanguageServer, type LanguageServerApi } from './lsp/feature.js';
 import { registerSdkFeature } from './sdk/feature.js';
 import type { SdkProcessService } from './sdk/host.js';
 
 declare const __ZENWAVE_BUILD_COMMIT__: string;
+
+/** What the extension returns from `activate`: the shared language server connection. */
+export interface ZenwaveExtensionApi {
+  readonly languageServer: LanguageServerApi;
+}
+
+export interface HostServices {
+  readonly sdkProcess?: SdkProcessService;
+  readonly languageServer?: LanguageServerHost;
+}
 
 /**
  * Host-agnostic activation.
@@ -19,8 +31,8 @@ declare const __ZENWAVE_BUILD_COMMIT__: string;
 export function activate(
   context: vscode.ExtensionContext,
   capabilities: HostCapabilities,
-  sdkProcess?: SdkProcessService,
-): void {
+  services: HostServices = {},
+): ZenwaveExtensionApi {
   const logger = new Logger();
   context.subscriptions.push(logger);
 
@@ -34,7 +46,14 @@ export function activate(
     vscode.commands.registerCommand('zenwave.showOutput', () => logger.show()),
   );
 
-  registerSdkFeature(context, capabilities, logger, sdkProcess);
+  registerSdkFeature(context, capabilities, logger, services.sdkProcess);
+  const languageServer = registerLanguageServer(
+    context,
+    capabilities,
+    logger,
+    capabilities.languageServer === 'none' ? undefined : services.languageServer,
+  );
+  return { languageServer };
 }
 
 /**

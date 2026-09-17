@@ -39,15 +39,24 @@
   ],
   "main": "./dist/node/extension.js",
   "browser": "./dist/browser/extension.js",
+  "zenwaveLanguageServer": {
+    "package": "@zenwave360/lsp-js",
+    "version": "0.1.0-SNAPSHOT"
+  },
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Running ZenWave SDK code generation executes a command line tool from the workspace and is disabled in restricted mode. Syntax highlighting and previews work normally."
+      "description": "In Restricted Mode ZenWave starts no language server, resolves no model content and asks for no credentials, and ZenWave SDK code generation is disabled. Syntax highlighting and editing work normally. Trusting the workspace enables the rest without a reload.",
+      "restrictedConfigurations": [
+        "zenwave.lsp.serverPath",
+        "zenwave.workspace.manifest"
+      ]
     }
   },
   "activationEvents": [
     "onLanguage:zdl",
-    "onLanguage:zfl"
+    "onLanguage:zfl",
+    "workspaceContains:.zenwave/config.yml"
   ],
   "contributes": {
     "languages": [
@@ -107,6 +116,26 @@
         "command": "zenwave.sdk.run",
         "title": "Run SDK Plugin",
         "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.lsp.restart",
+        "title": "Restart Language Server",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.lsp.showStatus",
+        "title": "Show Language Server Status",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.credentials.record",
+        "title": "Record Credential",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.credentials.clear",
+        "title": "Clear Stored Credential",
+        "category": "ZenWave"
       }
     ],
     "menus": {
@@ -117,6 +146,19 @@
         {
           "command": "zenwave.sdk.run",
           "when": "false"
+        },
+        {
+          "command": "zenwave.lsp.restart"
+        },
+        {
+          "command": "zenwave.lsp.showStatus"
+        },
+        {
+          "command": "zenwave.credentials.record",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "zenwave.credentials.clear"
         }
       ]
     },
@@ -186,6 +228,91 @@
           "default": "",
           "scope": "resource",
           "description": "Optional shell executable used when zenwave.sdk.environment is loginShell. When empty, ZenWave uses VS Code's preferred terminal shell."
+        },
+        "zenwave.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Start the ZenWave language server for ZDL, ZFL and the architecture manifest. When off, the editor behaves as it does on a host with no server."
+        },
+        "zenwave.lsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Path to a locally built @zenwave360/lsp-js Node entry point (dist/node/zenwave-lsp-server.js) to run instead of the server shipped with the extension. Desktop only; relative paths resolve against the first workspace folder. Run \"ZenWave: Restart Language Server\" after changing it."
+        },
+        "zenwave.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "scope": "window",
+          "description": "Log the protocol exchange with the ZenWave language server to the ZenWave output channel."
+        },
+        "zenwave.workspace.manifest": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "The architecture manifest for this workspace, relative to the workspace folder or absolute. When set it is used as-is and nothing is searched for; otherwise project-manifest in .zenwave/config.yml at a workspace folder root is used."
+        },
+        "zenwave.credentials.origins": {
+          "type": "array",
+          "scope": "application",
+          "markdownDescription": "Origins (`scheme://host[:port]`) the language server may be given a credential for, and how. A credential is released only to an origin listed here, compared exactly. `source` `github` uses your VS Code GitHub sign-in; `stored` uses a secret recorded with **ZenWave: Record Credential** (kept in the OS keychain, never in settings). User settings only.",
+          "default": [
+            {
+              "origin": "https://github.com",
+              "source": "github"
+            },
+            {
+              "origin": "https://raw.githubusercontent.com",
+              "source": "github"
+            },
+            {
+              "origin": "https://api.github.com",
+              "source": "github"
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "origin"
+            ],
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "scheme://host[:port], nothing else."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "github",
+                  "stored"
+                ],
+                "default": "stored"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "HEADER",
+                  "QUERY"
+                ],
+                "default": "HEADER"
+              },
+              "key": {
+                "type": "string",
+                "default": "Authorization",
+                "description": "Header or query parameter name."
+              },
+              "valuePrefix": {
+                "type": "string",
+                "description": "Text put before the secret, e.g. \"Bearer \". Defaults to \"Bearer \" for GitHub sign-ins in the Authorization header."
+              }
+            }
+          }
         }
       }
     }
@@ -213,6 +340,7 @@
     "tsx": "^4.23.13"
   },
   "dependencies": {
-    "@zenwave360/dsl": "1.9.0-SNAPSHOT"
+    "@zenwave360/dsl": "1.9.0-SNAPSHOT",
+    "vscode-languageclient": "9.0.1"
   }
 }

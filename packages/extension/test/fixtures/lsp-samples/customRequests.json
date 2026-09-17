@@ -1,0 +1,9 @@
+[
+  "zenwave/hierarchy",
+  "zenwave/forwardReferences",
+  "zenwave/reverseReferences",
+  "zenwave/organizeZflServices",
+  "zenwave/eventFlowViews",
+  "zenwave/preview",
+  "zenwave/symbolAt"
+]

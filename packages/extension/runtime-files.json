@@ -4,6 +4,8 @@
     "dist/node/extension.js",
     "dist/browser/extension.js",
     "dist/build-info.json",
+    "dist/server/node/zenwave-lsp-server.js",
+    "dist/server/browser/zenwave-lsp-worker.js",
     "resources/sdk-plugin-catalogue.json",
     "resources/zdl-file-icon.png",
     "resources/zdl-file-icon.svg",

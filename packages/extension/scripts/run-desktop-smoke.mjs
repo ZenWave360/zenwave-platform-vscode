@@ -71,6 +71,19 @@ try {
     throw new Error(`Expected unsupported-shell and missing-executable diagnostics in ${userData}/logs`);
   }
   console.log('PASS: refusals report shell guidance and executable/PATH diagnostics');
+  for (const [expected, what] of [
+    ['language server: ipc (Node child process)', 'the chosen transport at activation'],
+    ['Architecture manifest: ', 'which manifest was resolved'],
+    ['from the zenwave.workspace.manifest setting', 'the setting route'],
+    ['Language server connected: zenwave-lsp', 'that the server started'],
+    ['zenwave.lsp.serverPath names', 'why a configured server could not start'],
+    ["Sending request 'textDocument/hover", 'the protocol trace with zenwave.lsp.trace.server'],
+    ["Sending notification 'workspace/didChangeWatchedFiles'", 'the manifest change notified to the server'],
+    ['Credential request for https://github.com.attacker.example/x refused', 'the credential refusal'],
+  ]) {
+    if (!logs.includes(expected)) throw new Error(`The ZenWave output channel does not record ${what} ("${expected}")`);
+  }
+  console.log('PASS: output channel records transport, manifest route, server lifecycle, protocol trace and refusals');
   // Check the absolute deletion target is a child of this runner's test root.
   const relative = path.relative(path.resolve(testRoot), path.resolve(isolated));
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unsafe cleanup path');
