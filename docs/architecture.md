@@ -54,6 +54,7 @@ src/lsp/manifest*.ts   setting → .zenwave/config.yml → none, through vscode.
 src/lsp/credential*.ts origin-matched answers to zenwave/credential
 src/model/actions.ts   editor commands over zenwave/* requests (references, organize)
 src/model/navigation.ts opens server locations (uri + range) the editor's way
+src/explorer/*          Architecture and Model trees over zenwave/hierarchy; DiagramPanels seam for 004
 ```
 
 Shared code imports only *types* from `vscode-languageclient`: its bare entry is

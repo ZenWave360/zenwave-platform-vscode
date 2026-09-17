@@ -1,0 +1,9 @@
+entity OrderCheckout {
+    status String
+}
+
+service OrdersCheckoutService for (OrderCheckout) {
+    startOrderCheckout(OrderCheckout) OrderCheckout
+    confirmOrder(id) OrderCheckout
+    cancelOrder(id) OrderCheckout
+}

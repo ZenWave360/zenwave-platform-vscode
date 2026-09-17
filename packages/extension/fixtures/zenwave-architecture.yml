@@ -3,3 +3,9 @@ domains:
     services:
       orders-api:
         repository: "file:///workspace/orders-api"
+  fulfillment:
+    subdomains:
+      shipping:
+        services:
+          shipping-api:
+            repository: "file:///workspace/shipping-api"

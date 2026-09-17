@@ -6,6 +6,7 @@ import {
 } from './host/capabilities.js';
 import { Logger } from './host/logger.js';
 import type { LanguageServerHost } from './lsp/client.js';
+import { registerModelExplorer, type ModelExplorerApi } from './explorer/feature.js';
 import { registerLanguageServer, type LanguageServerApi } from './lsp/feature.js';
 import { registerModelActions } from './model/actions.js';
 import { registerSdkFeature } from './sdk/feature.js';
@@ -13,9 +14,10 @@ import type { SdkProcessService } from './sdk/host.js';
 
 declare const __ZENWAVE_BUILD_COMMIT__: string;
 
-/** What the extension returns from `activate`: the shared language server connection. */
+/** What the extension returns from `activate`: the shared language server connection and the explorer trees. */
 export interface ZenwaveExtensionApi {
   readonly languageServer: LanguageServerApi;
+  readonly explorer: ModelExplorerApi;
 }
 
 export interface HostServices {
@@ -55,7 +57,8 @@ export function activate(
     capabilities.languageServer === 'none' ? undefined : services.languageServer,
   );
   registerModelActions(context, languageServer, logger);
-  return { languageServer };
+  const explorer = registerModelExplorer(context, languageServer, logger);
+  return { languageServer, explorer };
 }
 
 /**

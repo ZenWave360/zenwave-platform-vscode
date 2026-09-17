@@ -80,6 +80,9 @@ try {
     ["Sending request 'textDocument/hover", 'the protocol trace with zenwave.lsp.trace.server'],
     ["Sending notification 'workspace/didChangeWatchedFiles'", 'the manifest change notified to the server'],
     ['Credential request for https://github.com.attacker.example/x refused', 'the credential refusal'],
+    ['Architecture tree: ', 'what the architecture tree shows'],
+    ['Architecture tree is empty: no architecture manifest was resolved', 'why the architecture tree is empty without a manifest'],
+    ['Model tree is empty: it needs the ZenWave language server', 'why the model tree is empty without a server'],
   ]) {
     if (!logs.includes(expected)) throw new Error(`The ZenWave output channel does not record ${what} ("${expected}")`);
   }

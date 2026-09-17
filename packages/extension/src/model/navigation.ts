@@ -24,12 +24,16 @@ export function toLocation(target: ServerLocation): vscode.Location {
   return new vscode.Location(vscode.Uri.parse(target.uri), range);
 }
 
-/** Opens a location with its start selected, in a regular (non-preview-replacing) way. */
-export async function openLocation(location: vscode.Location): Promise<vscode.TextEditor> {
+/**
+ * Opens a location with its start selected, in a preview tab. `preserveFocus`
+ * keeps the keyboard where the user was, as a tree does when it navigates.
+ */
+export async function openLocation(location: vscode.Location, options: { readonly preserveFocus?: boolean } = {}): Promise<vscode.TextEditor> {
   const document = await vscode.workspace.openTextDocument(location.uri);
   return vscode.window.showTextDocument(document, {
     selection: new vscode.Range(location.range.start, location.range.start),
     preview: true,
+    ...(options.preserveFocus ? { preserveFocus: true } : {}),
   });
 }
 

@@ -5,6 +5,8 @@ import type { ZenwaveExtensionApi } from '../src/activate.js';
 import type { LanguageServerApi } from '../src/lsp/feature.js';
 import { documentFailure } from '../src/lsp/requests.js';
 import type { OrganizeOutcome, ReferencesOutcome } from '../src/model/actions.js';
+import type { HierarchyTreeApi, ModelExplorerApi, OpenRelatedOutcome } from '../src/explorer/feature.js';
+import { findNode, type ExplorerNode } from '../src/explorer/hierarchy-model.js';
 
 const EXTENSION_ID = 'ZenWave360.zenwave-platform';
 
@@ -307,6 +309,268 @@ async function modelActionsOnDisk(api: LanguageServerApi): Promise<void> {
   await connected(api, 'Re-enabled after model actions');
 }
 
+const EXPLORER_COMMANDS = ['zenwave.explorer.refresh', 'zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.openManifest'];
+
+const labels = (nodes: readonly ExplorerNode[] | undefined): string[] => (nodes ?? []).map((item) => item.node.label);
+const roots = (tree: HierarchyTreeApi): ExplorerNode[] => (tree.tree?.roots ?? []) as ExplorerNode[];
+
+function node(tree: HierarchyTreeApi, label: string, kind: string): ExplorerNode | undefined {
+  return tree.tree && findNode(tree.tree, (candidate) => candidate.node.label === label && candidate.node.kind === kind);
+}
+
+async function treeState(tree: HierarchyTreeApi, kind: string, message: string, ms = 60000): Promise<void> {
+  await waitFor(() => tree.state.kind === kind, `${message}: ${JSON.stringify(tree.state)} for ${tree.documentUri}`, ms);
+  await tree.settled();
+  assert(tree.state.kind === kind, `${message}: ${JSON.stringify(tree.state)} for ${tree.documentUri}`);
+}
+
+function activeTabUri(): string | undefined {
+  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+  return input instanceof vscode.TabInputText ? input.uri.toString() : undefined;
+}
+
+/** 006, before any document is opened: the container exists and the architecture tree needs no editor. */
+async function explorerBeforeAnyDocument(api: LanguageServerApi, explorer: ModelExplorerApi, desktop: boolean): Promise<void> {
+  await connected(api, 'Explorer');
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  const commands = await vscode.commands.getCommands(true);
+  for (const command of EXPLORER_COMMANDS) assert(commands.includes(command), `${command} was not registered`);
+  await vscode.commands.executeCommand('workbench.view.extension.zenwave');
+  const { architecture, model } = explorer;
+  assert(vscode.window.tabGroups.all.every((group) => group.tabs.length === 0), 'An editor is open before the explorer check');
+
+  if (desktop) {
+    await treeState(architecture, 'ready', 'Architecture tree with no editor open');
+    const children = await architecture.provider.getChildren();
+    const manifest = children?.[0];
+    assert(manifest, 'No manifest root');
+    const item = await architecture.provider.getTreeItem(manifest);
+    assert(item.label === 'zenwave-architecture.yml', `Manifest root label: ${String(item.label)}`);
+    assert(labels(manifest.children).join() === 'orders,fulfillment', `Domains: ${labels(manifest.children)}`);
+    const shipping = node(architecture, 'shipping', 'subdomain');
+    assert(shipping?.parent?.node.label === 'fulfillment' && labels(shipping.children).join() === 'shipping-api',
+      `Subdomain under its domain: ${JSON.stringify(shipping?.node)}`);
+    assert(architecture.view.description === 'zenwave-architecture.yml', `Architecture description: ${architecture.view.description}`);
+    console.log('PASS: the ZenWave container shows the architecture manifest domains and subdomains with no editor open');
+  } else {
+    // A server in a Web Worker cannot read a vscode-test-web: document nobody opened (zenwave-lsp d7156e7):
+    // the tree says so, once, instead of rendering an empty box or retrying.
+    await treeState(architecture, 'not-found', 'Architecture tree in the browser for an unopened manifest');
+    assert(roots(architecture).length === 0, 'A not-found manifest must not render nodes');
+    const requests = architecture.stats.requests;
+    await delay(2000);
+    assert(architecture.stats.requests === requests && architecture.state.kind === 'not-found', 'The not-found state retried by itself');
+    assert(await vscode.commands.executeCommand<boolean>('zenwave.explorer.openManifest'), 'Open Architecture Manifest did nothing');
+    await treeState(architecture, 'ready', 'Architecture tree once the user opened the manifest');
+    assert(labels(roots(architecture)[0]?.children).join() === 'orders,fulfillment', `Domains after opening: ${labels(roots(architecture)[0]?.children)}`);
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    console.log('PASS: in the browser the architecture tree explains an unreadable manifest without retrying, and populates once the user opens it');
+  }
+  await treeState(model, 'no-model', 'Model tree with no model focused');
+  assert(roots(model).length === 0, 'Model tree has nodes with no model focused');
+  console.log('PASS: the model tree invites opening a model when none is focused');
+}
+
+/** 006 model tree against the real server, in both hosts. Writes nothing to disk. */
+async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi): Promise<void> {
+  await connected(api, 'Explorer trees');
+  const { model } = explorer;
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  const checkoutUri = await fixture('lsp/checkout.zfl');
+  const ordersZdl = await fixture('lsp/orders/model.zdl');
+  const checkout = checkoutUri.toString();
+  const zdl = ordersZdl.toString();
+  // Opened (not shown) so that a server in a browser, which cannot read files, has the ZDL models too.
+  await vscode.workspace.openTextDocument(ordersZdl);
+  await vscode.workspace.openTextDocument(await fixture('orders-checkout-api/domain-model.zdl'));
+  const checkoutDocument = await vscode.workspace.openTextDocument(checkoutUri);
+  await vscode.window.showTextDocument(checkoutDocument);
+  await waitFor(() => model.documentUri === checkout && node(model, 'Orders', 'system')?.node.sourceUri === zdl,
+    `Model tree for checkout.zfl with Orders declared in the ZDL: ${JSON.stringify(model.state)} ${model.documentUri}`);
+  await treeState(model, 'ready', 'Model tree for checkout.zfl');
+  assert(model.view.description === 'checkout.zfl', `Model tree does not name its document: ${model.view.description}`);
+  const orders = node(model, 'Orders', 'system')!;
+  const service = orders.children.find((child) => child.node.kind === 'service');
+  assert(service?.node.label === 'OrderService' && labels(service.children).join() === 'createOrder,notifyCustomer',
+    `Commands under their service: ${labels(service?.children)}`);
+  const ordersItem = await model.provider.getTreeItem(orders);
+  assert(ordersItem.description === 'model.zdl' && (ordersItem.iconPath as vscode.ThemeIcon).id === 'server-environment' &&
+    ordersItem.contextValue === 'zenwave.hierarchy.system.related', `Orders item: ${String(ordersItem.description)} ${(ordersItem.iconPath as vscode.ThemeIcon).id} ${ordersItem.contextValue}`);
+  console.log('PASS: model tree names checkout.zfl, shows the system declared in its @zdl model and each command under its service');
+
+  const placeOrderUri = await fixture('place-order-flow.zfl');
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(placeOrderUri));
+  await waitFor(() => model.documentUri === placeOrderUri.toString() && model.state.kind === 'ready' && node(model, 'OrdersCheckout', 'system') ? true : undefined,
+    `Model tree did not move to place-order-flow.zfl: ${model.documentUri} ${JSON.stringify(model.state)}`);
+  await model.settled();
+  const systems = roots(model).find((root) => root.node.kind === 'section' && root.node.label === 'systems');
+  assert(labels(systems?.children).join() === 'OrdersCheckout,CatalogInventory,PaymentsProcessing,FulfillmentShipping,NotificationsConsumer',
+    `place-order-flow systems: ${labels(systems?.children)}`);
+  const checkoutSystem = node(model, 'OrdersCheckout', 'system')!;
+  assert(checkoutSystem.node.sourceUri.endsWith('/orders-checkout-api/domain-model.zdl'), `OrdersCheckout declared in: ${checkoutSystem.node.sourceUri}`);
+  assert(labels(checkoutSystem.children[0]?.children).join() === 'startOrderCheckout,confirmOrder,cancelOrder',
+    `OrdersCheckoutService commands: ${labels(checkoutSystem.children[0]?.children)}`);
+  const payments = node(model, 'PaymentsProcessingService', 'service');
+  assert(labels(payments?.children).includes('authorizePayment') && labels(payments?.children).includes('retryPayment'),
+    `PaymentsProcessingService commands: ${labels(payments?.children)}`);
+  console.log('PASS: place-order-flow.zfl: five systems, one declared in its annotated ZDL, commands under their services');
+
+  // Not a model: the tree keeps the last model rather than emptying.
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(await fixture('README.md')));
+  const panel = vscode.window.createWebviewPanel('zenwave.smoke', 'Not a model', vscode.ViewColumn.Active, {});
+  await delay(1000);
+  await model.settled();
+  assert(model.documentUri === placeOrderUri.toString() && model.state.kind === 'ready' && roots(model).length > 0,
+    `A Markdown editor or a webview changed the model tree: ${model.documentUri} ${JSON.stringify(model.state)}`);
+  panel.dispose();
+  console.log('PASS: focusing a Markdown file or a webview keeps the last model on screen');
+
+  // Deliberately moving back to the flow retargets; drilling into its ZDL does not.
+  await vscode.window.showTextDocument(checkoutDocument);
+  await waitFor(() => model.documentUri === checkout && node(model, 'Orders', 'system')?.node.sourceUri === zdl, 'Model tree did not return to checkout.zfl');
+  await model.settled();
+  const opened = await vscode.commands.executeCommand<string>('zenwave.explorer.openNode', node(model, 'Orders', 'system'));
+  assert(opened === zdl, `Selecting a system opened ${opened}`);
+  await waitFor(() => activeTabUri() === zdl, 'The ZDL declaring Orders is not the active tab', 10000);
+  await delay(1000);
+  await model.settled();
+  assert(model.documentUri === checkout && node(model, 'Orders', 'system'), `Drilling into the ZDL retargeted the tree: ${model.documentUri}`);
+  const declared = node(model, 'OrderService', 'service')!;
+  assert(await vscode.commands.executeCommand<string>('zenwave.explorer.openNode', declared) === zdl, 'Selecting a service did not open its ZDL');
+  const zdlEditor = vscode.window.visibleTextEditors.find((editor) => editor.document.uri.toString() === zdl);
+  assert(zdlEditor?.selection.active.line === declared.node.sourceRange.start.line,
+    `Not at the declaration: ${JSON.stringify(zdlEditor?.selection.active)} vs ${JSON.stringify(declared.node.sourceRange)}`);
+  await delay(500);
+  await model.settled();
+  assert(model.documentUri === checkout, `Navigating inside the ZDL retargeted the tree: ${model.documentUri}`);
+  console.log('PASS: selecting a system opens the ZDL declaring it at the declaration, and the tree keeps showing the flow');
+
+  const related = node(model, 'Orders', 'system')!;
+  const back = related.node.relatedResources.findIndex((resource) => resource.relationType === 'referenced-by');
+  const toFlow = await vscode.commands.executeCommand<OpenRelatedOutcome>('zenwave.explorer.openRelated', related, back);
+  assert(toFlow.kind === 'opened' && toFlow.uri === checkout, `referenced-by related resource: ${JSON.stringify(toFlow)}`);
+  const domain = related.node.relatedResources.findIndex((resource) => resource.relationType === 'declares-domain');
+  const toZdl = await vscode.commands.executeCommand<OpenRelatedOutcome>('zenwave.explorer.openRelated', related, domain);
+  assert(toZdl.kind === 'opened' && toZdl.uri === zdl, `declares-domain related resource: ${JSON.stringify(toZdl)}`);
+  const none = await vscode.commands.executeCommand<OpenRelatedOutcome>('zenwave.explorer.openRelated', node(model, 'CheckoutFlow', 'flow'));
+  assert(none.kind === 'none', `A node without related resources: ${JSON.stringify(none)}`);
+  console.log('PASS: related resources open from a node in both directions; a node without any says so');
+
+  // Cursor to tree, and tree selection to an open diagram through the registry 004 fills (a fake panel here).
+  const highlighted: (string | null)[] = [];
+  const registration = explorer.diagramPanels.register(checkout, { highlightNode: (id) => { highlighted.push(id); } });
+  try {
+    await vscode.commands.executeCommand('zenwave.model.focus');
+    const editor = await vscode.window.showTextDocument(checkoutDocument);
+    await waitFor(() => model.view.visible && model.documentUri === checkout, 'Model view not visible');
+    await model.settled();
+    editor.selection = new vscode.Selection(21, 8, 21, 8);
+    await waitFor(() => model.view.selection[0]?.node.kind === 'policy' && model.view.selection[0].node.label === 'OrderCreated',
+      `The cursor in a when block did not reveal it: ${model.view.selection[0]?.node.label}`, 15000);
+    await waitFor(() => highlighted.includes('policy:OrderCreated:notifyCustomer'), `Tree selection did not reach the diagram panel: ${highlighted}`, 10000);
+    editor.selection = new vscode.Selection(11, 2, 11, 2);
+    await waitFor(() => model.view.selection[0]?.node.kind === 'start', `The cursor in a start did not reveal it: ${model.view.selection[0]?.node.label}`, 15000);
+    await waitFor(() => highlighted.includes('event:CheckoutStarted'), `Second selection did not reach the diagram panel: ${highlighted}`, 10000);
+    assert(model.lastReflection === 'highlighted', `Reflection: ${model.lastReflection}`);
+  } finally {
+    registration.dispose();
+  }
+  console.log('PASS: moving the cursor reveals the declaration in the tree, and the selection is sent to a diagram registered for the document');
+
+  // Typing: the largest flow fixture, many edits in quick succession, few requests.
+  const typed = await vscode.workspace.openTextDocument({ language: 'zfl', content: (await vscode.workspace.openTextDocument(placeOrderUri)).getText() });
+  const typedEditor = await vscode.window.showTextDocument(typed);
+  await waitFor(() => model.documentUri === typed.uri.toString() && model.state.kind === 'ready', 'Model tree did not follow an untitled flow');
+  await model.settled();
+  const before = model.stats;
+  const end = typed.lineAt(40).range.end;
+  for (let key = 0; key < 60; key++) {
+    await typedEditor.edit((edit) => key % 2 === 0
+      ? edit.insert(end, 'x')
+      : edit.delete(new vscode.Range(end, end.translate(0, 1))));
+  }
+  await delay(100);
+  await model.settled();
+  const after = model.stats;
+  assert(after.requests - before.requests <= 2 && after.renders - before.renders <= 2 && model.state.kind === 'ready',
+    `60 edits caused ${after.requests - before.requests} hierarchy requests and ${after.renders - before.renders} tree updates`);
+  console.log(`PASS: 60 edits to a ${typed.lineCount}-line flow caused ${after.requests - before.requests} hierarchy request(s) and ${after.renders - before.renders} tree update(s)`);
+
+  const broken = await vscode.workspace.openTextDocument({ language: 'zfl', content: 'flow Broken {\n    when {{ do\n' });
+  await vscode.window.showTextDocument(broken);
+  await waitFor(() => vscode.languages.getDiagnostics(broken.uri).length > 0, 'No diagnostics for the broken flow', 30000);
+  // lsp-js d7156e7 answers a partial hierarchy for a flow with syntax errors rather than documentUnreadable
+  // (spec question in the client-006 handoff); the tree shows it and says the document has errors.
+  await waitFor(() => model.documentUri === broken.uri.toString() && model.tree?.documentUri === broken.uri.toString() &&
+    (model.state.kind === 'unreadable' || (model.view.message ?? '').includes('has ')) ? true : undefined,
+  'Model tree did not report the broken flow', 30000);
+  await model.settled();
+  const brokenState: string = model.state.kind;
+  assert(brokenState === 'unreadable' || /has \d+ errors?; its hierarchy may be incomplete/.test(model.view.message ?? ''),
+    `A flow with syntax errors: ${JSON.stringify(model.state)} ${model.view.message}`);
+  console.log(`PASS: a flow with syntax errors is reported (${brokenState}: ${model.view.message})`);
+  for (const document of [typed, broken]) {
+    await vscode.window.showTextDocument(document);
+    await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+  }
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+}
+
+/** Desktop only: edits the copied manifest and configuration, and stops the server. */
+async function explorerOnDisk(api: LanguageServerApi, explorer: ModelExplorerApi): Promise<void> {
+  const { architecture, model } = explorer;
+  await connected(api, 'Explorer on disk');
+  await treeState(architecture, 'ready', 'Architecture tree before editing the manifest');
+  const manifestUri = await fixture('zenwave-architecture.yml');
+  const original = await vscode.workspace.fs.readFile(manifestUri);
+  const text = new TextDecoder().decode(original);
+  try {
+    await vscode.workspace.fs.writeFile(manifestUri, new TextEncoder().encode(`${text}  billing:\n    services:\n      billing-api:\n        repository: "file:///workspace/billing-api"\n`));
+    await waitFor(() => labels(roots(architecture)[0]?.children).includes('billing'), `A domain added to the manifest on disk did not appear: ${labels(roots(architecture)[0]?.children)}`, 30000);
+  } finally {
+    await vscode.workspace.fs.writeFile(manifestUri, original);
+  }
+  await waitFor(() => !labels(roots(architecture)[0]?.children).includes('billing'), 'The restored manifest still shows billing', 30000);
+  console.log('PASS: saving a domain into the manifest shows it in the architecture tree, and removing it removes it');
+
+  const checkout = await vscode.workspace.openTextDocument(await fixture('lsp/checkout.zfl'));
+  await vscode.window.showTextDocument(checkout);
+  await waitFor(() => model.documentUri === checkout.uri.toString(), 'Model tree did not follow checkout.zfl');
+  await treeState(model, 'ready', 'Model tree before stopping the server');
+  const settings = vscode.workspace.getConfiguration('zenwave');
+  try {
+    await settings.update('lsp.enabled', false, vscode.ConfigurationTarget.Workspace);
+    await treeState(architecture, 'no-server', 'Architecture tree with the server stopped');
+    await treeState(model, 'no-server', 'Model tree with the server stopped');
+    assert(roots(architecture).length === 0 && roots(model).length === 0, 'Trees keep nodes with the server stopped');
+  } finally {
+    await settings.update('lsp.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+  }
+  await connected(api, 'Re-enabled after the explorer check');
+  await treeState(architecture, 'ready', 'Architecture tree after the server restarted');
+  await treeState(model, 'ready', 'Model tree after the server restarted');
+  console.log('PASS: with the server stopped both trees say they need it, and repopulate when it returns');
+
+  const config = await fixture('.zenwave/config.yml');
+  const configText = await vscode.workspace.fs.readFile(config);
+  try {
+    await vscode.workspace.fs.delete(config);
+    await waitFor(() => api.manifest.route === 'none', `Deleting .zenwave/config.yml did not unresolve the manifest: ${JSON.stringify(api.manifest)}`);
+    await connected(api, 'Restarted without a manifest');
+    await treeState(architecture, 'no-manifest', 'Architecture tree without a manifest');
+    assert(roots(architecture).length === 0, 'Architecture tree has nodes without a manifest');
+    await treeState(model, 'ready', 'Model tree without a manifest');
+    assert(model.documentUri === checkout.uri.toString() && node(model, 'Orders', 'system'), 'Model tree stopped working without a manifest');
+  } finally {
+    await vscode.workspace.fs.writeFile(config, configText);
+  }
+  await waitFor(() => api.manifest.route === 'config', 'Restored .zenwave/config.yml was not resolved');
+  await connected(api, 'Restarted with the manifest restored');
+  await treeState(architecture, 'ready', 'Architecture tree with the manifest restored');
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  console.log('PASS: without a manifest the architecture tree says so while the model tree keeps working');
+}
+
 /** Desktop only: it edits workspace settings, which the browser host would write into the fixtures on disk. */
 async function languageServerSettings(api: LanguageServerApi): Promise<void> {
   const workspace = vscode.workspace.getConfiguration('zenwave');
@@ -491,11 +755,14 @@ export async function run(): Promise<void> {
   await extension.activate();
   assert(extension.isActive, `${EXTENSION_ID} did not activate`);
   await sharedLspFoundation();
-  const api = (extension.exports as ZenwaveExtensionApi).languageServer;
+  const { languageServer: api, explorer } = extension.exports as ZenwaveExtensionApi;
   const desktop = vscode.env.uiKind === vscode.UIKind.Desktop;
+  await explorerBeforeAnyDocument(api, explorer, desktop);
   await realLanguageServer(api, desktop);
   await modelActions(api);
+  await explorerTrees(api, explorer);
   if (desktop) await modelActionsOnDisk(api);
+  if (desktop) await explorerOnDisk(api, explorer);
   if (desktop) await languageServerSettings(api);
 
   const document = await vscode.workspace.openTextDocument(await fixture('complete.zdl'));

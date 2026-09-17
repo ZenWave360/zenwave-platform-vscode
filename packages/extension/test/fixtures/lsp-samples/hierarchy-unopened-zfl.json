@@ -1,0 +1,538 @@
+{
+  "request": {
+    "method": "zenwave/hierarchy",
+    "params": {
+      "uri": "file:///workspace/checkout.zfl"
+    }
+  },
+  "result": [
+    {
+      "id": "file:///workspace/checkout.zfl#systems",
+      "label": "systems",
+      "kind": "section",
+      "language": "zfl",
+      "sourceUri": "file:///workspace/checkout.zfl",
+      "sourceRange": {
+        "start": {
+          "line": 0,
+          "character": 0
+        },
+        "end": {
+          "line": 7,
+          "character": 0
+        }
+      },
+      "children": [
+        {
+          "id": "file:///workspace/checkout.zfl#systems.Orders",
+          "label": "Orders",
+          "kind": "system",
+          "language": "zfl",
+          "sourceUri": "file:///workspace/orders/model.zdl",
+          "sourceRange": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 0,
+              "character": 0
+            }
+          },
+          "children": [
+            {
+              "id": "file:///workspace/checkout.zfl#systems.Orders.services.OrderService",
+              "label": "OrderService",
+              "kind": "service",
+              "language": "zfl",
+              "sourceUri": "file:///workspace/orders/model.zdl",
+              "sourceRange": {
+                "start": {
+                  "line": 4,
+                  "character": 0
+                },
+                "end": {
+                  "line": 6,
+                  "character": 0
+                }
+              },
+              "children": [
+                {
+                  "id": "file:///workspace/checkout.zfl#systems.Orders.services.OrderService.commands.createOrder",
+                  "label": "createOrder",
+                  "kind": "command",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/orders/model.zdl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 5,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 5,
+                      "character": 23
+                    }
+                  },
+                  "children": [],
+                  "relatedResources": [
+                    {
+                      "targetKind": "reference",
+                      "label": "createOrder",
+                      "uri": "file:///workspace/checkout.zfl",
+                      "range": {
+                        "start": {
+                          "line": 14,
+                          "character": 4
+                        },
+                        "end": {
+                          "line": 18,
+                          "character": 4
+                        }
+                      },
+                      "category": "zfl",
+                      "relationType": "referenced-by"
+                    }
+                  ],
+                  "uiHints": {
+                    "events": "OrderCreated,OrderRejected"
+                  },
+                  "viewNodeIds": [
+                    "command:createOrder"
+                  ]
+                },
+                {
+                  "id": "file:///workspace/checkout.zfl#systems.Orders.services.OrderService.commands.notifyCustomer",
+                  "label": "notifyCustomer",
+                  "kind": "command",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 20,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 23,
+                      "character": 4
+                    }
+                  },
+                  "children": [],
+                  "relatedResources": [],
+                  "uiHints": {
+                    "events": "CustomerNotified"
+                  },
+                  "viewNodeIds": [
+                    "command:notifyCustomer"
+                  ]
+                }
+              ],
+              "relatedResources": [
+                {
+                  "targetKind": "reference",
+                  "label": "OrderService",
+                  "uri": "file:///workspace/checkout.zfl",
+                  "range": {
+                    "start": {
+                      "line": 3,
+                      "character": 8
+                    },
+                    "end": {
+                      "line": 5,
+                      "character": 8
+                    }
+                  },
+                  "category": "zfl",
+                  "relationType": "referenced-by"
+                }
+              ],
+              "uiHints": {},
+              "viewNodeIds": [
+                "group:Orders>OrderService"
+              ]
+            }
+          ],
+          "relatedResources": [
+            {
+              "targetKind": "related",
+              "label": "model.zdl",
+              "uri": "file:///workspace/orders/model.zdl",
+              "category": "zdl",
+              "relationType": "declares-domain"
+            },
+            {
+              "targetKind": "reference",
+              "label": "Orders",
+              "uri": "file:///workspace/checkout.zfl",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "character": 4
+                },
+                "end": {
+                  "line": 6,
+                  "character": 4
+                }
+              },
+              "category": "zfl",
+              "relationType": "referenced-by"
+            }
+          ],
+          "uiHints": {},
+          "viewNodeIds": []
+        }
+      ],
+      "relatedResources": [],
+      "uiHints": {},
+      "viewNodeIds": []
+    },
+    {
+      "id": "file:///workspace/checkout.zfl#flows",
+      "label": "flows",
+      "kind": "section",
+      "language": "zfl",
+      "sourceUri": "file:///workspace/checkout.zfl",
+      "sourceRange": {
+        "start": {
+          "line": 9,
+          "character": 0
+        },
+        "end": {
+          "line": 29,
+          "character": 0
+        }
+      },
+      "children": [
+        {
+          "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow",
+          "label": "CheckoutFlow",
+          "kind": "flow",
+          "language": "zfl",
+          "sourceUri": "file:///workspace/checkout.zfl",
+          "sourceRange": {
+            "start": {
+              "line": 9,
+              "character": 0
+            },
+            "end": {
+              "line": 29,
+              "character": 0
+            }
+          },
+          "children": [
+            {
+              "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.starts.CheckoutStarted",
+              "label": "CheckoutStarted",
+              "kind": "start",
+              "language": "zfl",
+              "sourceUri": "file:///workspace/checkout.zfl",
+              "sourceRange": {
+                "start": {
+                  "line": 10,
+                  "character": 4
+                },
+                "end": {
+                  "line": 12,
+                  "character": 4
+                }
+              },
+              "children": [],
+              "relatedResources": [],
+              "uiHints": {},
+              "viewNodeIds": [
+                "event:CheckoutStarted"
+              ]
+            },
+            {
+              "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.whens[0]",
+              "label": "CheckoutStarted",
+              "kind": "policy",
+              "language": "zfl",
+              "sourceUri": "file:///workspace/checkout.zfl",
+              "sourceRange": {
+                "start": {
+                  "line": 14,
+                  "character": 4
+                },
+                "end": {
+                  "line": 18,
+                  "character": 4
+                }
+              },
+              "children": [
+                {
+                  "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.whens[0].service",
+                  "label": "Orders.OrderService",
+                  "kind": "service",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 14,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 18,
+                      "character": 4
+                    }
+                  },
+                  "children": [],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": [
+                    "group:Orders>OrderService"
+                  ]
+                },
+                {
+                  "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.whens[0].events.OrderCreated",
+                  "label": "OrderCreated",
+                  "kind": "event",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 14,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 18,
+                      "character": 4
+                    }
+                  },
+                  "children": [],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": [
+                    "event:OrderCreated",
+                    "event:OrderCreated@Orders>OrderService"
+                  ]
+                },
+                {
+                  "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.whens[0].events.OrderRejected",
+                  "label": "OrderRejected",
+                  "kind": "event",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 14,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 18,
+                      "character": 4
+                    }
+                  },
+                  "children": [],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": [
+                    "event:OrderRejected",
+                    "event:OrderRejected@Orders>OrderService"
+                  ]
+                }
+              ],
+              "relatedResources": [],
+              "uiHints": {
+                "command": "createOrder",
+                "triggers": "CheckoutStarted"
+              },
+              "viewNodeIds": []
+            },
+            {
+              "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.whens[1]",
+              "label": "OrderCreated",
+              "kind": "policy",
+              "language": "zfl",
+              "sourceUri": "file:///workspace/checkout.zfl",
+              "sourceRange": {
+                "start": {
+                  "line": 20,
+                  "character": 4
+                },
+                "end": {
+                  "line": 23,
+                  "character": 4
+                }
+              },
+              "children": [
+                {
+                  "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.whens[1].service",
+                  "label": "Orders.OrderService",
+                  "kind": "service",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 20,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 23,
+                      "character": 4
+                    }
+                  },
+                  "children": [],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": [
+                    "group:Orders>OrderService"
+                  ]
+                },
+                {
+                  "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.whens[1].events.CustomerNotified",
+                  "label": "CustomerNotified",
+                  "kind": "event",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 20,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 23,
+                      "character": 4
+                    }
+                  },
+                  "children": [],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": [
+                    "event:CustomerNotified",
+                    "event:CustomerNotified@Orders>OrderService"
+                  ]
+                }
+              ],
+              "relatedResources": [],
+              "uiHints": {
+                "command": "notifyCustomer",
+                "triggers": "OrderCreated"
+              },
+              "viewNodeIds": [
+                "policy:OrderCreated:notifyCustomer"
+              ]
+            },
+            {
+              "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.end",
+              "label": "end",
+              "kind": "end",
+              "language": "zfl",
+              "sourceUri": "file:///workspace/checkout.zfl",
+              "sourceRange": {
+                "start": {
+                  "line": 25,
+                  "character": 4
+                },
+                "end": {
+                  "line": 28,
+                  "character": 4
+                }
+              },
+              "children": [
+                {
+                  "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.end.completed",
+                  "label": "completed",
+                  "kind": "outcome",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 25,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 28,
+                      "character": 4
+                    }
+                  },
+                  "children": [
+                    {
+                      "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.end.completed.CustomerNotified",
+                      "label": "CustomerNotified",
+                      "kind": "event",
+                      "language": "zfl",
+                      "sourceUri": "file:///workspace/checkout.zfl",
+                      "sourceRange": {
+                        "start": {
+                          "line": 25,
+                          "character": 4
+                        },
+                        "end": {
+                          "line": 28,
+                          "character": 4
+                        }
+                      },
+                      "children": [],
+                      "relatedResources": [],
+                      "uiHints": {},
+                      "viewNodeIds": [
+                        "event:CustomerNotified"
+                      ]
+                    }
+                  ],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": []
+                },
+                {
+                  "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.end.rejected",
+                  "label": "rejected",
+                  "kind": "outcome",
+                  "language": "zfl",
+                  "sourceUri": "file:///workspace/checkout.zfl",
+                  "sourceRange": {
+                    "start": {
+                      "line": 25,
+                      "character": 4
+                    },
+                    "end": {
+                      "line": 28,
+                      "character": 4
+                    }
+                  },
+                  "children": [
+                    {
+                      "id": "file:///workspace/checkout.zfl#flows.CheckoutFlow.end.rejected.OrderRejected",
+                      "label": "OrderRejected",
+                      "kind": "event",
+                      "language": "zfl",
+                      "sourceUri": "file:///workspace/checkout.zfl",
+                      "sourceRange": {
+                        "start": {
+                          "line": 25,
+                          "character": 4
+                        },
+                        "end": {
+                          "line": 28,
+                          "character": 4
+                        }
+                      },
+                      "children": [],
+                      "relatedResources": [],
+                      "uiHints": {},
+                      "viewNodeIds": [
+                        "event:OrderRejected"
+                      ]
+                    }
+                  ],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": []
+                }
+              ],
+              "relatedResources": [],
+              "uiHints": {},
+              "viewNodeIds": []
+            }
+          ],
+          "relatedResources": [],
+          "uiHints": {},
+          "viewNodeIds": []
+        }
+      ],
+      "relatedResources": [],
+      "uiHints": {},
+      "viewNodeIds": []
+    }
+  ]
+}

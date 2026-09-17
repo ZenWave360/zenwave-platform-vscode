@@ -12,5 +12,8 @@ manifest to resolve: `.zenwave/config.yml` names `zenwave-architecture.yml`.
 taken from the `@zenwave360/lsp-js` wire tests (zenwave-lsp `lsp-js/npm/test`
 and the lsp-hierarchy samples): a ZDL with an unknown entity (`broken.zdl`), a
 valid one to hover (`orders.zdl`), and a flow with its `@zdl` model
-(`checkout.zfl`, `orders/model.zdl`). The `modules/…/openapi.yml` stands in for
+(`checkout.zfl`, `orders/model.zdl`). `orders-checkout-api/domain-model.zdl` declares the
+`OrdersCheckout` system of `place-order-flow.zfl`, so the model tree has a
+system to relocate there; the other ZDL files that flow annotates do not exist.
+The manifest has a domain with a subdomain for the architecture tree. The `modules/…/openapi.yml` stands in for
 the unrelated YAML the client must not send to the server.

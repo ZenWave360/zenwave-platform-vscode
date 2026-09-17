@@ -222,6 +222,55 @@ an outbound webview message that does not exist yet. `TreeView.reveal()` and
 from the start; the cursor-follows-tree scenario in the spec exercises them
 anyway.
 
+### Decision (task 1.6): the Model tree keeps its scope
+
+Decided by agent on 2026-09-17, pending review.
+
+With `003` connected, the Outline does show a conceptual hierarchy for an open
+document. It is not the same hierarchy the Model tree shows, as of zenwave-lsp
+d7156e7:
+
+- `textDocument/documentSymbol` stays within the document. A flow's `Orders`
+  system and the services and commands its `@zdl` model declares point at the
+  flow in the Outline and at the ZDL in the Model tree (store 001 2.5), which is
+  what makes "go to the declaration" and the drill-in rule possible.
+- The Outline has no related resources, and nothing it could be asked to
+  highlight in a diagram.
+- The Outline follows the active *text* editor; the Model tree keeps its document
+  while a webview, a preview or a diagram has focus.
+
+So the condition this design set for shrinking — everything the Model tree does
+for one open document also appears in the Outline — does not hold, and the tree
+stays. Revisit if `documentSymbol` gains cross-document locations, or if `004`
+ships without the selection wiring.
+
+### Implementation notes (vscode-platform/client-006)
+
+- **Where the manifest comes from.** `zenwave/workspaceStatus` does not exist.
+  The tree uses `LanguageServerApi.manifest.manifestUri`, the manifest `003`
+  resolved and started the server with. It is still one source of truth — a
+  different manifest restarts the server — but it is the client's resolution,
+  not the server's report. The server-side report is store 001 task 2.22.
+- **A browser-hosted server cannot read the manifest.** It answers
+  `documentNotFound` for an unopened `vscode-vfs:` manifest. The tree shows that
+  state once, explained, with an *Open Architecture Manifest* action; it does not
+  retry and does not open the manifest itself. Once the user opens it, the server
+  answers from the editor and the tree populates.
+- **Empty states are per-tree context keys.** `zenwave.architectureTreeState` and
+  `zenwave.modelTreeState` hold the reason (`no-server`, `unsupported`,
+  `no-manifest`, `no-model`, `not-found`, `unreadable`, `empty`, `failed`,
+  `loading`, `ready`). `003`'s boolean keys cannot tell these apart.
+- **A document with syntax errors.** lsp-js d7156e7 answers a partial hierarchy
+  for a flow with syntax errors, not `documentUnreadable`. The tree shows what it
+  got and says in the view message that the document has errors. `unreadable`
+  is still handled for a server that reports it.
+- **The seam for `004`.** `DiagramPanels` (`src/explorer/diagram-selection.ts`)
+  is a registry of open diagram panels by document URI, each with
+  `highlightNode(viewNodeId | null)`. Tree selection sends the node's first
+  `viewNodeIds` entry, or `null` for a node without one, to every panel open for
+  the tree's document. A diagram editor registers a panel and disposes the
+  registration when it closes.
+
 ## Risks / Trade-offs
 
 - **Two trees where users expect one place to look.** The Outline, the Model tree

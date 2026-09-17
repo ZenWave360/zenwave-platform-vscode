@@ -56,7 +56,9 @@
   "activationEvents": [
     "onLanguage:zdl",
     "onLanguage:zfl",
-    "workspaceContains:.zenwave/config.yml"
+    "workspaceContains:.zenwave/config.yml",
+    "onView:zenwave.architecture",
+    "onView:zenwave.model"
   ],
   "contributes": {
     "languages": [
@@ -106,6 +108,113 @@
         "path": "./syntaxes/zfl.tmLanguage.json"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zenwave",
+          "title": "ZenWave",
+          "icon": "$(type-hierarchy)"
+        }
+      ]
+    },
+    "views": {
+      "zenwave": [
+        {
+          "id": "zenwave.architecture",
+          "name": "Architecture",
+          "icon": "$(symbol-namespace)",
+          "contextualTitle": "ZenWave"
+        },
+        {
+          "id": "zenwave.model",
+          "name": "Model",
+          "icon": "$(type-hierarchy)",
+          "contextualTitle": "ZenWave"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "zenwave.architecture",
+        "contents": "Waiting for the ZenWave language server to start...",
+        "when": "zenwave.architectureTreeState == loading"
+      },
+      {
+        "view": "zenwave.architecture",
+        "contents": "The architecture tree needs the ZenWave language server, which is not available here.\n[Show Language Server Status](command:zenwave.lsp.showStatus)",
+        "when": "zenwave.architectureTreeState == no-server"
+      },
+      {
+        "view": "zenwave.architecture",
+        "contents": "The connected ZenWave language server does not build hierarchies, so there is no architecture to show.\n[Show Output](command:zenwave.showOutput)",
+        "when": "zenwave.architectureTreeState == unsupported"
+      },
+      {
+        "view": "zenwave.architecture",
+        "contents": "No architecture manifest was found for this workspace. Name one with `project-manifest` in `.zenwave/config.yml` at a workspace folder root, or with the setting.\n[Configure Architecture Manifest](command:workbench.action.openSettings?%5B%22zenwave.workspace.manifest%22%5D)",
+        "when": "zenwave.architectureTreeState == no-manifest"
+      },
+      {
+        "view": "zenwave.architecture",
+        "contents": "The ZenWave language server could not read the architecture manifest. A server running in the browser reads only documents open in the editor or served over http(s); open the manifest to browse it here.\n[Open Architecture Manifest](command:zenwave.explorer.openManifest)\n[Show Output](command:zenwave.showOutput)",
+        "when": "zenwave.architectureTreeState == not-found"
+      },
+      {
+        "view": "zenwave.architecture",
+        "contents": "The architecture manifest could not be read. Its problems are reported in the editor.\n[Open Architecture Manifest](command:zenwave.explorer.openManifest)",
+        "when": "zenwave.architectureTreeState == unreadable"
+      },
+      {
+        "view": "zenwave.architecture",
+        "contents": "The architecture manifest declares nothing to show yet.\n[Open Architecture Manifest](command:zenwave.explorer.openManifest)",
+        "when": "zenwave.architectureTreeState == empty"
+      },
+      {
+        "view": "zenwave.architecture",
+        "contents": "The architecture tree could not be loaded. The reason is recorded in the ZenWave output.\n[Show Output](command:zenwave.showOutput)",
+        "when": "zenwave.architectureTreeState == failed"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "Waiting for the ZenWave language server to start...",
+        "when": "zenwave.modelTreeState == loading"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "The model tree needs the ZenWave language server, which is not available here.\n[Show Language Server Status](command:zenwave.lsp.showStatus)",
+        "when": "zenwave.modelTreeState == no-server"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "The connected ZenWave language server does not build hierarchies, so there is no model tree to show.\n[Show Output](command:zenwave.showOutput)",
+        "when": "zenwave.modelTreeState == unsupported"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "Open a ZDL or ZFL model to see its hierarchy here.\n[Open a Model](command:workbench.action.quickOpen?%5B%22.z%22%5D)",
+        "when": "zenwave.modelTreeState == no-model"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "The model document could not be read. Fix the problems reported for it and the tree follows.\n[Show Problems](command:workbench.actions.view.problems)",
+        "when": "zenwave.modelTreeState == unreadable"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "The ZenWave language server could not read this model document.\n[Show Output](command:zenwave.showOutput)",
+        "when": "zenwave.modelTreeState == not-found"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "The ZenWave language server reports no hierarchy for this document.",
+        "when": "zenwave.modelTreeState == empty"
+      },
+      {
+        "view": "zenwave.model",
+        "contents": "The model tree could not be loaded. The reason is recorded in the ZenWave output.\n[Show Output](command:zenwave.showOutput)",
+        "when": "zenwave.modelTreeState == failed"
+      }
+    ],
     "commands": [
       {
         "command": "zenwave.showOutput",
@@ -151,6 +260,28 @@
         "command": "zenwave.zfl.organizeServices",
         "title": "Organize ZFL Services",
         "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.explorer.refresh",
+        "title": "Refresh",
+        "category": "ZenWave",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "zenwave.explorer.openNode",
+        "title": "Go to Declaration",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.explorer.openRelated",
+        "title": "Open Related Resource...",
+        "category": "ZenWave",
+        "icon": "$(references)"
+      },
+      {
+        "command": "zenwave.explorer.openManifest",
+        "title": "Open Architecture Manifest",
+        "category": "ZenWave"
       }
     ],
     "menus": {
@@ -186,6 +317,22 @@
         {
           "command": "zenwave.zfl.organizeServices",
           "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests"
+        },
+        {
+          "command": "zenwave.explorer.refresh",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.explorer.openNode",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.explorer.openRelated",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.explorer.openManifest",
+          "when": "zenwave.manifestAvailable"
         }
       ],
       "editor/context": [
@@ -203,6 +350,20 @@
           "command": "zenwave.zfl.organizeServices",
           "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests",
           "group": "1_modification@90"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "zenwave.explorer.refresh",
+          "when": "view == zenwave.architecture || view == zenwave.model",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "zenwave.explorer.openRelated",
+          "when": "(view == zenwave.architecture || view == zenwave.model) && viewItem =~ /\\.related$/",
+          "group": "navigation"
         }
       ]
     },
