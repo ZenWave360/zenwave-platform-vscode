@@ -72,8 +72,8 @@ test('each model action is offered only with a connected server advertising its 
     contributes: { commands: { command: string }[]; menus: Record<string, { command: string; when?: string }[]> };
   };
   const expectations: Record<string, { requests: string[]; language: RegExp }> = {
-    'zenwave.model.forwardReferences': { requests: ['zenwave/symbolAt', 'zenwave/forwardReferences'], language: /editorLangId =~ \/\^\(zdl\|zfl\)\$\// },
-    'zenwave.model.reverseReferences': { requests: ['zenwave/symbolAt', 'zenwave/reverseReferences'], language: /editorLangId =~ \/\^\(zdl\|zfl\)\$\// },
+    'zenwave.model.forwardReferences': { requests: ['zenwave/symbolAt', 'zenwave/forwardReferences'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\// },
+    'zenwave.model.reverseReferences': { requests: ['zenwave/symbolAt', 'zenwave/reverseReferences'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\// },
     'zenwave.zfl.organizeServices': { requests: ['zenwave/organizeZflServices'], language: /editorLangId == zfl/ },
   };
   for (const [command, expected] of Object.entries(expectations)) {

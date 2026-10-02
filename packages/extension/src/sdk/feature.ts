@@ -468,8 +468,8 @@ export function registerSdkFeature(
     capabilities.canRunProcesses && processService ? { models, processService } : undefined;
 
   context.subscriptions.push(
-    vscode.languages.registerCompletionItemProvider({ language: 'zdl' }, authoring),
-    vscode.languages.registerHoverProvider({ language: 'zdl' }, authoring),
+    vscode.languages.registerCompletionItemProvider([{ language: 'zdl' }, { language: 'zw' }], authoring),
+    vscode.languages.registerHoverProvider([{ language: 'zdl' }, { language: 'zw' }], authoring),
     vscode.commands.registerCommand(RUN_COMMAND, (request: unknown) =>
       runPlugin(request, capabilities, taskContext, logger),
     ),
@@ -479,7 +479,7 @@ export function registerSdkFeature(
     const codeLenses = new SdkCodeLensProvider(taskContext);
     context.subscriptions.push(
       codeLenses,
-      vscode.languages.registerCodeLensProvider({ language: 'zdl' }, codeLenses),
+      vscode.languages.registerCodeLensProvider([{ language: 'zdl' }, { language: 'zw' }], codeLenses),
       vscode.tasks.registerTaskProvider(TASK_TYPE, new SdkTaskProvider(taskContext, logger)),
       vscode.tasks.onDidEndTaskProcess((event) => diagnoseMissingCommand(event, logger)),
       vscode.workspace.onDidChangeConfiguration((event) => {

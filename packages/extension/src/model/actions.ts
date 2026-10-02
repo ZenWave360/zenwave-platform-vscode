@@ -13,7 +13,7 @@ export const MODEL_ACTION_COMMANDS = {
   organizeServices: 'zenwave.zfl.organizeServices',
 } as const;
 
-const MODEL_LANGUAGES = new Set(['zdl', 'zfl']);
+const MODEL_LANGUAGES = new Set(['zdl', 'zw', 'zfl']);
 
 /**
  * What a model action did. Returned to programmatic callers (and the smoke test);

@@ -5,7 +5,7 @@ import type { ExplorerTree } from './hierarchy-model.js';
  * the rules are testable without an editor.
  */
 
-const MODEL_LANGUAGES = new Set(['zdl', 'zfl']);
+const MODEL_LANGUAGES = new Set(['zdl', 'zw', 'zfl']);
 const MODEL_EXTENSIONS = /\.(zdl|zw|zfl)$/i;
 
 export interface UriLike {

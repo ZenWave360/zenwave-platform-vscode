@@ -79,7 +79,7 @@ function readSettings(): LspSettings {
   return { enabled: settings.get<boolean>('enabled', true), serverPath: serverPath || undefined };
 }
 
-const MODEL_LANGUAGES = new Set(['zdl', 'zfl']);
+const MODEL_LANGUAGES = new Set(['zdl', 'zw', 'zfl']);
 
 export function registerLanguageServer(
   context: vscode.ExtensionContext,

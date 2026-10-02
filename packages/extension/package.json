@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "publisher": "ZenWave360",
   "license": "MIT",
-  "icon": "resources/zenwave-logo.png",
+  "icon": "resources/zenwave-brand/zenwave-platform-icon.png",
   "private": true,
   "homepage": "https://www.zenwave360.io/",
   "bugs": {
@@ -75,6 +75,7 @@
   },
   "activationEvents": [
     "onLanguage:zdl",
+    "onLanguage:zw",
     "onLanguage:zfl",
     "workspaceContains:.zenwave/config.yml",
     "onView:zenwave.architecture",
@@ -90,13 +91,28 @@
           "zdl"
         ],
         "extensions": [
-          ".zdl",
+          ".zdl"
+        ],
+        "configuration": "./syntaxes/zdl.language-configuration.json",
+        "icon": {
+          "light": "./resources/zenwave-brand/zdl-file-icon.png",
+          "dark": "./resources/zenwave-brand/zdl-file-icon.png"
+        }
+      },
+      {
+        "id": "zw",
+        "aliases": [
+          "ZenWave SDK",
+          "ZW",
+          "zw"
+        ],
+        "extensions": [
           ".zw"
         ],
         "configuration": "./syntaxes/zdl.language-configuration.json",
         "icon": {
-          "light": "./resources/zdl-file-icon.png",
-          "dark": "./resources/zdl-file-icon.png"
+          "light": "./resources/zenwave-brand/zenwave-sdk-icon.png",
+          "dark": "./resources/zenwave-brand/zenwave-sdk-icon.png"
         }
       },
       {
@@ -111,14 +127,19 @@
         ],
         "configuration": "./syntaxes/zfl.language-configuration.json",
         "icon": {
-          "light": "./resources/zenwave-logo.png",
-          "dark": "./resources/zenwave-logo.png"
+          "light": "./resources/zenwave-brand/zenwave-logo.svg",
+          "dark": "./resources/zenwave-brand/zenwave-logo.svg"
         }
       }
     ],
     "grammars": [
       {
         "language": "zdl",
+        "scopeName": "source.zdl",
+        "path": "./syntaxes/zdl.tmLanguage.json"
+      },
+      {
+        "language": "zw",
         "scopeName": "source.zdl",
         "path": "./syntaxes/zdl.tmLanguage.json"
       },
@@ -370,11 +391,11 @@
         },
         {
           "command": "zenwave.model.forwardReferences",
-          "when": "editorLangId =~ /^(zdl|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests"
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests"
         },
         {
           "command": "zenwave.model.reverseReferences",
-          "when": "editorLangId =~ /^(zdl|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests"
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests"
         },
         {
           "command": "zenwave.zfl.organizeServices",
@@ -428,12 +449,12 @@
       "editor/context": [
         {
           "command": "zenwave.model.forwardReferences",
-          "when": "editorLangId =~ /^(zdl|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests",
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests",
           "group": "navigation@90"
         },
         {
           "command": "zenwave.model.reverseReferences",
-          "when": "editorLangId =~ /^(zdl|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
           "group": "navigation@91"
         },
         {

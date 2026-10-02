@@ -79,7 +79,7 @@ export async function resolveWorkspaceManifest(): Promise<ResolvedManifest> {
  * as a glob, so the file matches exactly whatever characters its name holds.
  */
 export function documentSelector(resolved: ResolvedManifest): DocumentSelector {
-  const selector: DocumentSelector = [{ language: 'zdl' }, { language: 'zfl' }];
+  const selector: DocumentSelector = [{ language: 'zdl' }, { language: 'zw' }, { language: 'zfl' }];
   if (resolved.manifestUri) {
     const uri = vscode.Uri.parse(resolved.manifestUri, true);
     selector.push({ scheme: uri.scheme, pattern: uri.fsPath });
