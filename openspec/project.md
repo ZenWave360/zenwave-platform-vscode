@@ -19,7 +19,7 @@ we do not reimplement them.
 
 | Release | Owns |
 | --- | --- |
-| **zenwave-manifest** | `manifest-core`, `manifest-graph`, `workspace-runtime`, MCP adapter, **all architectural semantics** |
+| **zenwave-architecture** | `manifest-core`, `manifest-graph`, `workspace-runtime`, MCP adapter, **all architectural semantics** |
 | **zenwave-lsp** | LSP mapping, document/language services, JVM + JS transports, IntelliJ and VS Code clients |
 | **zenwave-architectural-vistas** | Visualization packages under the `@zenwave360` scope — `vistas-eventflow` (EventFlow and Service Map renderers, view-model contracts), `eventcatalog-components`, and the webview bundle both IDE plugins embed |
 

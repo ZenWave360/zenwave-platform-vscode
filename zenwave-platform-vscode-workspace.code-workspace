@@ -7,7 +7,7 @@
 			"path": "../dsl-kotlin"
 		},
 		{
-			"path": "../zenwave-manifest"
+			"path": "../zenwave-architecture"
 		},
 		{
 			"path": "../json-schema-ref-parser-kmp"

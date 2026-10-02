@@ -84,7 +84,7 @@ Current work: [`openspec/changes/`](openspec/changes/).
 Model semantics and language services live in other repositories, both work in
 progress. This repo presents and drives them; it does not reimplement them.
 
-- **zenwave-manifest** — `manifest-core`, `manifest-graph`, `workspace-runtime`,
+- **zenwave-architecture** — `manifest-core`, `manifest-graph`, `workspace-runtime`,
   MCP adapter, all architectural semantics
 - **zenwave-lsp** — LSP mapping, document/language services, JVM + JS transports,
   IntelliJ and VS Code clients

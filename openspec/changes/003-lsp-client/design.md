@@ -17,7 +17,7 @@ What already exists upstream and can be relied on:
   `zenwave/reverseReferences`, `zenwave/organizeZflServices`,
   `zenwave/conceptAt`, `zenwave/workspaceStatus`;
 - initialization options shaped `{ zenwave: { configUri, projectManifestUri } }`;
-- `zenwave-manifest`'s content-resolution specification, which already says how a
+- `zenwave-architecture`'s content-resolution specification, which already says how a
   manifest reaches content in other repositories.
 
 Read as *intended* rather than relied on: `.zenwave/config.yml` naming a project
@@ -169,7 +169,7 @@ sources:
   git:       { contentUrlExpression: "${server}/${org}/${owner.repository}/raw/main/${content.path}" }
 ```
 
-`zenwave-manifest`'s resolution specification anchors the workspace base at the
+`zenwave-architecture`'s resolution specification anchors the workspace base at the
 **manifest's own directory** and states that a transport or not-found failure
 advances to the next candidate. That single rule is what makes both hosts work
 without either being a special case:
