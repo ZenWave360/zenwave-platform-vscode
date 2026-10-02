@@ -3,13 +3,17 @@
 
 config {
   basePackage "io.example.orders"
+  --force
 
   plugins {
     FirstPlugin {
       targetFolder "build/generated"
       sourceFile "${this.file.path}"
-      --force
       --style=compact
+    }
+
+    FirstPlugin {
+      targetFolder "build/other"
     }
 
     SecondPlugin {

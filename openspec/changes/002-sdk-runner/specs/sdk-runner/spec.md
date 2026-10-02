@@ -17,6 +17,13 @@ inside a `config { plugins { … } }` block of a ZDL document. A plugin declared
 - **WHEN** the file is open in the editor
 - **THEN** a Run action appears above each of the three plugin declarations
 
+#### Scenario: Several plugins of the same type
+- **GIVEN** a `.zdl` file whose `config { plugins { … } }` block declares the
+  same plugin type more than once, each with its own braced body and options
+- **WHEN** the file is open in the editor
+- **THEN** a Run action appears above each declaration, and triggering one
+  runs that declaration's options
+
 #### Scenario: A disabled plugin
 - **GIVEN** a plugin declaration marked `disabled`
 - **WHEN** the file is open in the editor
@@ -51,7 +58,10 @@ model file that contains it, using these rules:
 - the enclosing `config` block's options are inherited and passed the same way,
   unless the plugin opts out with `(inherit false)` after its name;
 - an option declared on the plugin overrides an inherited option of the same name;
-- the plugin's CLI options are passed in declaration order;
+- CLI options declared directly in the enclosing `config` block are inherited
+  unless the plugin opts out with `(inherit false)`;
+- the effective CLI options are passed in declaration order, with a plugin-local
+  CLI option replacing an inherited CLI option of the same name;
 - every value that comes from the model or from settings is quoted for the shell
   the command runs in, so that it reaches the SDK as one literal argument and is
   never interpreted by the shell;
@@ -88,6 +98,24 @@ model file that contains it, using these rules:
 - **WHEN** the user triggers the plugin's Run action
 - **THEN** the command carries `targetFolder=build/generated` once, and not the
   inherited value
+
+#### Scenario: Inheriting a CLI flag from the config block
+- **GIVEN** a `config` block declaring `--force` before two plugin declarations
+- **WHEN** the user triggers either plugin's Run action
+- **THEN** each command carries `--force` once
+
+#### Scenario: Opting out of inherited CLI options
+- **GIVEN** a `config` block declaring `--force` and a plugin declared as
+  `MyPlugin (inherit false) { … }`
+- **WHEN** the user triggers that plugin's Run action
+- **THEN** its command does not carry `--force`
+
+#### Scenario: A plugin CLI option shadowing an inherited one
+- **GIVEN** a `config` block declaring `--profile=local` and a plugin declaring
+  `--profile=test`
+- **WHEN** the user triggers that plugin's Run action
+- **THEN** the command carries `--profile=test` once and does not carry
+  `--profile=local`
 
 #### Scenario: The model file is passed automatically
 - **GIVEN** a plugin declaration that mentions neither `zdlFile` nor `zdlFiles`
@@ -161,8 +189,10 @@ the command line SHALL be echoed where the command runs.
 Triggering a Run action SHALL execute the assembled command in a terminal, with
 the directory containing the model file as the working directory. The run SHALL
 be cancellable, SHALL report a non-zero exit status to the user, and SHALL be
-re-runnable without returning to the model file. Running a plugin repeatedly
-SHALL NOT accumulate terminals.
+re-runnable without returning to the model file. A later Run SHALL reuse that
+terminal when the assembled command is the same, and SHALL use a new terminal
+when the command differs, including two declarations of the same plugin type.
+Several different commands SHALL be able to run at the same time.
 
 #### Scenario: Running a plugin
 - **GIVEN** a model file at `src/main/resources/model/orders.zdl`
@@ -170,17 +200,22 @@ SHALL NOT accumulate terminals.
 - **THEN** the command runs in a terminal whose working directory is
   `src/main/resources/model`
 
-#### Scenario: Running the same plugin again
-- **GIVEN** a plugin that has already been run
+#### Scenario: Running the same command again
+- **GIVEN** a plugin that has already been run, with its declaration unchanged
 - **WHEN** the user runs it again
-- **THEN** it runs in the terminal its previous run used, rather than opening
-  another one
+- **THEN** it runs in the terminal its previous run used
 
 #### Scenario: Running again after editing the declaration
 - **GIVEN** a plugin that has already been run, whose options the user has since
   changed
 - **WHEN** the user runs it again
-- **THEN** it runs with the changed options, in the terminal its previous run used
+- **THEN** it runs with the changed options, in a new terminal
+
+#### Scenario: Two declarations of the same plugin type
+- **GIVEN** two runnable declarations of the same plugin type, with different
+  options
+- **WHEN** the user runs both
+- **THEN** each runs in its own terminal, and both run at the same time
 
 #### Scenario: Running plugins from two different models
 - **GIVEN** plugins run from model files in two different directories

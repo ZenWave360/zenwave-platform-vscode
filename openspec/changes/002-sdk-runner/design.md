@@ -17,7 +17,7 @@ directory, using a hand-rolled search that VS Code has no equivalent for and doe
 not need — see the decision below.
 
 What makes this change cheap: `@zenwave360/dsl`'s `parseZdl` already returns a
-`locations` map alongside the model, keyed by paths like `plugins.<name>`, so the
+`locations` map alongside the model, keyed by paths like `pluginsList.<n>`, so the
 extension does not need to parse ZDL to know where a lens goes. See
 `docs/architecture.md` on why parsing stays upstream.
 
@@ -65,9 +65,9 @@ extension does not need to parse ZDL to know where a lens goes. See
 `parseZdl` returns `locations` entries of the form
 
 ```
-plugins.<name>          → [startIndex, endIndex, startLine, startCol, endLine, endCol]
-plugins.<name>.name     → …
-plugins.<name>.disabled → …   (present only when the plugin is disabled)
+pluginsList.<n>          → [startIndex, endIndex, startLine, startCol, endLine, endCol]
+pluginsList.<n>.name     → …
+pluginsList.<n>.disabled → …   (present only when the plugin is disabled)
 ```
 
 so the lens position, the plugin name, the disabled flag, the config options and
@@ -134,21 +134,20 @@ for one plugin nor bind a key to it. That re-runnability is one of the reasons
 for choosing the Tasks API in the first place, so it is not worth trading away
 for terminal grouping.
 
-So the definition carries the plugin and its model file, and the panel is
-`Dedicated`: each plugin keeps one terminal across its own runs. A typical model
-declares a handful of plugins and a user runs one or two, so terminals stay
-bounded — which is the need behind IntelliJ's algorithm, without the algorithm.
+So the definition carries the plugin, its model file, and the assembled command,
+and the panel is `Dedicated`: the same command line reuses one terminal; a
+different command opens another. Two declarations of the same plugin type with
+different options are different commands, so they can run at the same time.
 
 A custom task *type* (`zenwave-sdk`) rather than an anonymous task, so the run
 shows up as a ZenWave task and users can bind or re-run it.
 
-**The definition carries identity and nothing else** — the plugin and its model
-file. VS Code derives a task's identity, and so its dedicated terminal, from
-*every* property of the definition. An earlier implementation also put the
-assembled command there, so editing an option made a new task and a new terminal.
-The command is assembled from the model each time the task is resolved instead,
-which also makes a hand-written `tasks.json` entry of just `plugin` and `file`
-runnable.
+**The definition's identity is the command line.** VS Code derives a task's
+identity, and so its dedicated terminal, from *every* property of the
+definition. Putting the assembled command there is the reuse heuristic: Run
+again with the same command, same terminal; change an option, new command, new
+terminal. A hand-written `tasks.json` entry of just `plugin` and `file` is still
+runnable: the command is assembled when that entry is first resolved.
 
 ### The installed SDK is not asked, for now
 

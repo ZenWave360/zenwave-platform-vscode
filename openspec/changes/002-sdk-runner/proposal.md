@@ -29,8 +29,9 @@ wait on `zenwave-lsp`, this one does not.
   declaration — its own options, the inherited `config` options, `--deps` from
   Maven-coordinate imports, verbatim CLI options, and a defaulted `zdlFile`.
 - Execution through a **terminal-backed VS Code task**, with the model file's
-  directory as the working directory, and one task identity per plugin so
-  repeated runs reuse a terminal instead of accumulating them.
+  directory as the working directory, and task identity equal to the assembled
+  command so the same command reuses a terminal and a different command opens
+  another.
 - **Settings** for the CLI command (`jbang zw` by default) and for extra
   arguments appended to every run.
 - **Honest gating**: no lens at all where processes cannot be spawned, and a

@@ -921,16 +921,21 @@ async function desktopRuns(document: vscode.TextDocument): Promise<void> {
   const profileKey = `automationProfile.${configuration.platform}`;
   const settings: [vscode.WorkspaceConfiguration, string, unknown][] = [
     [sdk, 'cliCommand', configuration.cliCommand], [sdk, 'environment', 'inherited'],
-    [sdk, 'extraArgs', []], [terminal, profileKey, { path: configuration.shell }],
+    [sdk, 'extraArgs', ['--smoke-delay=1500']], [terminal, profileKey, { path: configuration.shell }],
   ];
   const saved = settings.map(([section, key]) => section.inspect(key)?.workspaceValue);
   const opened: vscode.Terminal[] = [];
+  const openedCount = (): number => opened.length;
   let started = 0;
   const subscriptions = [
     vscode.window.onDidOpenTerminal((value) => opened.push(value)),
     vscode.tasks.onDidStartTask((event) => { if (event.execution.task.definition.type === 'zenwave-sdk') started++; }),
   ];
-  const request = { uri: document.uri.toString(), plugin: 'FirstPlugin' };
+  const firstOffset = document.getText().indexOf('FirstPlugin');
+  const secondOffset = document.getText().indexOf('FirstPlugin', firstOffset + 1);
+  assert(firstOffset >= 0 && secondOffset > firstOffset, 'Duplicate FirstPlugin fixtures were not found');
+  const request = { uri: document.uri.toString(), plugin: 'FirstPlugin', offset: firstOffset };
+  const secondRequest = { uri: document.uri.toString(), plugin: 'FirstPlugin', offset: secondOffset };
   async function runOnce(): Promise<void> {
     let exitCode: number | undefined;
     let ended: vscode.Disposable | undefined;
@@ -962,14 +967,53 @@ async function desktopRuns(document: vscode.TextDocument): Promise<void> {
     }
     await bounded(command, 'Refused Run did not finish after dismissing its notification');
     assert(started === before, 'Refused Run started a task');
-    assert(opened.length === terminalsBefore, 'Refused Run opened a terminal');
+    assert(openedCount() === terminalsBefore, 'Refused Run opened a terminal');
+  }
+  async function runTogether(requests: readonly { uri: string; plugin: string; offset: number }[]): Promise<void> {
+    let ended = 0;
+    let failure: Error | undefined;
+    let taskEnded: vscode.Disposable | undefined;
+    let processEnded: vscode.Disposable | undefined;
+    const complete = new Promise<void>((resolve, reject) => {
+      processEnded = vscode.tasks.onDidEndTaskProcess((event) => {
+        if (event.execution.task.definition.type !== 'zenwave-sdk') return;
+        if (event.exitCode !== undefined && event.exitCode !== 0) {
+          failure = new Error(`Fixture SDK exited ${event.exitCode}`);
+        }
+      });
+      taskEnded = vscode.tasks.onDidEndTask((event) => {
+        if (event.execution.task.definition.type !== 'zenwave-sdk') return;
+        if (++ended === requests.length) {
+          if (failure) reject(failure); else resolve();
+        }
+      });
+    });
+    try {
+      await Promise.all(requests.map((value) => bounded(
+        vscode.commands.executeCommand('zenwave.sdk.run', value),
+        'Parallel Run command did not return',
+      )));
+      const running = vscode.tasks.taskExecutions.filter(
+        (execution) => execution.task.definition.type === 'zenwave-sdk',
+      );
+      assert(running.length === requests.length, 'Different commands must run at the same time');
+      await bounded(complete, 'Parallel fixture SDK tasks did not finish');
+    } finally {
+      taskEnded?.dispose();
+      processEnded?.dispose();
+    }
   }
   try {
     for (const [section, key, value] of settings) await section.update(key, value, vscode.ConfigurationTarget.Workspace);
     assert(vscode.workspace.isTrusted, 'Desktop smoke workspace must be trusted');
+    await runTogether([request, secondRequest]);
+    const startsAfterParallel = started;
+    assert(startsAfterParallel === 2 && openedCount() === 2,
+      'Different commands from the same plugin type must open two task terminals');
     await runOnce();
-    const firstTerminal = vscode.window.terminals.find((value) => opened.includes(value));
-    assert(firstTerminal && opened.length === 1, 'First Run must open exactly one task terminal');
+    const startsAfterSameCommand = started;
+    assert(startsAfterSameCommand === 3 && openedCount() === 2,
+      'The same command must reuse its task terminal');
     const edit = new vscode.WorkspaceEdit();
     const offset = document.getText().indexOf('build/generated');
     assert(offset >= 0, 'Fixture option to edit was not found');
@@ -977,22 +1021,34 @@ async function desktopRuns(document: vscode.TextDocument): Promise<void> {
       document.positionAt(offset + 'build/generated'.length)), 'build/edited');
     assert(await vscode.workspace.applyEdit(edit), 'Could not edit plugin option');
     await runOnce();
-    assert(started === 2 && opened.length === 1 && vscode.window.terminals.includes(firstTerminal),
-      'Running after an edit must reuse the same terminal');
+    const startedAfterEdit = started;
+    const terminalsAfterEdit = openedCount();
+    assert(startedAfterEdit === 4 && terminalsAfterEdit === 3, 'A different command must open a new terminal');
+    await runOnce();
+    const startedAfterRepeat = started;
+    const terminalsAfterRepeat = openedCount();
+    assert(startedAfterRepeat === 5 && terminalsAfterRepeat === 3,
+      'The same command must reuse its terminal');
     const invocations = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(
       vscode.Uri.joinPath(configUri, '..', 'sdk-invocations.json'),
     ))) as string[][];
-    assert(invocations.length === 2, 'Only the two user Runs may invoke the fixture SDK');
-    assert(invocations[0]?.includes('targetFolder=build/generated'), 'First Run used wrong option');
-    assert(invocations[1]?.includes('targetFolder=build/edited'), 'Second Run ignored edited option');
+    assert(invocations.length === 5, 'Only the five user Runs may invoke the fixture SDK');
+    assert(invocations.filter((args) => args.includes('targetFolder=build/generated')).length === 2,
+      'The original command must run twice');
+    assert(invocations.filter((args) => args.includes('targetFolder=build/other')).length === 1,
+      'The second same-type declaration must run its own command');
+    assert(invocations.filter((args) => args.includes('targetFolder=build/edited')).length === 2,
+      'The edited command must run twice');
+    assert(invocations.every((args) => args.filter((argument) => argument === '--force').length === 1),
+      'Every inheriting plugin command must contain the shared --force flag exactly once');
     await terminal.update(profileKey, { path: configuration.unsupportedShell }, vscode.ConfigurationTarget.Workspace);
     await refuses();
     await terminal.update(profileKey, { path: configuration.shell }, vscode.ConfigurationTarget.Workspace);
     await sdk.update('cliCommand', 'definitely-not-a-zenwave-smoke-executable', vscode.ConfigurationTarget.Workspace);
     await refuses();
     await authoring();
-    assert(started === 2, 'Authoring with a missing SDK started a task');
-    console.log('PASS: edited Run reuses terminal; unsupported shell and missing executable start no task');
+    assert(startedAfterRepeat === 5 && started === startedAfterRepeat, 'Authoring with a missing SDK started a task');
+    console.log('PASS: different same-plugin commands run concurrently; different command opens a new terminal, same command reuses it; unsupported shell and missing executable start no task');
   } finally {
     subscriptions.forEach((value) => value.dispose());
     for (let index = 0; index < settings.length; index++) {
@@ -1035,10 +1091,13 @@ export async function run(): Promise<void> {
     'vscode.executeCodeLensProvider', plugins.uri,
   );
   const sdkLenses = (lenses ?? []).filter((lens) => lens.command?.command === 'zenwave.sdk.run');
-  assert(sdkLenses.length === (desktop ? 2 : 0), `Expected ${desktop ? 2 : 0} SDK lenses, got ${sdkLenses.length}`);
+  assert(sdkLenses.length === (desktop ? 3 : 0), `Expected ${desktop ? 3 : 0} SDK lenses, got ${sdkLenses.length}`);
   if (desktop) {
-    assert(sdkLenses.map((lens) => (lens.command?.arguments?.[0] as { plugin: string }).plugin)
-      .sort().join(',') === 'FirstPlugin,SecondPlugin', 'Lenses must only cover enabled plugins');
+    const requests = sdkLenses.map((lens) => lens.command?.arguments?.[0] as { plugin: string; offset: number });
+    assert(requests.map((request) => request.plugin).sort().join(',') === 'FirstPlugin,FirstPlugin,SecondPlugin',
+      'Lenses must cover every enabled plugin declaration, including duplicates');
+    assert(new Set(requests.map((request) => request.offset)).size === 3,
+      'Each same-type plugin lens must identify its own declaration');
   }
   console.log(`PASS: ${desktop ? 'desktop enabled-plugin' : 'browser absent'} CodeLens`);
   await authoring();

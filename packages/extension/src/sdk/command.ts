@@ -174,7 +174,19 @@ export function buildSdkArguments(
   for (const [name, value] of options) {
     args.push(`${name}=${substitutePath(formatValue(value), filePath)}`);
   }
+
+  const effectiveCliOptions = new Map<string, PluginDeclaration['cliOptions'][number]>();
+  if (plugin.inherit) {
+    for (const option of model.cliOptions) {
+      effectiveCliOptions.set(option.name, option);
+    }
+  }
   for (const option of plugin.cliOptions) {
+    // Moving an override to the end preserves the selected declaration's local order.
+    effectiveCliOptions.delete(option.name);
+    effectiveCliOptions.set(option.name, option);
+  }
+  for (const option of effectiveCliOptions.values()) {
     args.push(cliOptionArgument(option, filePath));
   }
   args.push(...settings.extraArgs);

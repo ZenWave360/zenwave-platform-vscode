@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseZdl } from '@zenwave360/dsl';
-import { isPluginNamePosition, ModelCache, parseModel, toSourceRange } from '../../src/sdk/model.js';
+import { findRunnablePlugin, isPluginNamePosition, ModelCache, parseModel, toSourceRange } from '../../src/sdk/model.js';
 
 const MODEL = `
 config {
@@ -15,8 +15,8 @@ config {
 
 test('ANTLR locations become zero-based, end-exclusive editor ranges', () => {
   const raw = parseZdl(MODEL) as { locations: Record<string, Int32Array> };
-  const declaration = raw.locations['plugins.DefaultPlugin']!;
-  const name = raw.locations['plugins.DefaultPlugin.name']!;
+  const declaration = raw.locations['pluginsList.0']!;
+  const name = raw.locations['pluginsList.0.name']!;
   const line = MODEL.split('\n')[4]!;
   assert.equal(declaration[5], line.lastIndexOf('}'), 'declaration end column is inclusive');
   assert.equal(name[5], line.indexOf('DefaultPlugin') + 'DefaultPlugin'.length,
@@ -29,18 +29,42 @@ test('ANTLR locations become zero-based, end-exclusive editor ranges', () => {
     start: { line: 4, character: 4 },
     end: { line: 4, character: 17 },
   });
-  assert.deepEqual(parseModel(MODEL)?.locations['plugins.DefaultPlugin.name'],
+  assert.deepEqual(parseModel(MODEL)?.locations['pluginsList.0.name'],
     toSourceRange(name, MODEL));
 });
 
 test('parseModel exposes locally built DSL plugin config option and value spans', () => {
   const text = 'config {\n  plugins {\n    MyPlugin {\n      displayName "Orders API"\n    }\n  }\n}';
   const model = parseModel(text);
-  assert.deepEqual(model?.locations['plugins.MyPlugin.config.displayName'], {
+  assert.deepEqual(model?.locations['pluginsList.0.config.displayName'], {
     start: { line: 3, character: 6 }, end: { line: 3, character: 30 },
   });
-  assert.deepEqual(model?.locations['plugins.MyPlugin.config.displayName.value'], {
+  assert.deepEqual(model?.locations['pluginsList.0.config.displayName.value'], {
     start: { line: 3, character: 18 }, end: { line: 3, character: 30 },
+  });
+});
+
+test('parseModel exposes config-level CLI options without corrupting following config', () => {
+  const text = `config {
+    title "shared"
+    --force
+    --profile="local build"
+    useJSpecify true
+    plugins { MyPlugin {} }
+  }`;
+  const model = parseModel(text);
+  assert.ok(model);
+  assert.deepEqual(model.cliOptions, [
+    { name: 'force' },
+    { name: 'profile', value: '"local build"' },
+  ]);
+  assert.equal(model.config.title, 'shared');
+  assert.equal(model.config.useJSpecify, true);
+  assert.deepEqual(model.locations['cliOptions.force'], {
+    start: { line: 2, character: 4 }, end: { line: 2, character: 11 },
+  });
+  assert.deepEqual(model.locations['config.useJSpecify'], {
+    start: { line: 4, character: 4 }, end: { line: 4, character: 20 },
   });
 });
 
@@ -55,6 +79,34 @@ test('plugin discovery reads all declarations, disabled state, and inherit strin
       { name: 'DisabledPlugin', disabled: true, inherit: false },
     ],
   );
+});
+
+test('plugin discovery keeps every declaration when several share a type name', () => {
+  const text = `
+config {
+  plugins {
+    SamePlugin { targetFolder "one" }
+    SamePlugin { targetFolder "two" }
+    OtherPlugin { targetFolder "three" }
+  }
+}`;
+  const model = parseModel(text);
+  assert.ok(model);
+  assert.deepEqual(
+    model.plugins.map(({ name, config }) => ({ name, targetFolder: config.targetFolder })),
+    [
+      { name: 'SamePlugin', targetFolder: 'one' },
+      { name: 'SamePlugin', targetFolder: 'two' },
+      { name: 'OtherPlugin', targetFolder: 'three' },
+    ],
+  );
+  assert.notEqual(model.plugins[0]?.offsets[0], model.plugins[1]?.offsets[0]);
+  const first = text.indexOf('SamePlugin { targetFolder "one" }');
+  const second = text.indexOf('SamePlugin { targetFolder "two" }');
+  assert.equal(model.plugins[0]?.offsets[0], first);
+  assert.equal(model.plugins[1]?.offsets[0], second);
+  assert.equal(findRunnablePlugin(model, 'SamePlugin', second)?.config.targetFolder, 'two');
+  assert.equal(findRunnablePlugin(model, 'SamePlugin', first)?.config.targetFolder, 'one');
 });
 
 test('an unfinished plugin recovered by ANTLR is not exposed as runnable', () => {

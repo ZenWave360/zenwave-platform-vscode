@@ -102,6 +102,32 @@ test('CLI options keep declaration order and are quoted like any other value', (
   assert.match(command, /--input="\/work\/My Project\/orders\.zdl"/);
 });
 
+test('config-level CLI options are inherited, overridden locally, and excluded by inherit false', () => {
+  const text = `
+config {
+  --force
+  --profile="local build"
+  plugins {
+    InheritedPlugin { --profile=test }
+    SecondPlugin {}
+    StandalonePlugin (inherit false) { --local }
+  }
+}`;
+  const parsed = parseModel(text);
+  assert.ok(parsed);
+  const inherited = buildSdkArguments(parsed, parsed.plugins[0]!, '/work/orders.zdl', settings);
+  const second = buildSdkArguments(parsed, parsed.plugins[1]!, '/work/orders.zdl', settings);
+  const standalone = buildSdkArguments(parsed, parsed.plugins[2]!, '/work/orders.zdl', settings);
+
+  assert.equal(inherited.filter((argument) => argument === '--force').length, 1);
+  assert.ok(inherited.includes('--profile=test'));
+  assert.ok(!inherited.includes('--profile=local build'));
+  assert.deepEqual(second.slice(-2), ['--force', '--profile=local build']);
+  assert.ok(!standalone.includes('--force'));
+  assert.ok(!standalone.includes('--profile=local build'));
+  assert.ok(standalone.includes('--local'));
+});
+
 test('configured CLI and extra arguments wrap the assembled command', () => {
   const command = posix(main, '/work/orders.zdl', {
     cliCommand: 'zw',
@@ -168,4 +194,25 @@ test('a Windows CLI command path is invoked, not echoed, in PowerShell', () => {
     'powershell',
   );
   assert.match(command, /^& 'C:\\Program Files\\jbang\\jbang\.cmd' zw -p MainPlugin /);
+});
+
+test('each same-type plugin declaration builds its own command', () => {
+  const text = `
+config {
+  plugins {
+    SamePlugin { targetFolder "one" }
+    SamePlugin { targetFolder "two" }
+  }
+}`;
+  const parsed = parseModel(text);
+  assert.ok(parsed);
+  assert.equal(parsed.plugins.length, 2);
+  const first = buildSdkCommand(parsed, parsed.plugins[0]!, '/work/orders.zdl', settings, 'posix');
+  const second = buildSdkCommand(parsed, parsed.plugins[1]!, '/work/orders.zdl', settings, 'posix');
+  assert.match(first, /-p SamePlugin /);
+  assert.match(second, /-p SamePlugin /);
+  assert.match(first, /targetFolder=one/);
+  assert.match(second, /targetFolder=two/);
+  assert.doesNotMatch(first, /targetFolder=two/);
+  assert.doesNotMatch(second, /targetFolder=one/);
 });

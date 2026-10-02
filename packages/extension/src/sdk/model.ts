@@ -11,12 +11,17 @@ export interface SourceRange {
   readonly end: { readonly line: number; readonly character: number };
 }
 
+export interface CliOption {
+  readonly name: string;
+  readonly value?: string;
+}
+
 export interface PluginDeclaration {
   readonly name: string;
   readonly disabled: boolean;
   readonly inherit: boolean;
   readonly config: Readonly<Record<string, ModelValue>>;
-  readonly cliOptions: readonly { readonly name: string; readonly value?: string }[];
+  readonly cliOptions: readonly CliOption[];
   readonly location: SourceRange;
   readonly offsets: readonly [number, number];
 }
@@ -28,6 +33,7 @@ export interface ModelImport {
 
 export interface ParsedModel {
   readonly config: Readonly<Record<string, ModelValue>>;
+  readonly cliOptions: readonly CliOption[];
   readonly plugins: readonly PluginDeclaration[];
   readonly imports: readonly ModelImport[];
   readonly locations: Readonly<Record<string, SourceRange>>;
@@ -124,7 +130,7 @@ function readsAsInheritance(value: unknown): boolean {
   return value !== false;
 }
 
-function cliOptions(value: unknown): PluginDeclaration['cliOptions'] {
+function cliOptions(value: unknown): readonly CliOption[] {
   if (!isObject(value)) {
     return [];
   }
@@ -155,13 +161,13 @@ export function parseModel(text: string): ParsedModel | undefined {
   }
 
   const plugins: PluginDeclaration[] = [];
-  if (isObject(value.plugins)) {
-    for (const [mapName, rawPlugin] of Object.entries(value.plugins)) {
+  if (Array.isArray(value.pluginsList)) {
+    for (const [index, rawPlugin] of value.pluginsList.entries()) {
       if (!isObject(rawPlugin)) {
         continue;
       }
-      const name = typeof rawPlugin.name === 'string' ? rawPlugin.name : mapName;
-      const rawLocation = rawLocations[`plugins.${name}`];
+      const name = typeof rawPlugin.name === 'string' ? rawPlugin.name : `plugin${index}`;
+      const rawLocation = rawLocations[`pluginsList.${index}`];
       const location = toSourceRange(rawLocation, text);
       const offsets = locationOffsets(rawLocation);
       if (!location || !offsets) {
@@ -203,6 +209,7 @@ export function parseModel(text: string): ParsedModel | undefined {
 
   return {
     config: asObject(value.config),
+    cliOptions: cliOptions(value.cliOptions),
     plugins,
     imports,
     locations,
@@ -238,6 +245,24 @@ export function pluginAtOffset(
   return model.plugins.find(
     (plugin) => plugin.offsets[0] <= offset && offset <= plugin.offsets[1],
   );
+}
+
+/** The declaration to run: the instance at `offset` when several share a type name. */
+export function findRunnablePlugin(
+  model: ParsedModel,
+  name: string,
+  offset?: number,
+): PluginDeclaration | undefined {
+  const enabled = model.plugins.filter((plugin) => plugin.name === name && !plugin.disabled);
+  if (offset !== undefined) {
+    const atOffset = enabled.find(
+      (plugin) => plugin.offsets[0] <= offset && offset <= plugin.offsets[1],
+    );
+    if (atOffset) {
+      return atOffset;
+    }
+  }
+  return enabled[0];
 }
 
 const COMPLETION_PLUGIN = '__ZenWaveCompletionPlugin__';

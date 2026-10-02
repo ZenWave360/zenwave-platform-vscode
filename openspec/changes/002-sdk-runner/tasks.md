@@ -45,6 +45,10 @@
 - [x] 3.5 Skip plugins declared `disabled`
 - [x] 3.6 Fixtures: a model with three plugins, one of them disabled; a model
       with no `config` block; a model with an unbalanced brace
+- [x] 3.7 Every declaration of the same plugin type is runnable, each with its
+      own options and Run action
+- [x] 3.8 Read configuration-level CLI options from the parser's top-level
+      `cliOptions` output without inspecting or reparsing source text
 
 ## 4. Command assembly
 
@@ -62,6 +66,11 @@
       values containing whitespace — test with a Windows path containing a space
 - [x] 4.10 Unit-test assembly against the IntelliJ behaviour, one test per rule in
       the delta spec
+- [x] 4.11 Inherit configuration-level CLI options unless the plugin declares
+      `(inherit false)`; let a plugin-local option replace a same-named inherited
+      option without duplication, preserving deterministic declaration order
+- [x] 4.12 Cover shared valueless flags, valued options, local overrides,
+      inheritance opt-out and multiple plugin declarations in unit tests
 
 ## 5. CodeLens
 
@@ -82,10 +91,12 @@
 - [x] 6.4 ~~Check workspace trust before the catalogue too~~ — superseded: no
       catalogue process is started (see 11.3)
 - [x] 6.5 Surface a non-zero exit as a failed run
-- [x] 6.6 `TaskPanelKind.Dedicated`, so repeated runs of one plugin reuse their
-      terminal instead of opening another
+- [x] 6.6 `TaskPanelKind.Dedicated`, with the assembled command in the task
+      definition, so the same command reuses a terminal and a different command
+      opens another
 - [ ] 6.7 Confirm a run never lands in a terminal the user opened themselves
-- [ ] 6.8 Check what running a plugin does while its previous run is still going
+- [x] 6.8 Different commands, including two declarations of the same plugin
+      type, run concurrently in their own task terminals
 - [x] 6.9 A setting choosing between the inherited environment and a login shell,
       honoured by the runner **and** the catalogue
 - [x] 6.10 Diagnose a command that cannot be found, without starting the SDK:
@@ -146,16 +157,16 @@
 
 ## 9. Verification
 
-Automated portions of 9.3, 9.6, 9.9, 9.10, 9.12 and 11.6 pass locally in
+Automated portions of 6.8, 9.3, 9.6, 9.9, 9.10, 9.12 and 11.6 pass locally in
 `test/smoke.ts`: enabled-only desktop lenses, no browser lenses, shipped plugin
-and option completion/hover, option-edit terminal reuse with a fixture CLI,
+and option completion/hover, option-edit opens a new terminal with a fixture CLI,
 unsupported-shell refusal, and missing-executable refusal with PATH diagnostics.
 These tasks stay open for the human's real-SDK and UI checks.
 
 - [x] 9.1 `npm run typecheck`, `npm run lint`, `npm run build`
 - [x] 9.2 Browser bundle still free of Node APIs after adding `@zenwave360/dsl`
 - [ ] 9.3 Desktop: lenses appear on the fixture, a run generates into the right
-      directory, and running the same plugin twice reuses one terminal
+      directory, and running the same command twice reuses one terminal
 - [ ] 9.4 Desktop: a failing plugin reports failure
 - [ ] 9.5 Restricted Mode: the run refuses and explains
 - [ ] 9.6 Desktop: plugin-name and option completion and hover come from the
@@ -177,8 +188,8 @@ These tasks stay open for the human's real-SDK and UI checks.
 
 ## 11. Review follow-ups (2026-09-16)
 
-- [x] 11.1 Keep the assembled command out of the task definition, so running a
-      plugin after editing it reuses its terminal
+- [x] 11.1 Put the assembled command in the task definition, so a later Run
+      reuses a terminal only when the command is unchanged
 - [x] 11.2 Quote every model and settings value for the task's shell — POSIX or
       PowerShell — including CLI options; refuse `cmd.exe` and other shells, and
       PowerShell arguments containing a double quote, with an explanation
@@ -189,8 +200,9 @@ These tasks stay open for the human's real-SDK and UI checks.
 - [ ] 11.5 **Upstream (`dsl-kotlin`):** numbers are JS numbers in `parseZdl`
       output, and a negative number keeps its sign — filed in `zenwave-specs`
       `001-ide-client-contracts` task 4.6
-- [ ] 11.6 Desktop: run the same plugin, edit an option, run it again — one
-      terminal; with tasks defaulting to `cmd`, Run refuses and explains
+- [ ] 11.6 Desktop: run a plugin, edit an option, run it again — a second
+      terminal; run the same command again — that second terminal; with tasks
+      defaulting to `cmd`, Run refuses and explains
 - [ ] 11.7 Decide whether and when an installed SDK is asked for its catalogue
       (design: "The installed SDK is not asked, for now")
 

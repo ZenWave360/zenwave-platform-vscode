@@ -18,6 +18,13 @@ const packaged = [
   ...built.map((file) => `extension/${file}`),
 ];
 
+test('the ZenWave task definition registers the command as terminal identity', () => {
+  const taskDefinition = manifest.contributes?.taskDefinitions?.find(
+    (definition: { type?: string }) => definition.type === 'zenwave-sdk',
+  );
+  assert.equal(taskDefinition?.properties?.command?.type, 'string');
+});
+
 test('the committed list covers everything package.json refers to', () => {
   const listedSet = new Set(listed);
   assert.deepEqual(

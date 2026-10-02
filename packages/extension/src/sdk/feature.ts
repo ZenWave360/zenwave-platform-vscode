@@ -6,6 +6,7 @@ import { buildSdkCommand, findUnquotableArgument, splitCommandLine } from './com
 import { readSdkSettings, taskShell, type SdkProcessService, type SdkSettings } from './host.js';
 import { loginShellArguments, shellFamily, type ShellFamily } from './shell.js';
 import {
+  findRunnablePlugin,
   isPluginNamePosition,
   ModelCache,
   pluginAtOffset,
@@ -18,17 +19,20 @@ const RUN_COMMAND = 'zenwave.sdk.run';
 interface RunPluginRequest {
   readonly uri: string;
   readonly plugin: string;
+  readonly offset?: number;
 }
 
 /**
- * Only what identifies a plugin. VS Code derives a task's identity, and so its
- * dedicated terminal, from every property of the definition: anything that
- * changes when the declaration is edited must stay out of it.
+ * VS Code derives a task's identity, and so its dedicated terminal, from the
+ * properties registered for this task type. `command` makes the assembled
+ * command line part of that identity: the same command reuses a terminal, while
+ * a different one opens another, including two runs of the same plugin.
  */
 interface ZenWaveTaskDefinition extends vscode.TaskDefinition {
   readonly type: typeof TASK_TYPE;
   readonly plugin: string;
   readonly file: string;
+  readonly command?: string;
 }
 
 function asRange(range: SourceRange): vscode.Range {
@@ -47,11 +51,19 @@ function directoryOf(uri: vscode.Uri): string {
 }
 
 function asTaskDefinition(value: vscode.TaskDefinition): ZenWaveTaskDefinition | undefined {
-  return value.type === TASK_TYPE &&
-    typeof value.plugin === 'string' &&
-    typeof value.file === 'string'
-    ? { type: TASK_TYPE, plugin: value.plugin, file: value.file }
-    : undefined;
+  if (
+    value.type !== TASK_TYPE ||
+    typeof value.plugin !== 'string' ||
+    typeof value.file !== 'string'
+  ) {
+    return undefined;
+  }
+  return {
+    type: TASK_TYPE,
+    plugin: value.plugin,
+    file: value.file,
+    ...(typeof value.command === 'string' ? { command: value.command } : {}),
+  };
 }
 
 function fileUri(
@@ -96,37 +108,42 @@ interface TaskContext {
   readonly processService: SdkProcessService;
 }
 
-/** Builds the task from the model as it is now, or explains why it cannot run. */
+/** Builds the task from the stored command, or from the model as it is now. */
 async function buildTask(
   definition: ZenWaveTaskDefinition,
   scope: vscode.WorkspaceFolder | vscode.TaskScope,
   context: TaskContext,
+  offset?: number,
 ): Promise<vscode.Task | string> {
   const uri = fileUri(definition.file, scope);
-  const document = await vscode.workspace.openTextDocument(uri);
-  const model = context.models.get(document.uri.toString(), document.version, document.getText());
-  const plugin = model?.plugins.find(
-    (candidate) => candidate.name === definition.plugin && !candidate.disabled,
-  );
-  if (!model || !plugin) {
-    return `Plugin ${definition.plugin} is not a runnable declaration in ${uri.fsPath}.`;
-  }
-
   const settings = readSdkSettings(uri);
   const resolution = resolveShell(settings, context.processService.platform);
   if ('refusal' in resolution) {
     return resolution.refusal;
   }
 
-  const unquotable = findUnquotableArgument(
-    model,
-    plugin,
-    uri.fsPath,
-    settings,
-    resolution.family,
-  );
-  if (unquotable !== undefined) {
-    return `Refusing to run ${definition.plugin} through PowerShell: the argument ${JSON.stringify(unquotable)} contains a double quote, which PowerShell cannot pass to the SDK intact. Remove the double quote, or run through a POSIX shell (zenwave.sdk.environment loginShell with zenwave.sdk.loginShell set to bash).`;
+  let commandLine = definition.command;
+  if (commandLine === undefined) {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const model = context.models.get(document.uri.toString(), document.version, document.getText());
+    const plugin = model
+      ? findRunnablePlugin(model, definition.plugin, offset)
+      : undefined;
+    if (!model || !plugin) {
+      return `Plugin ${definition.plugin} is not a runnable declaration in ${uri.fsPath}.`;
+    }
+
+    const unquotable = findUnquotableArgument(
+      model,
+      plugin,
+      uri.fsPath,
+      settings,
+      resolution.family,
+    );
+    if (unquotable !== undefined) {
+      return `Refusing to run ${definition.plugin} through PowerShell: the argument ${JSON.stringify(unquotable)} contains a double quote, which PowerShell cannot pass to the SDK intact. Remove the double quote, or run through a POSIX shell (zenwave.sdk.environment loginShell with zenwave.sdk.loginShell set to bash).`;
+    }
+    commandLine = buildSdkCommand(model, plugin, uri.fsPath, settings, resolution.family);
   }
 
   const cwd = directoryOf(uri);
@@ -152,9 +169,13 @@ async function buildTask(
     options.executable = resolution.shell;
     options.shellArgs = [...(loginShellArguments(resolution.shell) ?? [])];
   }
-  const commandLine = buildSdkCommand(model, plugin, uri.fsPath, settings, resolution.family);
   const task = new vscode.Task(
-    definition,
+    {
+      type: TASK_TYPE,
+      plugin: definition.plugin,
+      file: definition.file,
+      command: commandLine,
+    } satisfies ZenWaveTaskDefinition,
     scope,
     `Run ${definition.plugin}`,
     'ZenWave SDK',
@@ -228,7 +249,11 @@ class SdkCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable 
                 : buildSdkCommand(model, plugin, document.uri.fsPath, settings, resolution.family),
             command: RUN_COMMAND,
             arguments: [
-              { uri: document.uri.toString(), plugin: plugin.name } satisfies RunPluginRequest,
+              {
+                uri: document.uri.toString(),
+                plugin: plugin.name,
+                offset: plugin.offsets[0],
+              } satisfies RunPluginRequest,
             ],
           }),
       );
@@ -364,7 +389,8 @@ function isRunRequest(value: unknown): value is RunPluginRequest {
     'uri' in value &&
     typeof value.uri === 'string' &&
     'plugin' in value &&
-    typeof value.plugin === 'string'
+    typeof value.plugin === 'string' &&
+    (!('offset' in value) || typeof (value as { offset: unknown }).offset === 'number')
   );
 }
 
@@ -404,6 +430,7 @@ async function runPlugin(
     { type: TASK_TYPE, plugin: request.plugin, file: uri.fsPath },
     vscode.workspace.getWorkspaceFolder(uri) ?? vscode.TaskScope.Workspace,
     context,
+    request.offset,
   );
   if (typeof task === 'string') {
     await reportRefusal(task, logger);

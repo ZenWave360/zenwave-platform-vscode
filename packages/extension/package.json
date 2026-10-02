@@ -39,6 +39,20 @@
   ],
   "main": "./dist/node/extension.js",
   "browser": "./dist/browser/extension.js",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "build:smoke": "node esbuild.mjs --tests",
+    "watch": "node esbuild.mjs --watch",
+    "package": "node scripts/package.mjs",
+    "generate:sdk-catalogue": "node scripts/generate-sdk-catalogue.mjs",
+    "verify:vsix": "node scripts/verify-vsix.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test test/unit/*.test.ts",
+    "test:desktop": "npm run build && npm run build:smoke && node scripts/run-desktop-smoke.mjs",
+    "test:browser": "npm run build && npm run build:smoke && node scripts/run-browser-smoke.mjs",
+    "run-in-browser": "npm run build && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. fixtures",
+    "serve-web": "npm run build && vscode-test-web --browser=none --quality=stable --extensionDevelopmentPath=. fixtures"
+  },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
     "version": "0.1.0-SNAPSHOT"
@@ -502,6 +516,10 @@
           "file": {
             "type": "string",
             "description": "Model file declaring the plugin, absolute or relative to the workspace folder. The command is assembled from the declaration when the task runs."
+          },
+          "command": {
+            "type": "string",
+            "description": "Assembled command line. ZenWave uses this as part of the task identity so only an identical command reuses its terminal."
           }
         }
       }
@@ -683,20 +701,6 @@
         }
       }
     ]
-  },
-  "scripts": {
-    "build": "node esbuild.mjs",
-    "build:smoke": "node esbuild.mjs --tests",
-    "watch": "node esbuild.mjs --watch",
-    "package": "node scripts/package.mjs",
-    "generate:sdk-catalogue": "node scripts/generate-sdk-catalogue.mjs",
-    "verify:vsix": "node scripts/verify-vsix.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test test/unit/*.test.ts",
-    "test:desktop": "npm run build && npm run build:smoke && node scripts/run-desktop-smoke.mjs",
-    "test:browser": "npm run build && npm run build:smoke && node scripts/run-browser-smoke.mjs",
-    "run-in-browser": "npm run build && vscode-test-web --browser=chromium --quality=stable --extensionDevelopmentPath=. fixtures",
-    "serve-web": "npm run build && vscode-test-web --browser=none --quality=stable --extensionDevelopmentPath=. fixtures"
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0",

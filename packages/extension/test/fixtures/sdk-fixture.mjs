@@ -6,3 +6,9 @@ const output = 'sdk-invocations.json';
 const invocations = fs.existsSync(output) ? JSON.parse(fs.readFileSync(output, 'utf8')) : [];
 invocations.push(process.argv.slice(2));
 fs.writeFileSync(output, JSON.stringify(invocations));
+
+const delayArgument = process.argv.find((argument) => argument.startsWith('--smoke-delay='));
+const delay = Number(delayArgument?.slice('--smoke-delay='.length) ?? 0);
+if (Number.isFinite(delay) && delay > 0) {
+  await new Promise((resolve) => setTimeout(resolve, delay));
+}
