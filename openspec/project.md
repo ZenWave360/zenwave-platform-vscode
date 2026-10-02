@@ -19,7 +19,7 @@ we do not reimplement them.
 
 | Release | Owns |
 | --- | --- |
-| **zenwave-architecture** | `manifest-core`, `manifest-graph`, `workspace-runtime`, MCP adapter, **all architectural semantics** |
+| **zenwave-architecture** | `architecture-manifest`, `architecture-graph`, `workspace-runtime`, MCP adapter, **all architectural semantics** |
 | **zenwave-lsp** | LSP mapping, document/language services, JVM + JS transports, IntelliJ and VS Code clients |
 | **zenwave-architectural-vistas** | Visualization packages under the `@zenwave360` scope — `vistas-eventflow` (EventFlow and Service Map renderers, view-model contracts), `eventcatalog-components`, and the webview bundle both IDE plugins embed |
 
@@ -34,7 +34,7 @@ passing.
 
 ### Kotlin Multiplatform is the engine; TypeScript is the shell
 
-The language stack (`dsl-kotlin`, `manifest-core`, `lsp-core`) is Kotlin
+The language stack (`dsl-kotlin`, `architecture-manifest`, `lsp-core`) is Kotlin
 Multiplatform with a JS target. We lean on that rather than reimplementing
 parsing or semantics in TypeScript.
 

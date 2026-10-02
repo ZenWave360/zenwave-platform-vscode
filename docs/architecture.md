@@ -137,7 +137,7 @@ All three upstreams are work in progress. If a question is about what a model
 
 | Release | Owns |
 | --- | --- |
-| **zenwave-architecture** | `manifest-core`, `manifest-graph`, `workspace-runtime`, MCP adapter, all architectural semantics |
+| **zenwave-architecture** | `architecture-manifest`, `architecture-graph`, `workspace-runtime`, MCP adapter, all architectural semantics |
 | **zenwave-lsp** | LSP mapping, document/language services, JVM + JS transports, IntelliJ and VS Code clients |
 | **zenwave-architectural-vistas** | `@zenwave360/vistas-eventflow` and the other visualization packages, plus the webview bundle both IDE plugins embed |
 

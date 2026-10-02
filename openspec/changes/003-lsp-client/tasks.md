@@ -16,10 +16,10 @@ Track them here so the blocker is visible rather than discovered.
       `dist/server`, pinned exactly in `package.json` `zenwaveLanguageServer`, not an npm dependency.
 - [x] 1.3 `zenwave-specs`: `002-kmp-browser-support` — the shared Kotlin
       libraries loading in a browser at all. One Node import at the bottom of the
-      chain (ref-parser → manifest-core → manifest-graph → workspace-runtime →
+      chain (ref-parser → architecture-manifest → architecture-graph → workspace-runtime →
       lsp-core → lsp-js) is what stops the web host today, and nothing done in
       `zenwave-lsp` fixes it
-      What this repo needs loads: the worker bundle (ref-parser, manifest-core, lsp-core, dsl-kotlin)
+      What this repo needs loads: the worker bundle (ref-parser, architecture-manifest, lsp-core, dsl-kotlin)
       starts in the `@vscode/test-web` extension host and answers diagnostics, hover and all seven
       `zenwave/*` requests (`npm run test:browser`). Caveat: lsp-core at d7156e7 does not use
       workspace-runtime, so that link of the chain is not exercised (store 002 3.1 remains open).
