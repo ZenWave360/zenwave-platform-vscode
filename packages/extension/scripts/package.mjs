@@ -9,7 +9,11 @@ const require = createRequire(import.meta.url);
 const manifest = JSON.parse(fs.readFileSync(path.join(projectDir, 'package.json'), 'utf8'));
 const changelog = fs.readFileSync(path.join(projectDir, 'CHANGELOG.md'), 'utf8');
 const tag = process.env.ZENWAVE_RELEASE_TAG?.trim();
-const requestedOutput = process.argv[process.argv.indexOf('--out') + 1];
+const outFlagIndex = process.argv.indexOf('--out');
+const requestedOutput = outFlagIndex >= 0 ? process.argv[outFlagIndex + 1] : undefined;
+if (outFlagIndex >= 0 && !requestedOutput) {
+  throw new Error('Missing value for --out');
+}
 const output = requestedOutput || path.join(projectDir, `${manifest.name}-${manifest.version}.vsix`);
 
 let preRelease = false;
