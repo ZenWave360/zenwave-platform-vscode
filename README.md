@@ -22,15 +22,14 @@ flow modelling across bounded contexts).
 The last row is not an omission. `zenwave-sdk` is JVM-only and launched through
 JBang, so it cannot run in a browser. Rather than showing a button that fails,
 the extension detects what the host can do and hides what it cannot — see
-[`openspec/project.md`](openspec/project.md).
+[client architecture](https://github.com/ZenWave360/zenwave-specs/blob/main/zenwave-platform-vscode/architecture.md).
 
 ## Repository layout
 
 ```
 packages/extension/        the VS Code extension
 packages/preview-renderer/ ZDL/ZFL → Markdown + Mermaid   (placeholder)
-openspec/                  specs and change proposals — read this first
-docs/                      architecture and decision records
+docs/                      pointer to the design documentation in zenwave-specs
 ```
 
 The EventFlow diagram is **not** built here. It lives upstream in
@@ -56,28 +55,19 @@ that works on the desktop can still be broken in the browser.
 
 ## How work happens here
 
-This project uses spec-driven development. **Read
-[`openspec/README.md`](openspec/README.md) before writing code** — behaviour is
-proposed and reviewed as a spec delta first.
+The design documentation for the whole platform lives in
+[`zenwave-specs`](https://github.com/ZenWave360/zenwave-specs/blob/main/README.md), and the part for this project is in
+[`zenwave-specs/zenwave-platform-vscode`](https://github.com/ZenWave360/zenwave-specs/blob/main/zenwave-platform-vscode). **Read
+[`AGENTS.md`](AGENTS.md) before writing code** — behaviour is described there first,
+then implemented here.
 
-We use the [OpenSpec](https://github.com/Fission-AI/OpenSpec) CLI:
+Spec and code are jointly authoritative: the spec owns observable behaviour and
+contracts, the code owns implementation. When they disagree, that is a decision to
+make, not an automatic rewrite.
 
-```bash
-npm i -g @fission-ai/openspec   # mind the scope: plain `openspec` is an empty placeholder
-openspec list                   # in-flight changes
-openspec doctor                 # healthy root? do references resolve?
-```
-
-One deviation from upstream: **the spec is not the single source of truth.**
-Spec and code are jointly authoritative — the spec owns observable behaviour and
-contracts, the code owns implementation. When they disagree, that is a decision
-to make, not an automatic rewrite.
-
-This repo is its own OpenSpec root and reads the shared `zenwave-specs` store as
-a read-only reference. Behaviour local to this client stays here; contracts that
-bind repos together go to the store.
-
-Current work: [`openspec/changes/`](openspec/changes/).
+Behaviour local to this client is documented under `zenwave-platform-vscode/`;
+contracts that bind repositories together are under `flows/`. Current work is in
+`zenwave-platform-vscode/work/`.
 
 ## Upstream
 

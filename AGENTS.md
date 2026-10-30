@@ -4,95 +4,54 @@ Applies to humans and coding agents alike.
 
 ## Read first
 
-1. [`openspec/README.md`](openspec/README.md) — the spec-driven workflow
-2. [`openspec/project.md`](openspec/project.md) — project context and settled decisions
-3. [`docs/architecture.md`](docs/architecture.md) — how the pieces fit
+1. [`zenwave-specs/AGENTS.md`](https://github.com/ZenWave360/zenwave-specs/blob/main/AGENTS.md) — how specs and code relate, and the workflow
+2. [`zenwave-specs/zenwave-platform-vscode/architecture.md`](https://github.com/ZenWave360/zenwave-specs/blob/main/zenwave-platform-vscode/architecture.md) — how this client is built
+3. [`zenwave-specs/architecture/stack.md`](https://github.com/ZenWave360/zenwave-specs/blob/main/architecture/stack.md) — how the pieces fit, and [`status`](https://github.com/ZenWave360/zenwave-specs/blob/main/architecture/status.md) for what is built
+
+In the workspace these are at `../zenwave-specs/`. [`docs/README.md`](docs/README.md)
+lists every document for this project. Cross-repository flows (EventFlow, the LSP
+requests, the webview protocol) are under `flows/` there.
 
 ## The workflow, briefly
 
-Behaviour is **proposed as a spec delta and reviewed before it is implemented**.
-
-```bash
-openspec new change <name>          # scaffold changes/<name>/
-#   proposal.md   why, what changes, capabilities, impact
-#   design.md     technical approach and tradeoffs (skip for trivial changes)
-#   tasks.md      implementation checklist
-#   specs/<capability>/spec.md      the DELTA against openspec/specs/
-
-openspec validate <name> --strict   # before review
-openspec status --change <name>     # while implementing
-openspec archive <name>             # folds deltas into specs/, moves to archive/
-```
-
-Archiving is the step that keeps the living spec honest. A change is not done
-when the code merges. `openspec archive` validates first and does the fold, so
-there is no excuse to skip it.
-
-Requires `npm i -g @fission-ai/openspec` — mind the scope; the unscoped
-`openspec` package is an empty 0.0.0 placeholder.
+Behaviour is **described in `zenwave-specs` first**, then implemented here. Edit the
+document, mark the rule *proposed*, implement, and flip it to *exists* when the code
+makes it true. Cite the rule in the commit as `spec:<document>#<id>`.
 
 ## Rules that are easy to get wrong
 
-**Never edit `openspec/specs/` directly.** It is the archived result of deltas.
-Propose a change instead, and let `openspec archive` do the fold.
+**Cross-repo contracts do not belong in this repo's code comments or docs.**
+Behaviour local to this VS Code client goes in `zenwave-specs/zenwave-platform-vscode/`.
+Anything that binds repos together (LSP surface, view-model shapes, manifest
+semantics, SDK CLI contract, what the DSL parser returns) goes in
+`zenwave-specs/flows/`. The test: would breaking it break another repo?
 
-**Check `openspec list --specs` before naming a capability.** Plain
-`openspec list` shows in-flight *changes*, not specs — confusing the two is how
-a near-duplicate capability gets introduced.
-
-**Cross-repo contracts do not belong here.** This repo is its own OpenSpec root
-and references the shared `zenwave-specs` store read-only. Behaviour local to
-this VS Code client stays here; anything that binds repos together (LSP surface,
-view-model shapes, manifest semantics, SDK CLI contract, what the DSL parser
-returns) goes to the store with an explicit `--store zenwave-specs`. The test:
-would breaking it break another repo?
-
-**When the blocker is upstream, file it — do not just report it.** This client
-sits downstream of four moving repositories, and most of what blocks it is in one
-of them. Writing "blocked on X" into a run report leaves a person to carry the
-message to another repository, which is how a blocker sits for a month.
-
-Instead:
-
-1. Record the need in the store as a requirement — what a consumer must be able
-   to rely on, in the store's own vocabulary, not as a patch for this client.
-2. Add the work to that store change's task section for the repository that owns
-   it, with the evidence: the file, the line, and what breaks without it.
-3. Leave the local prerequisite in this repo's `tasks.md` phrased as *"this is
-   available to me"*, and tick it when it is — not when somebody upstream says
-   they did it.
-
-The store is the queue. An upstream repository's agent reads its own section,
-does the work, and ticks it there. Nobody carries anything between repositories
-by hand.
+**When the blocker is upstream, file it — do not just report it.** This client sits
+downstream of moving repositories, and most of what blocks it is in one of them.
+Record the need in the spec as a rule or numbered question, add the work to the
+[backlog](https://github.com/ZenWave360/zenwave-specs/blob/main/work/backlog.md) under the repository that owns it (with the file, the line and what breaks), and
+phrase the local prerequisite as *"this is available to me"*, ticked when it is. The
+full procedure is in `zenwave-specs/AGENTS.md`.
 
 **Small additive upstream fixes may be made directly.** Mirroring a pattern that
 already exists in that repository, with a test, and changing nothing an existing
 consumer sees — that is cheaper to do than to file. Anything that changes a shape
-another consumer reads is not: an agent that knows only this client will design
-for this client, and the other IDE finds out when it breaks.
-
-**Do not put implementation detail in a spec.** The test: could a user or a
-neighbouring system notice it? Command ids, activation conditions, rendered
-output, settings keys, fallback behaviour — yes. Class structure, bundler choice,
-memoisation — no.
-
-**Every requirement needs a `#### Scenario:`.** A requirement without one is a
-wish, and usually turns out to be vague once you try to write the scenario.
+another consumer reads is not: an agent that knows only this client will design for
+this client, and the other IDE finds out when it breaks.
 
 **Never import a Node API from shared code.** Only `src/node/` may. The browser
-bundle is built with `platform: browser` and a transitively-reached `node:fs`
-fails at runtime inside a Web Worker, not at build time. Keeping the Node surface
-in one file is what makes this structural rather than a matter of discipline.
+bundle is built with `platform: browser` and a transitively-reached `node:fs` fails
+at runtime inside a Web Worker, not at build time. Keeping the Node surface in one
+file is what makes this structural rather than a matter of discipline.
 
 **Gate features on host capabilities, do not let them fail.** `zenwave-sdk` is
 JVM-only via JBang and can never run in a browser. Hide what cannot work, and log
 why to the output channel.
 
-**Do not reimplement model semantics.** Parsing and semantics come from the
-Kotlin Multiplatform packages (`@zenwave360/dsl`, and later
-`@zenwave360/lsp-js`). If TypeScript is about to grow an opinion about what a
-model means, that is a signal to push the work upstream.
+**Do not reimplement model semantics.** Parsing and semantics come from the Kotlin
+Multiplatform packages (`@zenwave360/dsl`, and later `@zenwave360/lsp-js`). If
+TypeScript is about to grow an opinion about what a model means, that is a signal to
+push the work upstream.
 
 ## Conventions
 
@@ -103,11 +62,11 @@ model means, that is a signal to push the work upstream.
 ## Verify before claiming done
 
 ```bash
-openspec validate --all --strict
+node ../zenwave-specs/tools/check-refs.mjs .
 npm run typecheck
 npm run build
 npm run run-in-browser
 ```
 
-Test **both** hosts. A change that works on the desktop can still be broken in
-the browser, and the browser failure will not show up in a build.
+Test **both** hosts. A change that works on the desktop can still be broken in the
+browser, and the browser failure will not show up in a build.

@@ -28,7 +28,6 @@
     "serve-web": "npm run serve-web --workspace packages/extension"
   },
   "devDependencies": {
-    "@fission-ai/openspec": "^1.13.0",
     "@types/node": "^20.14.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",

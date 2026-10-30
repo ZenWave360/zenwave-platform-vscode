@@ -45,9 +45,6 @@ jobs:
           npm run generate:sdk-catalogue --workspace packages/extension
           git diff --exit-code -- packages/extension/resources/sdk-plugin-catalogue.json
 
-      - name: Validate OpenSpec changes
-        run: npx openspec validate --all --strict
-
       - name: Typecheck
         run: npm run typecheck
 

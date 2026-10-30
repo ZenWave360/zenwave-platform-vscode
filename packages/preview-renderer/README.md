@@ -7,6 +7,6 @@ Not implemented yet. Planned for the `markdown-preview` change:
 - Port the Handlebars renderer from `zdl-vscode/src/web/preview/`
 - Put it behind a `PreviewProvider` interface so an LSP-backed provider can
   replace it once `lsp-core` grows a `zenwave/preview` capability
-- Emit Mermaid rather than PlantUML — see `docs/architecture.md`
+- Emit Mermaid rather than PlantUML — see [architecture.md](https://github.com/ZenWave360/zenwave-specs/blob/main/zenwave-platform-vscode/architecture.md)
 
-Do not add code here without a change proposal in `openspec/changes/`.
+Do not add code here without a rule in [model-preview](https://github.com/ZenWave360/zenwave-specs/blob/main/zenwave-platform-vscode/model-preview.md).
