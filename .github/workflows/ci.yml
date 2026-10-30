@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ZENWAVE_BUILD_COMMIT: ${{ github.sha }}
+      ZENWAVE_USE_LOCAL_DEPENDENCIES: 'false'
       VSIX: artifacts/zenwave-platform.vsix
 
     steps:

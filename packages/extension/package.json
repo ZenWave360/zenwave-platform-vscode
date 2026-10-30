@@ -55,7 +55,7 @@
   },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
-    "version": "0.1.0-SNAPSHOT"
+    "version": "0.1.0-next.12.1"
   },
   "zenwaveEventFlowWebview": {
     "package": "@zenwave360/vistas-eventflow-webview",
@@ -724,6 +724,8 @@
     ]
   },
   "devDependencies": {
+    "@zenwave360/lsp-js": "0.1.0-next.12.1",
+    "@zenwave360/vistas-eventflow-webview": "0.1.0",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
@@ -732,7 +734,7 @@
     "tsx": "^4.23.13"
   },
   "dependencies": {
-    "@zenwave360/dsl": "1.9.0-SNAPSHOT",
+    "@zenwave360/dsl": "1.10.0",
     "vscode-languageclient": "9.0.1"
   }
 }

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import { builtinModules, createRequire } from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { linkedSiblings } from './scripts/siblings.mjs';
 
 const watch = process.argv.includes('--watch');
 const production = process.argv.includes('--production');
@@ -13,13 +14,14 @@ const packageManifest = JSON.parse(
   fs.readFileSync(path.join(projectDir, 'package.json'), 'utf8'),
 );
 
+/** A sibling linked by scripts/siblings.mjs is whatever that checkout last built, so its version can't match the pin. */
+const isLinkedSibling = (packageName) => linkedSiblings().some((sibling) => sibling.package === packageName);
+
 /**
  * The language server is `@zenwave360/lsp-js`, shipped inside the VSIX: its two
  * self-contained bundles are copied into dist/server. The version is pinned in
- * package.json (`zenwaveLanguageServer`) rather than declared as a dependency,
- * because the package is not on the npm registry yet and a lockfile entry for it
- * would resolve only on the machine that linked it. See README "Development
- * dependencies" and 003 design §Decision (task 1.2).
+ * package.json (`zenwaveLanguageServer`), with the same version as a dev
+ * dependency. See README "Development dependencies" and decision 0006.
  */
 const SERVER_BUNDLES = [
   { exportName: './node', target: 'dist/server/node/zenwave-lsp-server.js' },
@@ -31,12 +33,12 @@ const NEWLINE_INDENT = '\n  ';
 function languageServerPackage() {
   const pinned = packageManifest.zenwaveLanguageServer;
   const help = [
-    `${pinned.package}@${pinned.version} is needed to build the extension and is not on the npm registry yet.`,
-    'Link a local build without saving it:',
+    `${pinned.package}@${pinned.version} is needed to build the extension. Run npm ci, or link a local build without saving it:`,
     `  npm install --no-save --workspace packages/extension <zenwave-lsp>/lsp-js/build/npm-pack/zenwave360-lsp-js-${pinned.version}.tgz`,
     `or point ZENWAVE_LSP_JS_DIR at the unpacked package (<zenwave-lsp>/lsp-js/build/npm-package).`,
   ].join(NEWLINE_INDENT);
   let directory = process.env.ZENWAVE_LSP_JS_DIR?.trim();
+  const versionMustMatch = Boolean(directory) || !isLinkedSibling(pinned.package);
   if (directory) {
     directory = path.resolve(directory);
   } else {
@@ -51,7 +53,7 @@ function languageServerPackage() {
     throw new Error(`ZENWAVE_LSP_JS_DIR=${directory} holds no package.json.${NEWLINE_INDENT}${help}`);
   }
   const found = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  if (found.name !== pinned.package || found.version !== pinned.version) {
+  if (found.name !== pinned.package || (versionMustMatch && found.version !== pinned.version)) {
     throw new Error(`Found ${found.name}@${found.version} in ${directory}, expected ${pinned.package}@${pinned.version}.${NEWLINE_INDENT}${help}`);
   }
   return SERVER_BUNDLES.map(({ exportName, target }) => {
@@ -69,8 +71,8 @@ function languageServerPackage() {
  * zenwave-architectural-vistas and shipped inside the VSIX: its `webview/` page
  * (index.html plus content-hashed assets) is copied into dist/eventflow-webview.
  * As with the language server, the exact package version and the page protocol
- * version are pinned in package.json (`zenwaveEventFlowWebview`) rather than
- * declared as a dependency, because the package is not on the npm registry yet.
+ * version are pinned in package.json (`zenwaveEventFlowWebview`), with the same
+ * version as a dev dependency.
  * The build fails when the page states another protocol version than the one
  * pinned, so a protocol change cannot reach the VSIX silently; at runtime the
  * editor checks the version the page announces as well. See 004 design
@@ -79,12 +81,13 @@ function languageServerPackage() {
 function eventFlowWebviewPackage() {
   const pinned = packageManifest.zenwaveEventFlowWebview;
   const help = [
-    `${pinned.package}@${pinned.version} is needed to build the extension and is not on the npm registry yet.`,
-    'Point ZENWAVE_VISTAS_WEBVIEW_DIR (absolute path) at the unpacked package, either',
+    `${pinned.package}@${pinned.version} is needed to build the extension. Run npm ci, or`,
+    'point ZENWAVE_VISTAS_WEBVIEW_DIR (absolute path) at the unpacked package, either',
     '  <zenwave-architectural-vistas>/packages/eventflow-webview after `pnpm --filter @zenwave360/vistas-eventflow-webview build`,',
     `  or the package/ directory extracted from zenwave360-vistas-eventflow-webview-${pinned.version}.tgz.`,
   ].join(NEWLINE_INDENT);
   let directory = process.env.ZENWAVE_VISTAS_WEBVIEW_DIR?.trim();
+  const versionMustMatch = Boolean(directory) || !isLinkedSibling(pinned.package);
   if (directory) {
     directory = path.resolve(directory);
   } else {
@@ -99,7 +102,7 @@ function eventFlowWebviewPackage() {
     throw new Error(`ZENWAVE_VISTAS_WEBVIEW_DIR=${directory} holds no package.json.${NEWLINE_INDENT}${help}`);
   }
   const found = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  if (found.name !== pinned.package || found.version !== pinned.version) {
+  if (found.name !== pinned.package || (versionMustMatch && found.version !== pinned.version)) {
     throw new Error(`Found ${found.name}@${found.version} in ${directory}, expected ${pinned.package}@${pinned.version}.${NEWLINE_INDENT}${help}`);
   }
   const page = path.join(directory, 'webview');
