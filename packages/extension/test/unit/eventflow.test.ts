@@ -242,13 +242,14 @@ test('the page gets webview URIs for its assets, a CSP without remote or inline 
 
 test('the manifest registers an optional diagram editor for .zfl and offers it from one submenu', () => {
   const contributes = manifest.contributes;
-  assert.deepEqual(contributes.customEditors, [{ viewType: EVENTFLOW_VIEW_TYPE, displayName: 'ZenWave EventFlow Diagram', selector: [{ filenamePattern: '*.zfl' }], priority: 'option' }]);
+  assert.deepEqual(contributes.customEditors.filter((editor: { viewType: string }) => editor.viewType === EVENTFLOW_VIEW_TYPE), [{ viewType: EVENTFLOW_VIEW_TYPE, displayName: 'ZenWave EventFlow Diagram', selector: [{ filenamePattern: '*.zfl' }], priority: 'option' }]);
   assert.deepEqual(manifest.zenwaveEventFlowWebview, { package: '@zenwave360/vistas-eventflow-webview', version: '0.1.0', protocol: EVENTFLOW_PROTOCOL, protocolVersion: EVENTFLOW_PROTOCOL_VERSION });
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
-  assert.deepEqual(title.filter((item) => item.submenu).map((item) => [item.submenu, item.when]), [['zenwave.modelViews', 'resourceExtname == .zfl']]);
+  assert.deepEqual(title.filter((item) => item.submenu).map((item) => [item.submenu, item.when]), [['zenwave.modelViews', '(resourceExtname == .zfl || resourceExtname == .zdl) && !isInDiffEditor']]);
   assert.ok(!title.some((item) => item.command === 'zenwave.eventflow.open' || item.command === 'zenwave.eventflow.openToSide'), 'no title-bar icon of its own');
   const submenu = contributes.menus['zenwave.modelViews'] as { command: string; when: string }[];
-  assert.deepEqual(submenu.map((item) => item.command).sort(), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.eventflow.showText']);
+  assert.deepEqual(submenu.map((item) => item.command).filter((command) => command.startsWith('zenwave.eventflow.')).sort(), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.eventflow.showText']);
+  for (const item of submenu.filter((entry) => entry.command === 'zenwave.eventflow.open' || entry.command === 'zenwave.eventflow.openToSide')) assert.match(item.when, /^resourceExtname == .zfl /, `${item.command} stays on ZFL only`);
   for (const item of title.filter((entry) => entry.command)) {
     assert.match(item.when, /^activeCustomEditorId == zenwave\.eventflow && /, `${item.command} is not scoped to the diagram editor`);
   }

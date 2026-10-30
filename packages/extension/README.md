@@ -40,6 +40,15 @@ Event Storming board.
   (`zenwave.eventflow.defaultView`, `zenwave.eventflow.humanizeLabels` set how it
   opens). When it has nothing to draw it says why. Clicking a node does not
   navigate to its source yet.
+- A preview of ZDL and ZFL models, drawn from what the language server returns
+  with the Mermaid renderer shipped in the extension (no network): from the
+  ZenWave icon in the editor title bar, or **ZenWave: Open Preview**
+  (`Ctrl+Shift+V`) and **Open Preview to the Side** (`Ctrl+K V`). A ZDL model shows
+  its class diagram; a ZFL flow shows its flowchart and one sequence per outcome,
+  with selectors for the diagram and for how sequence variants are rendered. It
+  follows edits as you type, keeps the last good drawing while the model cannot be
+  read, follows the colour theme, and says why when it has nothing to show.
+  Opening a model file still gives its text.
 
 More is on the way; see the repository for what is planned.
 
@@ -48,8 +57,8 @@ More is on the way; see the repository for what is planned.
 `@zenwave360/dsl`, `@zenwave360/lsp-js` and
 `@zenwave360/vistas-eventflow-webview` are pinned to published versions, so
 `npm ci` works on a clean checkout. The build copies the server's two bundles
-into `dist/server` and the diagram page into `dist/eventflow-webview`, and
-checks them against `zenwaveLanguageServer` and `zenwaveEventFlowWebview` in
+into `dist/server`, the diagram page into `dist/eventflow-webview` and the pinned
+Mermaid bundle into `dist/preview-webview`, and checks the first two against `zenwaveLanguageServer` and `zenwaveEventFlowWebview` in
 `package.json`.
 
 To work against your checkouts without publishing, keep the sibling repositories

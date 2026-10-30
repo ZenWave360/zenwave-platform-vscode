@@ -10,16 +10,18 @@ import { registerEventFlowEditor, type EventFlowApi } from './eventflow/feature.
 import { registerModelExplorer, type ModelExplorerApi } from './explorer/feature.js';
 import { registerLanguageServer, type LanguageServerApi } from './lsp/feature.js';
 import { registerModelActions } from './model/actions.js';
+import { registerPreviewEditor, type PreviewApi } from './preview/feature.js';
 import { registerSdkFeature } from './sdk/feature.js';
 import type { SdkProcessService } from './sdk/host.js';
 
 declare const __ZENWAVE_BUILD_COMMIT__: string;
 
-/** What the extension returns from `activate`: the shared language server connection, the explorer trees and the diagram editors. */
+/** What the extension returns from `activate`: the shared language server connection, the explorer trees, the diagram editors and the previews. */
 export interface ZenwaveExtensionApi {
   readonly languageServer: LanguageServerApi;
   readonly explorer: ModelExplorerApi;
   readonly eventflow: EventFlowApi;
+  readonly preview: PreviewApi;
 }
 
 export interface HostServices {
@@ -61,7 +63,8 @@ export function activate(
   registerModelActions(context, languageServer, logger);
   const explorer = registerModelExplorer(context, languageServer, logger);
   const eventflow = registerEventFlowEditor(context, languageServer, logger, explorer.diagramPanels);
-  return { languageServer, explorer, eventflow };
+  const preview = registerPreviewEditor(context, languageServer, logger);
+  return { languageServer, explorer, eventflow, preview };
 }
 
 /**

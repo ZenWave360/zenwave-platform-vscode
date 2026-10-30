@@ -1,0 +1,75 @@
+html, body { height: 100%; margin: 0; padding: 0; }
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+}
+[hidden] { display: none !important; }
+
+#controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  align-items: center;
+  flex: none;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, transparent));
+  background: var(--vscode-editorWidget-background, transparent);
+}
+#controls label { display: inline-flex; align-items: center; gap: 6px; }
+#controls select {
+  max-width: 28rem;
+  padding: 2px 4px;
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  border-radius: 2px;
+  font: inherit;
+}
+#controls select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+#view { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; outline: none; user-select: text; }
+#view svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+#state { box-sizing: border-box; flex: none; }
+#state.overlay { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; }
+#state.banner {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
+}
+#state .box { max-width: 40rem; padding: 24px; text-align: center; }
+#state.banner .box { max-width: none; padding: 0; text-align: left; flex: 1; }
+#state .title { margin: 0 0 8px; font-weight: 600; }
+#state.banner .title { display: inline; margin: 0; }
+#state .detail { margin: 0 0 16px; opacity: .85; white-space: pre-wrap; }
+#state.banner .detail { display: inline; margin: 0 0 0 8px; }
+#state .actions { display: inline; }
+#state button {
+  margin: 4px;
+  padding: 4px 12px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  font: inherit;
+}
+#state button:hover { background: var(--vscode-button-hoverBackground); }
+
+.notice { max-width: 60rem; margin: 12px auto; }
+.notice p { margin: 0 0 8px; color: var(--vscode-errorForeground, inherit); }
+.notice pre {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  background: var(--vscode-textCodeBlock-background, transparent);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}

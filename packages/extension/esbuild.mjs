@@ -131,6 +131,37 @@ function copyEventFlowWebview(page) {
   console.log(`[eventflow] copied ${pinned.package}@${pinned.version} (protocol version ${pinned.protocolVersion})`);
 }
 
+/**
+ * The preview page is this extension's own (webview/preview), built for the
+ * browser as one script and shipped in dist/preview-webview with its stylesheet
+ * and the Mermaid bundle. Mermaid is not imported by the page: the page loads it
+ * from the extension on the first diagram, so opening a preview that has nothing
+ * to draw costs nothing. The version copied must be the one pinned in package.json.
+ */
+function mermaidBundle() {
+  const pinned = packageManifest.dependencies.mermaid;
+  let directory;
+  try {
+    directory = path.dirname(createRequire(path.join(projectDir, 'package.json')).resolve('mermaid/package.json'));
+  } catch {
+    throw new Error(`mermaid is not installed. Run npm ci.`);
+  }
+  const found = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+  const bundle = path.join(directory, 'dist', 'mermaid.min.js');
+  if (found.version !== pinned || !fs.existsSync(bundle)) {
+    throw new Error(`Found mermaid@${found.version} in ${directory} (${fs.existsSync(bundle) ? 'with' : 'without'} dist/mermaid.min.js), expected mermaid@${pinned}. Run npm ci.`);
+  }
+  return bundle;
+}
+
+function copyPreviewAssets(mermaid) {
+  const target = path.join(projectDir, 'dist/preview-webview');
+  fs.mkdirSync(target, { recursive: true });
+  fs.copyFileSync(path.join(projectDir, 'webview/preview/preview.css'), path.join(target, 'preview.css'));
+  fs.copyFileSync(mermaid, path.join(target, 'mermaid.min.js'));
+  console.log(`[preview] copied mermaid@${packageManifest.dependencies.mermaid}`);
+}
+
 function copyLanguageServer(bundles) {
   for (const { source, target } of bundles) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -141,10 +172,12 @@ function copyLanguageServer(bundles) {
 
 let serverBundles = [];
 let eventFlowPage;
+let mermaid;
 if (!tests) {
   try {
     serverBundles = languageServerPackage();
     eventFlowPage = eventFlowWebviewPackage();
+    mermaid = mermaidBundle();
   } catch (error) {
     console.error(`error: ${error.message}`);
     process.exit(1);
@@ -204,6 +237,14 @@ const extensionTargets = [
     platform: 'browser',
     target: 'es2022',
   },
+  {
+    name: 'preview-page',
+    entryPoints: [path.join(projectDir, 'webview/preview/main.ts')],
+    outfile: path.join(projectDir, 'dist/preview-webview/preview.js'),
+    platform: 'browser',
+    target: 'es2022',
+    format: 'iife',
+  },
 ];
 
 const testTargets = extensionTargets.map((target) => ({
@@ -213,7 +254,7 @@ const testTargets = extensionTargets.map((target) => ({
   outfile: path.join(projectDir, `.test-dist/${target.name}/index.js`),
 }));
 
-const targets = tests ? testTargets : extensionTargets;
+const targets = tests ? testTargets.filter((target) => !target.name.startsWith('preview-page')) : extensionTargets;
 
 /**
  * Both targets build concurrently, but VS Code needs ONE begin/end pair per
@@ -287,7 +328,7 @@ const contexts = await Promise.all(
       entryPoints: target.entryPoints,
       outfile: target.outfile,
       bundle: true,
-      format: 'cjs',
+      format: target.format ?? 'cjs',
       platform: target.platform,
       target: target.target,
       // Provided by the extension host at runtime, never bundled.
@@ -309,6 +350,7 @@ const contexts = await Promise.all(
 if (watch) {
   copyLanguageServer(serverBundles);
   copyEventFlowWebview(eventFlowPage);
+  copyPreviewAssets(mermaid);
   await Promise.all(contexts.map((context) => context.watch()));
 } else {
   // esbuild throws on a failed build. The reporter plugin has already printed
@@ -321,6 +363,7 @@ if (watch) {
   } else if (!tests) {
     copyLanguageServer(serverBundles);
     copyEventFlowWebview(eventFlowPage);
+    copyPreviewAssets(mermaid);
     fs.mkdirSync(path.join(projectDir, 'dist'), { recursive: true });
     fs.writeFileSync(
       path.join(projectDir, 'dist/build-info.json'),
