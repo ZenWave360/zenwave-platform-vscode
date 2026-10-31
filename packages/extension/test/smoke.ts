@@ -1445,6 +1445,8 @@ async function rendersWhateverItIsGiven(flow: PreviewEditorApi): Promise<void> {
 async function previewTheme(flow: PreviewEditorApi, model: PreviewEditorApi): Promise<void> {
   const workbench = vscode.workspace.getConfiguration('workbench');
   const saved = workbench.inspect<string>('colorTheme')?.globalValue;
+  const pages: Partial<Record<'light' | 'dark', PreviewProbe>> = {};
+  const flows: Partial<Record<'light' | 'dark', PreviewProbe>> = {};
   try {
     for (const [name, theme] of [['Default Light Modern', 'light'], ['Default Dark Modern', 'dark']] as const) {
       const renders = (await flow.probe()).renders;
@@ -1455,14 +1457,41 @@ async function previewTheme(flow: PreviewEditorApi, model: PreviewEditorApi): Pr
         return answer.theme === theme && answer.renderedTheme === theme && answer.svgCount === 1 && answer.renders > renders ? answer : undefined;
       }, `The preview did not follow the ${name} theme`, 30000);
       assert(probe.cspViolations.length === 0, `Policy violations after the theme change: ${probe.cspViolations.join('; ')}`);
+      flows[theme] = probe;
       // The diagrams inside a Markdown page follow the theme too, each redrawn.
       const page = await waitFor(async () => {
         const answer = await model.probe();
         return answer.theme === theme && answer.renderedTheme === theme && answer.content.diagrams.drawn > 0 && answer.content.diagrams.failed === 0 && answer.renders > modelRenders ? answer : undefined;
       }, `The Markdown page did not follow the ${name} theme`, 30000);
       assert(page.cspViolations.length === 0 && page.content.unresolved.length === 0, `Markdown page after the theme change: ${page.cspViolations.join('; ')} ${page.content.unresolved.join()}`);
+      pages[theme] = page;
     }
-    console.log('PASS: switching the colour theme with a preview open redraws the diagram, and the diagrams of a Markdown page, in the matching Mermaid theme');
+    // What the diagrams look like, not which theme was asked for. A fenced diagram that carries its own
+    // theme (the server's class and state diagrams carry a light one so they stay readable) keeps it;
+    // one without follows the editor.
+    const content = model.session.representations.find((item) => item.id === model.session.selectedId)?.content ?? '';
+    const fences = [...content.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map((match) => /^---\r?\n[\s\S]*?\btheme:\s*\S+[\s\S]*?---/.test(match[1]!));
+    const luminance = (colour: string): number => {
+      const [r, g, b] = (colour.match(/[\d.]+/g) ?? ['0', '0', '0']).slice(0, 3).map(Number) as [number, number, number];
+      return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    };
+    const [light, dark] = [pages.light?.content.diagramColours ?? [], pages.dark?.content.diagramColours ?? []];
+    assert(fences.length > 0 && light.length === fences.length && dark.length === fences.length, `Diagrams drawn: ${light.length} light, ${dark.length} dark, ${fences.length} fenced`);
+    assert(fences.every(Boolean), `A diagram of the domain page has no theme of its own, so this check does not describe it: ${fences.join()}`);
+    light.forEach((before, index) => {
+      const after = dark[index]!;
+      assert(before.inks.length > 0 && after.inks.length > 0, `Diagram ${index} has no text to measure`);
+      assert(after.inks.every((ink) => luminance(ink) < 0.4), `Diagram ${index} with its own theme lost dark text on the dark page: ${after.inks.join()}`);
+      assert(after.fills.length === 0 || after.fills.some((fill) => luminance(fill) > 0.6), `Diagram ${index} with its own theme lost its light fill on the dark page: ${after.fills.join()}`);
+    });
+    // A diagram with no theme of its own (the ZFL flowchart) follows the editor: its text changes colour and is light on the dark page.
+    const flowSource = flow.session.representations.find((item) => item.id === flow.session.selectedId)?.content ?? '';
+    assert(flowSource !== '' && !/\btheme:/.test(flowSource), 'The ZFL diagram carries a theme of its own, so it is not the diagram without one');
+    const [flowLight, flowDark] = [flows.light?.content.diagramColours[0], flows.dark?.content.diagramColours[0]];
+    assert(flowLight && flowDark && flowLight.inks.length > 0 && flowDark.inks.length > 0, 'The flowchart has no text to measure');
+    assert(flowLight.inks.join() !== flowDark.inks.join(), `A diagram without a theme kept its text colour across the switch: ${flowLight.inks.join()}`);
+    assert(flowLight.inks.some((ink) => luminance(ink) < 0.4) && flowDark.inks.some((ink) => luminance(ink) > 0.6), `Text of a diagram without a theme: light ${flowLight.inks.join()} dark ${flowDark.inks.join()}`);
+    console.log('PASS: switching the colour theme with a preview open redraws the diagram and those of a Markdown page; a diagram without a theme of its own changes its text colour, one with its own keeps dark text on a light fill');
   } finally {
     await workbench.update('colorTheme', saved, vscode.ConfigurationTarget.Global);
   }
@@ -1612,7 +1641,7 @@ async function previewZw(api: LanguageServerApi, preview: PreviewApi): Promise<v
   // The preview is offered and renders the server's Markdown page, with the catalogue's description of each plugin it knows.
   const outcome = await vscode.commands.executeCommand<PreviewOpenOutcome>('zenwave.preview.openToSide');
   assert(outcome.kind === 'opened' && outcome.documentUri === name, `Preview of a .zw: ${JSON.stringify(outcome)}`);
-  const editor = await renderedZwPreview(preview, name);
+  let editor = await renderedZwPreview(preview, name);
   const answer = await serverPreview(api, name);
   const page = answer.representations[0];
   assert(answer.representations.length === 1 && page?.id === 'configuration' && page.format === 'MARKDOWN' && page.title === 'Plugin configuration',
@@ -1643,6 +1672,44 @@ async function previewZw(api: LanguageServerApi, preview: PreviewApi): Promise<v
   }
   await waitFor(() => !document.isDirty, 'Could not revert scripts.zw');
   await zwShowing(editor, (content) => content.includes('| maxDepth | 3 | plugin |'), 'The .zw preview did not follow the revert');
+
+  // A title equal to a section name must not move the contents links: the link goes to the section (an H2 after the contents), not to the title (the H1).
+  const titleAt = document.getText().indexOf('"Arcadia Editions - Orders Checkout scripts"');
+  assert(titleAt > 0, 'scripts.zw has no title');
+  try {
+    await text.edit((edit) => edit.replace(new vscode.Range(document.positionAt(titleAt), document.positionAt(titleAt + '"Arcadia Editions - Orders Checkout scripts"'.length)), '"Configuration"'));
+    await zwShowing(editor, (content) => content.startsWith('# Configuration') && content.includes('(#configuration-1)'), 'The .zw page did not show the title "Configuration"');
+    const followedConfiguration = (await editor.probe('#configuration-1')).followed;
+    assert(followedConfiguration?.tag === 'H2' && followedConfiguration.text.trim() === 'Configuration' && followedConfiguration.headingIndex > 1,
+      `The contents link to Configuration went to ${JSON.stringify(followedConfiguration)}, not to the Configuration section`);
+    console.log('PASS: with a .zw title equal to the Configuration section, the contents link leads to the section heading (H2), not the title');
+  } finally {
+    await vscode.commands.executeCommand('workbench.action.files.revert');
+  }
+  await waitFor(() => !document.isDirty, 'Could not revert scripts.zw after the title edit');
+  await zwShowing(editor, (content) => content.includes('# Arcadia Editions - Orders Checkout scripts'), 'The .zw preview did not follow the second revert');
+
+  // The same for a ZDL whose title is a section of the domain page.
+  const titledUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0]!.uri, 'lsp/titled.zdl');
+  await vscode.workspace.fs.writeFile(titledUri, new TextEncoder().encode('config {\n    title "Aggregates"\n}\n\nentity Customer {\n    name String\n}\n\naggregate CustomerAggregate(Customer) {\n}\n'));
+  try {
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(titledUri), { viewColumn: vscode.ViewColumn.One, preview: false });
+    const opened = await vscode.commands.executeCommand<PreviewOpenOutcome>('zenwave.preview.openToSide');
+    assert(opened.kind === 'opened', `Preview of titled.zdl: ${JSON.stringify(opened)}`);
+    const titled = await renderedZwPreview(preview, titledUri.toString());
+    const domain = await zwShowing(titled, (content) => content.startsWith('# Aggregates') && content.includes('(#aggregates-1)'), 'The ZDL page did not show the title "Aggregates"');
+    assert(domain.content.unresolved.length === 0, `Unresolved links: ${domain.content.unresolved.join()}`);
+    const followedAggregates = (await titled.probe('#aggregates-1')).followed;
+    assert(followedAggregates?.tag === 'H2' && followedAggregates.text.trim() === 'Aggregates' && followedAggregates.headingIndex > 1,
+      `The contents link to Aggregates went to ${JSON.stringify(followedAggregates)}, not to the Aggregates section`);
+    console.log('PASS: with a ZDL title equal to the Aggregates section, the contents link leads to the section heading (H2), not the title');
+  } finally {
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.workspace.fs.delete(titledUri, { useTrash: false });
+  }
+  await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.One, preview: false });
+  await vscode.commands.executeCommand('zenwave.preview.openToSide', uri);
+  editor = await renderedZwPreview(preview, name);
 
   // The catalogue is the client's copy: another one, sent at initialisation, is the one the page describes (and its source is named).
   const marker = 'Smoke marker: this description came from the client catalogue';

@@ -73,6 +73,8 @@ export interface PreviewContentProbe {
   readonly otherLinks: number;
   /** Every resource the page has requested, by URL. */
   readonly resources: readonly string[];
+  /** The diagrams drawn (every SVG of the preview area), in order, with the colours they are painted in (computed, as `rgb(...)`). */
+  readonly diagramColours: readonly { readonly inks: readonly string[]; readonly fills: readonly string[] }[];
 }
 
 /** What the page reports when probed. For tests and diagnostics. */
@@ -96,6 +98,8 @@ export interface PreviewProbe {
   /** The Mermaid theme the drawn diagram was rendered with. */
   readonly renderedTheme: string | undefined;
   readonly renders: number;
+  /** The heading the `followLink` of this probe led to: its tag, text and position among the page's headings. Absent when no link was followed or none resolved. */
+  readonly followed: { readonly tag: string; readonly text: string; readonly headingIndex: number } | undefined;
   readonly scrollTop: number;
   readonly stateKind: string | undefined;
   readonly stateMode: string | undefined;

@@ -377,11 +377,24 @@ function contentProbe(): PreviewContentProbe {
     unresolved: fragments.filter((href) => anchorTarget(anchorName(href)) === undefined),
     otherLinks: links.length - fragments.length,
     resources: performance.getEntriesByType('resource').map((entry) => entry.name),
+    diagramColours: all('svg').map((svg) => {
+      const unique = (values: string[]): string[] => [...new Set(values)];
+      const inks = [...svg.querySelectorAll('text, foreignObject span, foreignObject p')].map((element) => {
+        const style = getComputedStyle(element);
+        return element instanceof SVGElement && element.tagName.toLowerCase() === 'text' ? style.fill : style.color;
+      });
+      const fills = [...svg.querySelectorAll('.node rect, .node polygon, .node path, .node circle, g.statediagram-state rect')].map((element) => getComputedStyle(element).fill);
+      return { inks: unique(inks), fills: unique(fills) };
+    }),
   };
 }
 
 function probe(requestId: number, followLink?: string): void {
   if (followLink !== undefined) [...view.querySelectorAll<HTMLElement>('a[href]')].find((link) => link.getAttribute('href') === followLink)?.click();
+  const target = followLink === undefined ? undefined : anchorTarget(anchorName(followLink));
+  const followed = target && /^H[1-6]$/.test(target.tagName)
+    ? { tag: target.tagName, text: target.textContent ?? '', headingIndex: [...view.querySelectorAll('h1, h2, h3, h4, h5, h6')].indexOf(target) }
+    : undefined;
   const strays = [...document.body.children].filter((child) => /^d?zw-\d+$/.test(child.id)).length;
   post({
     type: 'zenwave.host.probeResult',
@@ -408,6 +421,7 @@ function probe(requestId: number, followLink?: string): void {
       theme: currentTheme(),
       renderedTheme: drawn?.theme,
       renders,
+      followed,
       scrollTop: view.scrollTop,
       stateKind: shownState?.kind,
       stateMode: shownState?.mode,
