@@ -236,10 +236,10 @@ export function registerPreviewEditor(
   function noDocument(argument: unknown): PreviewOpenOutcome {
     const untitled = commandDocument(argument, (uri) => uri.scheme === 'untitled');
     if (untitled) {
-      void vscode.window.showInformationMessage('Save this model to a .zdl or .zfl file first: a preview is of a saved file.');
+      void vscode.window.showInformationMessage('Save this model to a .zdl, .zw or .zfl file first: a preview is of a saved file.');
       return { kind: 'untitled' };
     }
-    void vscode.window.showInformationMessage('Open a ZDL or ZFL model to preview it.');
+    void vscode.window.showInformationMessage('Open a ZDL, ZW or ZFL model to preview it.');
     return { kind: 'no-document' };
   }
 

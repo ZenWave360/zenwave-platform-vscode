@@ -481,11 +481,11 @@
         },
         {
           "command": "zenwave.preview.openToSide",
-          "when": "(editorLangId =~ /^(zdl|zfl)$/ || resourceExtname =~ /^\\.(zdl|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.open",
-          "when": "(editorLangId =~ /^(zdl|zfl)$/ || resourceExtname =~ /^\\.(zdl|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.showText",
@@ -534,7 +534,7 @@
       "editor/title": [
         {
           "submenu": "zenwave.modelViews",
-          "when": "(resourceExtname == .zfl || resourceExtname == .zdl) && !isInDiffEditor",
+          "when": "(resourceExtname == .zfl || resourceExtname == .zdl || resourceExtname == .zw) && !isInDiffEditor",
           "group": "navigation@90"
         },
         {
@@ -581,12 +581,12 @@
         },
         {
           "command": "zenwave.preview.openToSide",
-          "when": "resourceExtname =~ /^\\.(zdl|zfl)$/ && activeCustomEditorId != zenwave.preview",
+          "when": "resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && activeCustomEditorId != zenwave.preview",
           "group": "2_preview@1"
         },
         {
           "command": "zenwave.preview.open",
-          "when": "resourceExtname =~ /^\\.(zdl|zfl)$/ && activeCustomEditorId != zenwave.preview",
+          "when": "resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && activeCustomEditorId != zenwave.preview",
           "group": "2_preview@2"
         }
       ]
@@ -788,6 +788,9 @@
             "filenamePattern": "*.zdl"
           },
           {
+            "filenamePattern": "*.zw"
+          },
+          {
             "filenamePattern": "*.zfl"
           }
         ],
@@ -809,13 +812,13 @@
         "command": "zenwave.preview.open",
         "key": "ctrl+shift+v",
         "mac": "cmd+shift+v",
-        "when": "editorTextFocus && resourceExtname =~ /^\\.(zdl|zfl)$/ && !isInDiffEditor"
+        "when": "editorTextFocus && resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && !isInDiffEditor"
       },
       {
         "command": "zenwave.preview.openToSide",
         "key": "ctrl+k v",
         "mac": "cmd+k v",
-        "when": "editorTextFocus && resourceExtname =~ /^\\.(zdl|zfl)$/ && !isInDiffEditor"
+        "when": "editorTextFocus && resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && !isInDiffEditor"
       }
     ]
   },

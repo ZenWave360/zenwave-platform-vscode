@@ -56,6 +56,8 @@ export class PreviewSession {
   readonly posted: string[] = [];
 
   private generation = 0;
+  private inflight: Promise<void> | undefined;
+  private again = false;
   private presented: string | undefined;
   private presentation: StatePresentation | null = null;
   private logged: string | undefined;
@@ -75,13 +77,36 @@ export class PreviewSession {
     return this.presentation;
   }
 
-  /** Asks the server for the representations and relays the answer. Answers overtaken by a newer request are dropped. */
-  async refresh(): Promise<void> {
-    if (this.disposed) return;
+  /**
+   * Asks the server for the representations and relays the answer. The server answers one request at a time on one
+   * thread, so a preview never queues requests behind a running one: a refresh asked meanwhile waits for it, its answer
+   * is dropped as stale, and one request for the latest state follows. The promise settles when that last one has.
+   */
+  refresh(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    if (this.inflight) {
+      this.again = true;
+      return this.inflight;
+    }
+    const run = (async () => {
+      try {
+        do {
+          this.again = false;
+          await this.request();
+        } while (this.again && !this.disposed);
+      } finally {
+        this.inflight = undefined;
+      }
+    })();
+    this.inflight = run;
+    return run;
+  }
+
+  private async request(): Promise<void> {
     const generation = ++this.generation;
     this.requests++;
     const result = await this.ports.preview(this.ports.documentUri, this.ports.hasRenderMode ? this.renderMode : undefined);
-    if (this.disposed || generation !== this.generation) return;
+    if (this.disposed || this.again || generation !== this.generation) return;
     const data = previewStateFromResult(result);
     this.record(data);
     this.data = data;

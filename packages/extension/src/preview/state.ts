@@ -84,7 +84,7 @@ export function presentPreviewState(fileName: string, page: PreviewPageState, da
     case 'unsupported-document':
       return {
         mode, kind: 'unsupported-document', title: `The ZenWave language server does not produce a preview for ${fileName}.${kept}`,
-        detail: 'Previews are produced for ZDL and ZFL documents.', actions: [SHOW_OUTPUT],
+        detail: 'Previews are produced for ZDL, ZW and ZFL documents.', actions: [SHOW_OUTPUT],
       };
     case 'failed':
       return {

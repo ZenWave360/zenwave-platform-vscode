@@ -70,7 +70,7 @@ export async function resolveWorkspaceManifest(): Promise<ResolvedManifest> {
 }
 
 /**
- * What the language client serves: ZDL and ZFL by language, and the manifest
+ * What the language client serves: ZDL, ZW and ZFL by language, and the manifest
  * by its resolved location. Never a `.yml` glob — a workspace is full of YAML
  * that is not ZenWave's.
  *

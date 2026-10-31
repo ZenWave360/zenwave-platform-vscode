@@ -22,6 +22,7 @@ import {
   sameInitialization,
   type ResolvedManifest,
 } from './manifest-resolution.js';
+import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource } from './plugin-catalogue.js';
 import { ZenwaveRequests } from './requests.js';
 import { languageServerStatus, presentStatus, type LanguageServerStatus } from './status.js';
 import { LspSupervisor, type LspState, type RequestResult } from './supervisor.js';
@@ -66,6 +67,8 @@ export interface LanguageServerApi {
   restart(): Promise<void>;
   /** The `zenwave/credential` handler, exposed for tests. */
   answerCredential(params: unknown): Promise<CredentialAnswer | null>;
+  /** A test seam: the source the next start takes the plugin catalogue from instead of the shipped one; `undefined` restores it. */
+  overridePluginCatalogue(source: PluginCatalogueSource | undefined): void;
 }
 
 interface LspSettings {
@@ -97,6 +100,7 @@ export function registerLanguageServer(
   let lastState: LspState['kind'] = 'unavailable';
   let transport: ReturnType<typeof languageClientTransport> | undefined;
   let startError = 'language server was not located';
+  let catalogueSource: PluginCatalogueSource = shippedCatalogueSource;
 
   const supervisor = new LspSupervisor(host ? () => {
     if (!transport) throw new Error(startError);
@@ -192,9 +196,10 @@ export function registerLanguageServer(
     }
     logger.info(`Language server: ${host.transport} transport, ${location.description}`);
     watchers = manifestWatchers(manifest);
+    const pluginCatalogue = await loadPluginCatalogue(catalogueSource, logger);
     const options = sharedClientOptions(
       documentSelector(manifest),
-      initializationOptions(manifest, true),
+      initializationOptions(manifest, true, pluginCatalogue),
       logger.outputChannel,
       watchers,
     );
@@ -304,5 +309,6 @@ export function registerLanguageServer(
     settled: async () => { let seen: Promise<void> | undefined; while (seen !== pending) { seen = pending; await seen; } },
     restart: () => start('restart requested'),
     answerCredential: (params) => credentials.answer(params),
+    overridePluginCatalogue: (source) => { catalogueSource = source ?? shippedCatalogueSource; },
   };
 }

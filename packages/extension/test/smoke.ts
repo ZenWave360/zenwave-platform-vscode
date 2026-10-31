@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SHIPPED_CATALOGUE } from '../src/sdk/catalogue.js';
+import rawShippedCatalogue from '../resources/sdk-plugin-catalogue.json';
 import { LspSupervisor } from '../src/lsp/supervisor.js';
 import type { ZenwaveExtensionApi } from '../src/activate.js';
 import type { LanguageServerApi } from '../src/lsp/feature.js';
@@ -14,6 +15,8 @@ import { outcomeOf } from '../src/preview/selection.js';
 import type { Preview } from '../src/lsp/requests.js';
 
 const EXTENSION_ID = 'ZenWave360.zenwave-platform';
+
+const SHIPPED_CATALOGUE_RAW = rawShippedCatalogue as { plugins: readonly unknown[] } & Record<string, unknown>;
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -1558,6 +1561,7 @@ export async function run(): Promise<void> {
   await eventflowDiagrams(api, explorer, eventflow);
   if (desktop) await eventflowOnDisk(api, eventflow);
   await previewModels(api, preview, desktop);
+  await previewZw(api, preview);
   if (desktop) await previewOnDisk(api, preview);
   if (desktop) await modelActionsOnDisk(api);
   if (desktop) await explorerOnDisk(api, explorer);
@@ -1586,4 +1590,117 @@ export async function run(): Promise<void> {
   console.log(`PASS: ${desktop ? 'desktop enabled-plugin' : 'browser absent'} CodeLens`);
   await authoring();
   if (desktop) await desktopRuns(plugins);
+}
+
+/** 005/3.4, 3.6, MP-R14, MP-R16: a `.zw` file previews its plugin configuration, described from the catalogue this client sent the server. */
+async function previewZw(api: LanguageServerApi, preview: PreviewApi): Promise<void> {
+  await connected(api, 'The .zw preview');
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  const uri = await fixture('lsp/scripts.zw');
+  const name = uri.toString();
+  const shipped = SHIPPED_CATALOGUE.plugins.find((plugin) => plugin.name === 'ZDLToOpenAPIPlugin');
+  const shippedSummary = shipped?.summary;
+  assert(shippedSummary, 'The shipped catalogue has no summary for ZDLToOpenAPIPlugin');
+
+  // Opening it the ordinary way is still the text editor.
+  await vscode.commands.executeCommand('vscode.open', uri);
+  await waitFor(() => isTextTab(vscode.window.tabGroups.activeTabGroup.activeTab, name), 'Opening a .zw did not give the text editor', 10000);
+  assert(editorCount(preview) === 0, 'Opening a .zw opened a preview');
+  const document = await vscode.workspace.openTextDocument(uri);
+  assert(document.languageId === 'zw', `scripts.zw has language ${document.languageId}`);
+
+  // The preview is offered and renders the server's Markdown page, with the catalogue's description of each plugin it knows.
+  const outcome = await vscode.commands.executeCommand<PreviewOpenOutcome>('zenwave.preview.openToSide');
+  assert(outcome.kind === 'opened' && outcome.documentUri === name, `Preview of a .zw: ${JSON.stringify(outcome)}`);
+  const editor = await renderedZwPreview(preview, name);
+  const answer = await serverPreview(api, name);
+  const page = answer.representations[0];
+  assert(answer.representations.length === 1 && page?.id === 'configuration' && page.format === 'MARKDOWN' && page.title === 'Plugin configuration',
+    `The .zw answer: ${answer.representations.map((item) => `${item.id}:${item.format}:${item.title}`).join()}`);
+  let probe = await editor.probe();
+  assert(!probe.diagramSelector.visible && !probe.renderModeSelector.visible && probe.svgCount === 0 && probe.notice === undefined,
+    `A .zw page with a selector or a diagram: ${JSON.stringify(probe.diagramSelector)}`);
+  assert(probe.text.includes('Resolved configuration') && probe.text.includes('Own configuration') && probe.text.includes('io.example.orders'),
+    `The .zw page does not show the resolved configuration: ${probe.text.slice(0, 300)}`);
+  assert(probe.text.includes(shippedSummary) && probe.text.includes(`Plugin descriptions come from the plugin catalogue: ${SHIPPED_CATALOGUE.source}`),
+    'The .zw page does not describe the plugin from the catalogue');
+  assert(probe.content.unresolved.length === 0 && probe.content.hostile === 0 && probe.cspViolations.length === 0,
+    `The .zw page: ${JSON.stringify(probe.content)} ${probe.cspViolations.join()}`);
+  console.log('PASS: a .zw file opens as text, and its preview renders the plugin configuration, resolved, described from the catalogue');
+
+  // An edit re-renders it, unsaved (MP-R5).
+  const text = await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.One, preview: false });
+  const at = document.getText().indexOf('maxDepth 3');
+  assert(at > 0, 'scripts.zw has no maxDepth option');
+  const requests = editor.session.requests;
+  try {
+    await text.edit((edit) => edit.replace(new vscode.Range(document.positionAt(at), document.positionAt(at + 'maxDepth 3'.length)), 'maxDepth 7'));
+    probe = await zwShowing(editor, (content) => content.includes('| maxDepth | 7 | plugin |') && !content.includes('| maxDepth | 3 |'), 'The edited .zw was not shown');
+    assert(editor.session.requests > requests, 'The .zw preview did not follow the edit');
+    console.log('PASS: an edit to the .zw text re-renders its preview');
+  } finally {
+    await vscode.commands.executeCommand('workbench.action.files.revert');
+  }
+  await waitFor(() => !document.isDirty, 'Could not revert scripts.zw');
+  await zwShowing(editor, (content) => content.includes('| maxDepth | 3 | plugin |'), 'The .zw preview did not follow the revert');
+
+  // The catalogue is the client's copy: another one, sent at initialisation, is the one the page describes (and its source is named).
+  const marker = 'Smoke marker: this description came from the client catalogue';
+  const sent = {
+    ...SHIPPED_CATALOGUE_RAW,
+    source: 'Smoke catalogue sent by the client',
+    plugins: SHIPPED_CATALOGUE_RAW.plugins.map((plugin) => (plugin as { name?: string }).name === 'ZDLToOpenAPIPlugin' ? { ...(plugin as object), summary: marker } : plugin),
+  };
+  api.overridePluginCatalogue(() => sent);
+  try {
+    await api.restart();
+    await connected(api, 'Restarted with another catalogue');
+    probe = await waitFor(async () => {
+      const answered = await editor.probe().catch(() => undefined);
+      return answered && answered.text.includes(marker) ? answered : undefined;
+    }, `The .zw page does not describe the plugin from the catalogue the client sent: ${editor.session.data.kind}`, 60000);
+    assert(probe.text.includes('Plugin descriptions come from the plugin catalogue: Smoke catalogue sent by the client') && !probe.text.includes(shippedSummary), 'The page mixes catalogues');
+    console.log("PASS: the .zw page describes the plugin from the catalogue the client sent at initialisation, not the server's own");
+
+    // A catalogue that cannot be read must not stop the server: it starts, and uses its own copy.
+    api.overridePluginCatalogue(() => { throw new Error('smoke: the catalogue is unreadable'); });
+    await api.restart();
+    await connected(api, 'Restarted with an unreadable catalogue');
+    probe = await waitFor(async () => {
+      const answered = await editor.probe().catch(() => undefined);
+      return answered && answered.text.includes(shippedSummary) && !answered.text.includes(marker) ? answered : undefined;
+    }, "The .zw page did not fall back to the server's own catalogue", 60000);
+    assert(probe.text.includes('Resolved configuration'), 'The .zw page lost its content');
+    console.log("PASS: an unreadable catalogue is left out, the server still starts and describes plugins from its own copy");
+  } finally {
+    api.overridePluginCatalogue(undefined);
+  }
+  await api.restart();
+  await connected(api, 'Restarted with the shipped catalogue');
+  await waitFor(async () => (await editor.probe().catch(() => undefined))?.text.includes(shippedSummary) ? true : undefined, 'The .zw page did not return to the shipped catalogue', 60000);
+  console.log('PASS: with the shipped catalogue sent again, the .zw page describes plugins as before');
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await waitFor(() => editorCount(preview) === 0, 'Closing all editors left previews registered');
+}
+
+/** A preview of a Markdown page once its page said it loaded and drew it (no diagram to wait for). */
+async function renderedZwPreview(preview: PreviewApi, uri: string): Promise<PreviewEditorApi> {
+  const editor = await waitFor(() => preview.editorsFor(uri)[0], `No preview editor for ${uri}`, 30000);
+  await waitFor(() => editor.session.page.kind === 'ready' ? true : editor.session.page.kind === 'failed' ? (() => { throw new Error(`Preview page failed: ${JSON.stringify(editor.session.page)}`); })() : undefined,
+    `The preview page never said it loaded for ${uri}`, 60000);
+  await waitFor(async () => {
+    const answer = await editor.probe().catch(() => undefined);
+    return answer && answer.renderedId === editor.session.selectedId && answer.content.headings > 0 ? answer : undefined;
+  }, `The preview rendered nothing for ${uri}: ${JSON.stringify(editor.session.state)} ${JSON.stringify(editor.session.data)}`, 90000);
+  return editor;
+}
+
+/** Waits until the Markdown the session holds satisfies the predicate and the page has drawn exactly that. */
+async function zwShowing(editor: PreviewEditorApi, wanted: (content: string) => boolean, message: string): Promise<PreviewProbe> {
+  return waitFor(async () => {
+    const content = editor.session.representations[0]?.content;
+    if (content === undefined || !wanted(content)) return undefined;
+    const answered = await editor.probe().catch(() => undefined);
+    return answered && answered.renderedHash === contentHash(content) ? answered : undefined;
+  }, message, 30000);
 }

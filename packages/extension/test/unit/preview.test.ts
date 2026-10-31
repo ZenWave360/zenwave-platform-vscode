@@ -152,17 +152,40 @@ test('the last good set stays on screen while the document cannot be read, and t
   assert.equal(renders().at(-1)?.representations.length, 1);
 });
 
-test('an answer overtaken by a newer request is dropped, so the last document typed is the one shown', async () => {
+test('a refresh asked while one is running waits for it: the stale answer is dropped and one request for the latest follows', async () => {
   const gates: ((result: RequestResult<Preview>) => void)[] = [];
-  const { session, renders } = harness(() => new Promise((resolve) => { gates.push(resolve); }));
+  const { session, renders, asked } = harness(() => new Promise((resolve) => { gates.push(resolve); }));
   session.receive(READY);
-  const slow = session.refresh();
-  const fast = session.refresh();
-  gates[1]!(ok({ representations: [mermaid('flowchart', 'newer')], defaultRepresentationId: 'flowchart' }));
-  await fast;
+  const first = session.refresh();
+  const second = session.refresh();
+  const third = session.refresh();
+  assert.equal(gates.length, 1, 'the server is asked once while a request runs');
+  assert.equal(session.requests, 1);
   gates[0]!(ok({ representations: [mermaid('flowchart', 'older')], defaultRepresentationId: 'flowchart' }));
-  await slow;
+  await settle();
+  assert.equal(gates.length, 2, 'one follow-up for everything asked meanwhile');
+  assert.equal(renders().length, 0, 'the answer overtaken by a newer edit is not shown');
+  gates[1]!(ok({ representations: [mermaid('flowchart', 'newer')], defaultRepresentationId: 'flowchart' }));
+  await Promise.all([first, second, third]);
   assert.deepEqual(renders().map((render) => render.representations[0]?.title), ['newer']);
+  assert.equal(session.requests, 2);
+  assert.equal(asked.length, 2);
+  void session.refresh();
+  assert.equal(session.requests, 3, 'an idle session asks again');
+  session.dispose();
+});
+
+test('changing the render mode while a request runs asks once more, with the new mode', async () => {
+  const gates: ((result: RequestResult<Preview>) => void)[] = [];
+  const { session, asked } = harness(() => new Promise((resolve) => { gates.push(resolve); }));
+  const running = session.refresh();
+  const changed = session.setRenderMode('SEPARATE_VARIANTS');
+  assert.equal(gates.length, 1);
+  gates[0]!(ok(ALT));
+  await settle();
+  gates[1]!(ok(SEPARATE));
+  await Promise.all([running, changed]);
+  assert.deepEqual(asked, ['ALT_BLOCKS', 'SEPARATE_VARIANTS']);
 });
 
 test('each reason for having nothing to show is its own message, explained, with something to do about it (MP-R8)', async () => {
@@ -283,10 +306,10 @@ test('the page has a CSP with no remote, inline-script or eval allowance, only i
   assert.ok(html.includes('id="render-mode"') && html.includes('id="diagram"'));
 });
 
-test('the manifest registers an optional preview editor for .zdl and .zfl, offered from the one submenu', () => {
+test('the manifest registers an optional preview editor for .zdl, .zw and .zfl, offered from the one submenu', () => {
   const contributes = manifest.contributes;
   assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === PREVIEW_VIEW_TYPE),
-    { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zfl' }], priority: 'option' });
+    { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zw' }, { filenamePattern: '*.zfl' }], priority: 'option' });
   const commands = (contributes.commands as { command: string; title: string }[]).map((entry) => entry.command);
   for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode']) {
     assert.ok(commands.includes(command), `${command} is not contributed`);
@@ -295,6 +318,7 @@ test('the manifest registers an optional preview editor for .zdl and .zfl, offer
   const [submenu] = title.filter((item) => item.submenu);
   assert.equal(submenu?.submenu, 'zenwave.modelViews');
   assert.match(submenu?.when ?? '', /resourceExtname == \.zdl/);
+  assert.match(submenu?.when ?? '', /resourceExtname == \.zw/);
   assert.match(submenu?.when ?? '', /resourceExtname == \.zfl/);
   assert.match(submenu?.when ?? '', /!isInDiffEditor/, 'no preview is offered in a diff (MP-Q4)');
   assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.')), 'the preview has no title-bar icon of its own');
@@ -306,10 +330,10 @@ test('the manifest registers an optional preview editor for .zdl and .zfl, offer
     assert.match(entry.when, /^resourceExtname == \.zfl /, `${entry.command} stays on ZFL`);
   }
   for (const entry of preview.filter((item) => item.command !== 'zenwave.preview.showText')) {
-    assert.ok(entry.when.includes('resourceExtname =~ /^\\.(zdl|zfl)$/'), `${entry.command} covers ZDL and ZFL, and not .zw yet`);
+    assert.ok(entry.when.includes('resourceExtname =~ /^\\.(zdl|zw|zfl)$/'), `${entry.command} covers ZDL, ZW and ZFL`);
   }
   const palette = Object.fromEntries((contributes.menus.commandPalette as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
-  assert.match(palette['zenwave.preview.open'] ?? '', /editorLangId =~ \/\^\(zdl\|zfl\)\$\//, 'an untitled model sees the command, which tells it to save first');
+  assert.match(palette['zenwave.preview.open'] ?? '', /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, 'an untitled model sees the command, which tells it to save first');
   assert.match(palette['zenwave.preview.openToSide'] ?? '', /!isInDiffEditor/);
   assert.match(palette['zenwave.preview.selectRenderMode'] ?? '', /resourceExtname == \.zfl/);
 });
@@ -322,7 +346,7 @@ test('the preview keybindings are scoped to model editors and cannot reach the b
   ]);
   for (const binding of bindings) {
     assert.match(binding.when, /editorTextFocus/);
-    assert.ok(binding.when.includes('resourceExtname =~ /^\\.(zdl|zfl)$/'), binding.when);
+    assert.ok(binding.when.includes('resourceExtname =~ /^\\.(zdl|zw|zfl)$/'), binding.when);
     assert.ok(!/markdown/i.test(binding.when), 'Markdown files are not matched');
   }
 });
