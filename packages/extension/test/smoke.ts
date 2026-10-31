@@ -1189,14 +1189,25 @@ async function previewModels(api: LanguageServerApi, preview: PreviewApi, deskto
   await vscode.commands.executeCommand('zenwave.preview.selectDiagram', { documentUri: checkout, representationId: alt.defaultRepresentationId });
   console.log(`PASS: the ZFL preview offers the server's ${alt.representations.length} representations in its order and titles, starts on its default, and draws each one with the bundled Mermaid`);
 
-  // A ZDL model: one class diagram, so neither selector is shown.
+  // A ZDL model: the server's Markdown page, rendered, its diagrams drawn, and no selector for a single representation (MP-R10, MP-R15).
   await vscode.commands.executeCommand('zenwave.preview.openToSide', ordersUri);
   const model = await renderedPreview(preview, orders);
   const ordersAnswer = await serverPreview(api, orders);
-  probe = await drawing(model, ordersAnswer.defaultRepresentationId, contentHash(ordersAnswer.representations[0]!.content), 'The class diagram was not drawn');
+  const page = ordersAnswer.representations[0]!;
+  assert(ordersAnswer.representations.length === 1 && page.format === 'MARKDOWN', `The ZDL answer is not one Markdown page: ${ordersAnswer.representations.map((item) => `${item.id}:${item.format}`).join()}`);
+  const fences = (page.content.match(/^```mermaid$/gm) ?? []).length;
+  assert(fences >= 1, 'The ZDL page has no diagram');
+  probe = await waitFor(async () => {
+    const answer = await model.probe().catch(() => undefined);
+    return answer && answer.renderedHash === contentHash(page.content) && answer.content.diagrams.drawn === fences ? answer : undefined;
+  }, 'The ZDL page was not drawn with its diagrams', 60000);
   assert(!probe.diagramSelector.visible && !probe.renderModeSelector.visible, `A selector with no choice is shown: ${JSON.stringify([probe.diagramSelector.visible, probe.renderModeSelector.visible])}`);
-  assert(probe.text.includes('Customer'), `The class diagram does not show Customer: ${probe.text.slice(0, 200)}`);
-  console.log('PASS: a ZDL preview draws the server\'s class diagram and shows no selector');
+  assert(probe.text.includes('Customer') && probe.content.headings > 0 && probe.notice === undefined, `The Markdown page does not read as a page: ${probe.text.slice(0, 200)}`);
+  assert(probe.content.diagrams.failed === 0 && probe.svgCount === fences, `Diagrams: ${JSON.stringify(probe.content.diagrams)} svg=${probe.svgCount} of ${fences}`);
+  assert(probe.content.fragments.length > 0 && probe.content.unresolved.length === 0, `Anchors of the page that do not resolve: ${probe.content.unresolved.join()}`);
+  assert(probe.content.hostile === 0 && probe.content.remoteImages === 0 && probe.cspViolations.length === 0, `Unsafe content or policy violations: ${JSON.stringify(probe.content)} ${probe.cspViolations.join()}`);
+  assert(probe.scripts.map(baseName).sort().join() === 'content.js,mermaid.min.js,preview.js', `Scripts the ZDL page loaded: ${probe.scripts.join()}`);
+  console.log(`PASS: a ZDL preview renders the server's Markdown page with its ${fences} diagram(s) drawn, every anchor resolving, and no selector`);
 
   // 005/7.5: two models previewed at once, each keeping its own document; asking again reveals rather than duplicates (MP-R1, MP-R3).
   assert(editorCount(preview) === 2 && preview.editorsFor(checkout).length === 1 && preview.editorsFor(orders).length === 1, 'Two previews are not two editors');
@@ -1257,7 +1268,7 @@ async function previewModels(api: LanguageServerApi, preview: PreviewApi, deskto
 
   await editsAndChoices(api, flow, alt);
   await rendersWhateverItIsGiven(flow);
-  if (desktop) await previewTheme(flow);
+  if (desktop) await previewTheme(flow, model);
   await previewStates(api, preview);
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   await waitFor(() => editorCount(preview) === 0, 'Closing all editors left previews registered');
@@ -1345,53 +1356,110 @@ async function editsAndChoices(api: LanguageServerApi, flow: PreviewEditorApi, a
   await waitFor(() => flow.session.data.kind === 'rendered' ? true : undefined, 'The preview did not follow the revert');
 }
 
-/** 005/5.5: a diagram that cannot be drawn reports itself and leaves the rest readable; other formats are named, not shown. */
+/** 005/5.1, 5.3, 5.5: Markdown and HTML are sanitised; a diagram that cannot be drawn reports itself and leaves the rest readable; other formats are named, not shown. */
 async function rendersWhateverItIsGiven(flow: PreviewEditorApi): Promise<void> {
+  await flow.settled();
   const good = flow.session.representations.find((item) => item.id === flow.session.selectedId)!;
+  const filler = Array.from({ length: 120 }, (_, index) => `Paragraph ${index} of filler text, so the page can scroll.`).join('\n\n');
+  const markdownText = [
+    '# Orders', '',
+    '[Last section](#last-section) and [out](https://remote.invalid/page) and [again](#orders-1)', '',
+    '![remote](https://remote.invalid/pic.png)', '',
+    '<script>window.__pwned = 1</script>', '',
+    '<img src="https://remote.invalid/raw.png" onerror="window.__pwned = 1">', '',
+    '```mermaid', '---', 'config:', '  theme: forest', '---', 'flowchart LR', '  a --> b', '```', '',
+    '```mermaid', 'this is not a diagram', '  ???', '```', '',
+    '```mermaid', 'flowchart LR', '  c --> d', '```', '',
+    '| a | b |', '|---|---|', '| 1 | `2` |', '',
+    filler, '', '## Last section', '', 'The end.', '',
+    filler, '', '## Orders', '', 'Again.', '',
+  ].join('\n');
+  const hostileHtml = '<p onclick="window.__pwned = 1" style="color:red">zzmarker</p><script>window.__pwned = 1</script><iframe src="https://remote.invalid/f"></iframe>' +
+    '<form action="https://remote.invalid/p"><input name="x"></form><img src="https://remote.invalid/p.png" srcset="https://remote.invalid/p2.png">' +
+    '<a href="https://remote.invalid/x">out</a><a href="#zzmarker">in</a><h2 id="zzmarker">Marked</h2><table><tr><td>cell</td></tr></table>';
   const items = [
     { id: 'broken', title: 'Broken', format: 'MERMAID', content: 'this is not a diagram\n  ???' },
-    { id: 'doc', title: 'Markdown page', format: 'MARKDOWN', content: '# Orders\n\n<script>window.__pwned = 1</script>' },
-    { id: 'page', title: 'HTML page', format: 'HTML', content: '<p onclick="window.__pwned = 1">zzmarker</p><script>window.__pwned = 1</script>' },
+    { id: 'doc', title: 'Markdown page', format: 'MARKDOWN', content: markdownText },
+    { id: 'page', title: 'HTML page', format: 'HTML', content: hostileHtml },
+    { id: 'other', title: 'Other', format: 'ASCIIDOC', content: '= Title' },
     good,
   ];
+  const send = (selectedId: string, list: readonly unknown[] = items): Thenable<boolean> =>
+    flow.panel.webview.postMessage({ type: 'zenwave.preview.render', payload: { representations: list, selectedId, renderMode: 'ALT_BLOCKS', showRenderMode: true } });
   const show = async (selectedId: string): Promise<PreviewProbe> => {
-    await flow.panel.webview.postMessage({ type: 'zenwave.preview.render', payload: { representations: items, selectedId, renderMode: 'ALT_BLOCKS', showRenderMode: true } });
-    return waitFor(async () => {
-      const probe = await flow.probe();
-      return selectedId === 'broken' ? (probe.notice !== undefined ? probe : undefined) : (probe.diagramSelector.value === selectedId ? probe : undefined);
-    }, `${selectedId} was not shown`, 30000);
+    await send(selectedId);
+    let last: PreviewProbe | undefined;
+    try {
+      return await waitFor(async () => {
+        const probe = last = await flow.probe();
+        const shown = selectedId === 'broken' || selectedId === 'other' ? probe.notice !== undefined : probe.renderedId === selectedId;
+        return probe.diagramSelector.value === selectedId && shown ? probe : undefined;
+      }, `${selectedId} was not shown`, 30000);
+    } catch (error) {
+      throw new Error(`${String(error)}: ${JSON.stringify(last && { ...last, text: last.text.slice(0, 300) })}`);
+    }
   };
   const broken = await show('broken');
   assert(/could not be drawn/.test(broken.notice ?? '') && broken.text.includes('this is not a diagram') && broken.svgCount === 0, `A malformed diagram: ${broken.notice}`);
-  assert(broken.diagramSelector.options.length === 4 && broken.diagramSelector.visible, 'The rest is not readable: the selector is gone');
+  assert(broken.diagramSelector.options.length === items.length && broken.diagramSelector.visible, 'The rest is not readable: the selector is gone');
   assert(broken.strayElements === 0, `A malformed diagram left ${broken.strayElements} elements in the page`);
+
+  // Markdown: rendered, three fenced diagrams each on its own (frontmatter included, one malformed), nothing hostile, no request.
   const markdown = await show('doc');
-  assert(/Markdown, which this version of the preview cannot show yet/.test(markdown.notice ?? '') && markdown.svgCount === 0 && !markdown.text.includes('Orders'), `Markdown: ${markdown.notice} ${markdown.text}`);
+  assert(markdown.content.diagrams.drawn === 2 && markdown.content.diagrams.failed === 1 && markdown.svgCount === 2, `Fenced diagrams: ${JSON.stringify(markdown.content.diagrams)} svg=${markdown.svgCount}`);
+  assert(markdown.text.includes('This diagram could not be drawn') && markdown.text.includes('this is not a diagram') && markdown.text.includes('The end.') && markdown.content.tables === 1,
+    `A malformed block did not report itself in place, or the rest is unreadable: ${markdown.text.slice(0, 300)}`);
+  assert(markdown.notice === undefined && markdown.strayElements === 0, `Markdown: ${markdown.notice} strays=${markdown.strayElements}`);
+  assert(markdown.content.hostile === 0 && markdown.content.remoteImages === 0 && markdown.text.includes('<script>window.__pwned = 1</script>'), `Markdown content is not safe: ${JSON.stringify(markdown.content)}`);
+  assert(!markdown.content.resources.some((url) => url.includes('remote.invalid')) && markdown.cspViolations.length === 0, `A request left the page: ${markdown.content.resources.join()} ${markdown.cspViolations.join()}`);
+  assert(markdown.content.otherLinks === 0 && markdown.content.fragments.join() === '#last-section,#orders-1' && markdown.content.unresolved.length === 0, `Links: ${JSON.stringify(markdown.content)}`);
+  assert(markdown.diagramSelector.visible, 'The selector is not usable on a Markdown page');
+  const followed = await flow.probe('#last-section');
+  assert(followed.scrollTop > 0, `An anchor link did not scroll within the page: ${followed.scrollTop}`);
+  const again = await flow.probe('#orders-1');
+  assert(again.scrollTop > 0 && again.scrollTop !== followed.scrollTop, `The repeated heading's anchor did not resolve to the second heading: ${followed.scrollTop} then ${again.scrollTop}`);
+  // An edit with the page left where it was: same representation, one more line, scroll kept (MP-R5).
+  await send('doc', items.map((item) => item.id === 'doc' ? { ...item, content: `${markdownText}\nAnd one more line.\n` } : item));
+  const kept = await waitFor(async () => { const probe = await flow.probe(); return probe.text.includes('And one more line.') ? probe : undefined; }, 'The edited Markdown was not shown', 30000);
+  assert(kept.scrollTop === again.scrollTop && kept.content.diagrams.drawn === 2, `The edit moved the page: ${again.scrollTop} to ${kept.scrollTop}`);
+
   const html = await show('page');
-  assert(/HTML, which this version of the preview cannot show yet/.test(html.notice ?? '') && html.svgCount === 0 && !html.text.includes('zzmarker'), `HTML: ${html.notice} ${html.text}`);
+  assert(html.text.includes('zzmarker') && html.text.includes('cell') && html.content.tables === 1, `HTML: ${html.text}`);
+  assert(html.content.hostile === 0 && html.content.remoteImages === 0 && html.content.otherLinks === 0 && html.content.unresolved.length === 0, `HTML content is not safe: ${JSON.stringify(html.content)}`);
+  assert(!html.content.resources.some((url) => url.includes('remote.invalid')) && html.cspViolations.length === 0, `A request left the page: ${html.content.resources.join()} ${html.cspViolations.join()}`);
+  assert(html.svgCount === 0 && html.notice === undefined, `HTML: ${html.notice}`);
+  const other = await show('other');
+  assert(/ASCIIDOC format/.test(other.notice ?? '') && other.svgCount === 0 && !other.text.includes('Title'), `Another format: ${other.notice}`);
   const recovered = await show(good.id);
   await waitFor(async () => (await flow.probe()).svgCount === 1, 'The good diagram was not drawn after the others', 30000);
   assert(recovered.cspViolations.length === 0, `Policy violations: ${recovered.cspViolations.join('; ')}`);
   await flow.session.refresh();
   await waitFor(async () => (await flow.probe()).diagramSelector.options.length === flow.session.representations.length ? true : undefined, 'The page did not return to the server answer', 30000);
-  console.log('PASS: a malformed diagram reports itself and the selector stays usable; Markdown and HTML are named as not shown yet and nothing in them runs');
+  console.log('PASS: Markdown and HTML are sanitised (nothing hostile, no request, no navigation) and anchors scroll; a malformed fenced diagram reports itself in place and the rest stays readable; an edit kept the scroll');
 }
 
 /** 005/7.11, 5.6: the preview follows a colour theme change while open. */
-async function previewTheme(flow: PreviewEditorApi): Promise<void> {
+async function previewTheme(flow: PreviewEditorApi, model: PreviewEditorApi): Promise<void> {
   const workbench = vscode.workspace.getConfiguration('workbench');
   const saved = workbench.inspect<string>('colorTheme')?.globalValue;
   try {
     for (const [name, theme] of [['Default Light Modern', 'light'], ['Default Dark Modern', 'dark']] as const) {
       const renders = (await flow.probe()).renders;
+      const modelRenders = (await model.probe()).renders;
       await workbench.update('colorTheme', name, vscode.ConfigurationTarget.Global);
       const probe = await waitFor(async () => {
         const answer = await flow.probe();
         return answer.theme === theme && answer.renderedTheme === theme && answer.svgCount === 1 && answer.renders > renders ? answer : undefined;
       }, `The preview did not follow the ${name} theme`, 30000);
       assert(probe.cspViolations.length === 0, `Policy violations after the theme change: ${probe.cspViolations.join('; ')}`);
+      // The diagrams inside a Markdown page follow the theme too, each redrawn.
+      const page = await waitFor(async () => {
+        const answer = await model.probe();
+        return answer.theme === theme && answer.renderedTheme === theme && answer.content.diagrams.drawn > 0 && answer.content.diagrams.failed === 0 && answer.renders > modelRenders ? answer : undefined;
+      }, `The Markdown page did not follow the ${name} theme`, 30000);
+      assert(page.cspViolations.length === 0 && page.content.unresolved.length === 0, `Markdown page after the theme change: ${page.cspViolations.join('; ')} ${page.content.unresolved.join()}`);
     }
-    console.log('PASS: switching the colour theme with a preview open redraws the diagram in the matching Mermaid theme');
+    console.log('PASS: switching the colour theme with a preview open redraws the diagram, and the diagrams of a Markdown page, in the matching Mermaid theme');
   } finally {
     await workbench.update('colorTheme', saved, vscode.ConfigurationTarget.Global);
   }

@@ -137,10 +137,11 @@ function copyEventFlowWebview({ page, name }) {
 
 /**
  * The preview page is this extension's own (webview/preview), built for the
- * browser as one script and shipped in dist/preview-webview with its stylesheet
- * and the Mermaid bundle. Mermaid is not imported by the page: the page loads it
- * from the extension on the first diagram, so opening a preview that has nothing
- * to draw costs nothing. The version copied must be the one pinned in package.json.
+ * browser as one script and shipped in dist/preview-webview with its stylesheet,
+ * the Mermaid bundle and the content bundle (Markdown and the sanitiser). Neither is
+ * imported by the page: it loads Mermaid from the extension on the first diagram and
+ * the content bundle on the first Markdown or HTML representation, so opening a
+ * preview that has neither costs nothing. The version copied must be the one pinned in package.json.
  */
 function mermaidBundle() {
   const pinned = packageManifest.dependencies.mermaid;
@@ -249,6 +250,14 @@ const extensionTargets = [
     target: 'es2022',
     format: 'iife',
   },
+  {
+    name: 'preview-content',
+    entryPoints: [path.join(projectDir, 'webview/preview/content.ts')],
+    outfile: path.join(projectDir, 'dist/preview-webview/content.js'),
+    platform: 'browser',
+    target: 'es2022',
+    format: 'iife',
+  },
 ];
 
 const testTargets = extensionTargets.map((target) => ({
@@ -258,7 +267,7 @@ const testTargets = extensionTargets.map((target) => ({
   outfile: path.join(projectDir, `.test-dist/${target.name}/index.js`),
 }));
 
-const targets = tests ? testTargets.filter((target) => !target.name.startsWith('preview-page')) : extensionTargets;
+const targets = tests ? testTargets.filter((target) => !target.name.startsWith('preview-')) : extensionTargets;
 
 /**
  * Both targets build concurrently, but VS Code needs ONE begin/end pair per

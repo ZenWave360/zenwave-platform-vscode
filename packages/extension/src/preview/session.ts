@@ -172,8 +172,8 @@ export class PreviewSession {
     this.present(true);
   }
 
-  /** Asks the page what it rendered. */
-  probe(timeoutMs = 5000): Promise<PreviewProbe> {
+  /** Asks the page what it rendered. With `followLink`, the page first follows that `#anchor` link as a click would (a test seam: a host cannot click inside a webview). */
+  probe(followLink?: string, timeoutMs = 5000): Promise<PreviewProbe> {
     const requestId = this.nextProbe++;
     return new Promise<PreviewProbe>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -181,7 +181,7 @@ export class PreviewSession {
         reject(new Error(`The preview page did not answer probe ${requestId}`));
       }, timeoutMs);
       this.probes.set(requestId, (probe) => { clearTimeout(timer); resolve(probe); });
-      this.post({ type: 'zenwave.host.probe', payload: { requestId } });
+      this.post({ type: 'zenwave.host.probe', payload: { requestId, ...(followLink === undefined ? {} : { followLink }) } });
     });
   }
 

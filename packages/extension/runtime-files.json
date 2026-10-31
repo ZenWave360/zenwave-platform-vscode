@@ -10,6 +10,7 @@
     "dist/eventflow-webview/assets/index-*.js",
     "dist/eventflow-webview/assets/index-*.css",
     "dist/preview-webview/preview.js",
+    "dist/preview-webview/content.js",
     "dist/preview-webview/preview.css",
     "dist/preview-webview/mermaid.min.js",
     "resources/sdk-plugin-catalogue.json",

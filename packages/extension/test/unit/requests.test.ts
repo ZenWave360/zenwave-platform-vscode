@@ -58,7 +58,7 @@ test('recorded server answers pass through unchanged and unexpected shapes fail'
   assert.equal(views.kind === 'ok' && views.value.flowGraph.schema, 'zfl.eventflow.view@1');
   assert.equal(views.kind === 'ok' && views.value, answers['zenwave/eventFlowViews'], 'forwarded unchanged');
   const preview = await requests.preview('file:///workspace/model.zdl');
-  assert.equal(preview.kind === 'ok' && preview.value.defaultRepresentationId, 'class-diagram');
+  assert.equal(preview.kind === 'ok' && preview.value.defaultRepresentationId, 'domain');
   const symbol = await requests.symbolAt('file:///workspace/checkout.zfl', { line: 14, character: 30 });
   assert.equal(symbol.kind === 'ok' && symbol.value?.semanticId, 'file:///workspace/checkout.zfl#flows.CheckoutFlow.commands.createOrder');
   const references = await requests.forwardReferences('file:///workspace/checkout.zfl', 'x');

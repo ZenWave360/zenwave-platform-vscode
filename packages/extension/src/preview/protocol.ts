@@ -53,7 +53,27 @@ export interface RenderPayload {
 export type OutboundMessage =
   | { readonly type: 'zenwave.preview.render'; readonly payload: RenderPayload }
   | { readonly type: 'zenwave.host.state'; readonly payload: StatePresentation | null }
-  | { readonly type: 'zenwave.host.probe'; readonly payload: { readonly requestId: number } };
+  | { readonly type: 'zenwave.host.probe'; readonly payload: { readonly requestId: number; readonly followLink?: string } };
+
+/** What a Markdown or HTML representation turned into on the page. */
+export interface PreviewContentProbe {
+  readonly headings: number;
+  readonly tables: number;
+  readonly codeBlocks: number;
+  /** `img` elements in the content, and how many of them have a `src` that is not `data:`. */
+  readonly images: number;
+  readonly remoteImages: number;
+  /** Elements that must never survive sanitising: script, frame, form, style, link, event handler attributes. */
+  readonly hostile: number;
+  readonly diagrams: { readonly drawn: number; readonly failed: number };
+  /** Links inside the page, and those with no element carrying their anchor. */
+  readonly fragments: readonly string[];
+  readonly unresolved: readonly string[];
+  /** Links in the content that are not to a fragment of the page. */
+  readonly otherLinks: number;
+  /** Every resource the page has requested, by URL. */
+  readonly resources: readonly string[];
+}
 
 /** What the page reports when probed. For tests and diagnostics. */
 export interface PreviewProbe {
@@ -67,6 +87,7 @@ export interface PreviewProbe {
   /** `contentHash` of the content drawn now. */
   readonly renderedHash: string | undefined;
   readonly svgCount: number;
+  readonly content: PreviewContentProbe;
   /** The rendered text of the preview area. */
   readonly text: string;
   /** What the page says in place of a diagram (an unsupported format, a diagram that failed). */

@@ -822,6 +822,7 @@
   "devDependencies": {
     "@zenwave360/lsp-js": "0.1.0-next.12.1",
     "@zenwave360/vistas-eventflow-webview": "0.1.0",
+    "@types/markdown-it": "14.2.0",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
@@ -831,6 +832,8 @@
   },
   "dependencies": {
     "@zenwave360/dsl": "1.10.0",
+    "dompurify": "3.4.17",
+    "markdown-it": "14.3.2",
     "mermaid": "12.2.0",
     "vscode-languageclient": "9.0.1"
   }

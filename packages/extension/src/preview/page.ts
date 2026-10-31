@@ -5,6 +5,10 @@
  * Scripts run only from the extension's own resources and this page's one nonce,
  * with no remote origin and no `unsafe-eval`; everything else is `default-src 'none'`.
  *
+ * Markdown and HTML representations are inserted only after the content bundle has
+ * sanitised them, and the policy gives them no `img-src` beyond the extension's own
+ * files and `data:`, so nothing in them reaches a network.
+ *
  * Styles are the one exception: `style-src` allows `'unsafe-inline'`, on this page
  * only. Mermaid measures text in the live document with `<style>` elements and
  * `style` attributes it inserts itself, and offers no way to nonce them. Under a
@@ -23,6 +27,8 @@ export interface PreviewPageResources {
   readonly scriptUri: string;
   readonly styleUri: string;
   readonly mermaidUri: string;
+  /** The content bundle: Markdown and the sanitiser. */
+  readonly contentUri: string;
 }
 
 export function previewContentSecurityPolicy(cspSource: string, nonce: string): string {
@@ -50,7 +56,7 @@ export function buildPreviewHtml(resources: PreviewPageResources): string {
 <title>ZenWave Preview</title>
 <link rel="stylesheet" href="${attribute(resources.styleUri)}">
 </head>
-<body data-mermaid-src="${attribute(resources.mermaidUri)}">
+<body data-mermaid-src="${attribute(resources.mermaidUri)}" data-content-src="${attribute(resources.contentUri)}">
 <header id="controls" hidden>
 <label id="render-mode-field" hidden>Render mode <select id="render-mode"></select></label>
 <label id="diagram-field" hidden>Diagram <select id="diagram"></select></label>

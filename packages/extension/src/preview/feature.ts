@@ -40,7 +40,7 @@ export interface PreviewEditorApi {
   readonly session: PreviewSession;
   /** Resolves when no request is scheduled or running. */
   settled(): Promise<void>;
-  probe(): Promise<PreviewProbe>;
+  probe(followLink?: string): Promise<PreviewProbe>;
 }
 
 export interface PreviewApi {
@@ -114,9 +114,9 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
     this.viewStateChanged();
   }
 
-  private resources(webview: vscode.Webview, pageDirectory: vscode.Uri): { cspSource: string; nonce: string; scriptUri: string; styleUri: string; mermaidUri: string } {
+  private resources(webview: vscode.Webview, pageDirectory: vscode.Uri): { cspSource: string; nonce: string; scriptUri: string; styleUri: string; mermaidUri: string; contentUri: string } {
     const asset = (name: string): string => webview.asWebviewUri(vscode.Uri.joinPath(pageDirectory, name)).toString();
-    return { cspSource: webview.cspSource, nonce: createNonce(), scriptUri: asset('preview.js'), styleUri: asset('preview.css'), mermaidUri: asset('mermaid.min.js') };
+    return { cspSource: webview.cspSource, nonce: createNonce(), scriptUri: asset('preview.js'), styleUri: asset('preview.css'), mermaidUri: asset('mermaid.min.js'), contentUri: asset('content.js') };
   }
 
   private load(webview: vscode.Webview, pageDirectory: vscode.Uri): void {
@@ -172,8 +172,8 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
     return this.refresher.idle();
   }
 
-  probe(): Promise<PreviewProbe> {
-    return this.session.probe();
+  probe(followLink?: string): Promise<PreviewProbe> {
+    return this.session.probe(followLink);
   }
 
   dispose(): void {

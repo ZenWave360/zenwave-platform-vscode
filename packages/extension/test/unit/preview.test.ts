@@ -67,7 +67,7 @@ test('the representations reach the page in the server order, under its titles, 
   assert.ok(posted.some((message) => message.type === 'zenwave.host.state'));
 });
 
-test('a ZDL class diagram has no render mode to offer, and the request carries none', async () => {
+test('a ZDL page has no render mode to offer, and the request carries none', async () => {
   const { session, renders, asked } = harness(() => ok(zdlAnswer), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
   session.receive(READY);
   await session.refresh();
@@ -259,6 +259,7 @@ test('the page has a CSP with no remote, inline-script or eval allowance, only i
     scriptUri: 'https://x.vscode-cdn.net/ext/dist/preview-webview/preview.js',
     styleUri: 'https://x.vscode-cdn.net/ext/dist/preview-webview/preview.css',
     mermaidUri: 'https://x.vscode-cdn.net/ext/dist/preview-webview/mermaid.min.js',
+    contentUri: 'https://x.vscode-cdn.net/ext/dist/preview-webview/content.js',
   };
   const html = buildPreviewHtml(resources);
   const csp = previewContentSecurityPolicy(resources.cspSource, resources.nonce);
@@ -271,7 +272,9 @@ test('the page has a CSP with no remote, inline-script or eval allowance, only i
   assert.ok(!/unsafe-eval|http:|connect-src|\*;/.test(csp.replaceAll('https://*.vscode-cdn.net', '')), csp);
   assert.ok(html.includes(`<script nonce="abc123" src="${resources.scriptUri}"></script>`));
   assert.ok(html.includes(`data-mermaid-src="${resources.mermaidUri}"`), 'Mermaid is named, not loaded, by the page');
-  assert.ok(!/<script[^>]*src="[^"]*mermaid/.test(html), 'Mermaid is loaded on the first diagram, not when the panel opens');
+  assert.ok(html.includes(`data-content-src="${resources.contentUri}"`), 'the content bundle is named, not loaded, by the page');
+  assert.ok(!/<script[^>]*src="[^"]*(mermaid|content)/.test(html), 'Mermaid and the content bundle are loaded when first needed, not when the panel opens');
+  assert.ok(!/img-src[^;]*https?:/.test(csp.replaceAll('https://*.vscode-cdn.net', '')), 'no remote image source');
   assert.equal((html.match(/<script/g) ?? []).length, 1);
   assert.ok(!/<style|style="/.test(html), 'the page carries no inline style');
   const failed = buildFailedHtml(resources, 'Could not load <b>preview.js</b>');
