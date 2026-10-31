@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SHIPPED_CATALOGUE } from '../src/sdk/catalogue.js';
 import rawShippedCatalogue from '../resources/sdk-plugin-catalogue.json';
+import recordedDomainPage from './fixtures/lsp-samples/preview-zdl.json';
 import { LspSupervisor } from '../src/lsp/supervisor.js';
 import type { ZenwaveExtensionApi } from '../src/activate.js';
 import type { LanguageServerApi } from '../src/lsp/feature.js';
@@ -1491,7 +1492,49 @@ async function previewTheme(flow: PreviewEditorApi, model: PreviewEditorApi): Pr
     assert(flowLight && flowDark && flowLight.inks.length > 0 && flowDark.inks.length > 0, 'The flowchart has no text to measure');
     assert(flowLight.inks.join() !== flowDark.inks.join(), `A diagram without a theme kept its text colour across the switch: ${flowLight.inks.join()}`);
     assert(flowLight.inks.some((ink) => luminance(ink) < 0.4) && flowDark.inks.some((ink) => luminance(ink) > 0.6), `Text of a diagram without a theme: light ${flowLight.inks.join()} dark ${flowDark.inks.join()}`);
-    console.log('PASS: switching the colour theme with a preview open redraws the diagram and those of a Markdown page; a diagram without a theme of its own changes its text colour, one with its own keeps dark text on a light fill');
+    // The page the server wrote for a real module, recorded: a flowchart with a subgraph (front matter, no theme), class
+    // diagrams, a state diagram. A relation with a multiplicity is added, as the server writes it for an embedded entity.
+    const recorded = recordedDomainPage.result.representations[0]!.content;
+    const multiplicity = ['', '```mermaid', '---', 'config:', '  theme: default', '  themeVariables:', '    lineColor: "#888888"', '    edgeLabelBackground: "#ffffff"', '---', 'classDiagram', '    class Order', '    class OrderItem', '    Order *-- "*" OrderItem : items', '```', ''].join('\n');
+    const sampleSource = recorded + multiplicity;
+    const sampleThemed = [...sampleSource.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map((match) => /^---\r?\n[\s\S]*?\btheme:\s*default[\s\S]*?---/.test(match[1]!));
+    const sample: Partial<Record<'light' | 'dark', PreviewProbe>> = {};
+    for (const [name, theme] of [['Default Light Modern', 'light'], ['Default Dark Modern', 'dark']] as const) {
+      await workbench.update('colorTheme', name, vscode.ConfigurationTarget.Global);
+      await model.panel.webview.postMessage({ type: 'zenwave.preview.render', payload: { representations: [{ id: 'recorded', title: 'Recorded', format: 'MARKDOWN', content: sampleSource }], selectedId: 'recorded', renderMode: 'ALT_BLOCKS', showRenderMode: false } });
+      sample[theme] = await waitFor(async () => {
+        const answer = await model.probe();
+        return answer.renderedId === 'recorded' && answer.theme === theme && answer.renderedTheme === theme && answer.content.diagrams.drawn === sampleThemed.length && answer.content.diagrams.failed === 0 ? answer : undefined;
+      }, `The recorded page was not drawn in the ${name} theme`, 30000);
+    }
+    const [sampleLight, sampleDark] = [sample.light!.content.diagramColours, sample.dark!.content.diagramColours];
+    assert(sampleThemed.includes(false) && sampleThemed.includes(true), `The recorded page does not mix diagrams with and without a theme: ${sampleThemed.join()}`);
+    sampleThemed.forEach((themed, index) => {
+      const [before, after] = [sampleLight[index]!, sampleDark[index]!];
+      if (themed) {
+        // `theme: default`: dark text on a light fill whatever the editor.
+        assert(after.inks.length > 0 && after.inks.every((ink) => luminance(ink) < 0.4), `Diagram ${index} (${after.kind}) with theme: default lost its dark text on the dark page: ${after.inks.join()}`);
+        assert(after.fills.length === 0 || after.fills.some((fill) => luminance(fill) > 0.6), `Diagram ${index} (${after.kind}) with theme: default lost its light fill on the dark page: ${after.fills.join()}`);
+      } else {
+        // No theme: the lines follow the editor, and a subgraph title keeps dark text on its light fill in both.
+        assert(before.lines.length > 0 && before.lines.join() !== after.lines.join(), `Diagram ${index} (${after.kind}) without a theme kept its lines across the switch: ${before.lines.join()}`);
+        assert(before.lines.some((line) => luminance(line) < 0.4) && after.lines.some((line) => luminance(line) > 0.6), `Lines of a diagram without a theme: light ${before.lines.join()} dark ${after.lines.join()}`);
+        for (const probe of [before, after]) {
+          assert(probe.clusterInks.length > 0 && probe.clusterInks.every((ink) => luminance(ink) < 0.4), `A subgraph title is not dark text: ${probe.clusterInks.join()}`);
+          assert(probe.clusterFills.length > 0 && probe.clusterFills.every((fill) => luminance(fill) > 0.6), `A subgraph is not on a light fill: ${probe.clusterFills.join()}`);
+        }
+      }
+    });
+    // State diagram transitions are not Mermaid's #333 on the dark page.
+    const states = sampleDark.filter((diagram) => diagram.kind === 'stateDiagram');
+    assert(states.length > 0 && states.every((diagram) => diagram.lines.length > 0 && !diagram.lines.includes('rgb(51, 51, 51)') && diagram.lines.every((line) => luminance(line) > 0.4)),
+      `State diagram transitions on the dark page: ${states.map((diagram) => diagram.lines.join()).join(' | ')}`);
+    // Multiplicity labels sit on the page itself: the editor's text colour in both themes.
+    const terminalsLight = sampleLight.flatMap((diagram) => diagram.terminals);
+    const terminalsDark = sampleDark.flatMap((diagram) => diagram.terminals);
+    assert(terminalsLight.length > 0 && terminalsLight.every((ink) => luminance(ink) < 0.4), `Multiplicity labels on the light page: ${terminalsLight.join()}`);
+    assert(terminalsDark.length > 0 && terminalsDark.every((ink) => luminance(ink) > 0.6), `Multiplicity labels on the dark page: ${terminalsDark.join()}`);
+    console.log('PASS: switching the colour theme with a preview open redraws the diagram and those of a Markdown page; a diagram without a theme of its own changes its text colour, one with its own keeps dark text on a light fill; on a recorded page state transitions and multiplicity labels read on the dark page and a subgraph title stays dark on its light fill');
   } finally {
     await workbench.update('colorTheme', saved, vscode.ConfigurationTarget.Global);
   }

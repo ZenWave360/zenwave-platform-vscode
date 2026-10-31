@@ -98,3 +98,9 @@ body > #state button:hover { background: var(--vscode-button-hoverBackground); }
 .zw-diagram-error { margin: 0 0 1em; padding: 8px 12px; border-left: 3px solid var(--vscode-errorForeground, currentColor); }
 .zw-diagram-error p { margin: 0 0 8px; color: var(--vscode-errorForeground, inherit); }
 .zw-diagram-error pre { margin: 0; }
+
+/* Multiplicity labels (the `*` on a `*--` relation) sit directly on the page, not on a node or a label background,
+   and Mermaid paints them #333 in every theme: the editor's own foreground is the colour that reads on the page.
+   The id raises the specificity above Mermaid's `#diagram-id`-scoped rules; nothing else in a diagram is touched. */
+#view svg g.edgeTerminals text,
+#view svg g.edgeTerminals tspan { fill: var(--vscode-editor-foreground, var(--vscode-foreground)); }

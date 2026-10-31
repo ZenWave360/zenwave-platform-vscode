@@ -379,12 +379,22 @@ function contentProbe(): PreviewContentProbe {
     resources: performance.getEntriesByType('resource').map((entry) => entry.name),
     diagramColours: all('svg').map((svg) => {
       const unique = (values: string[]): string[] => [...new Set(values)];
-      const inks = [...svg.querySelectorAll('text, foreignObject span, foreignObject p')].map((element) => {
+      const inks = [...svg.querySelectorAll('text, foreignObject span, foreignObject p')].filter((element) => !element.closest('.edgeTerminals')).map((element) => {
         const style = getComputedStyle(element);
         return element instanceof SVGElement && element.tagName.toLowerCase() === 'text' ? style.fill : style.color;
       });
       const fills = [...svg.querySelectorAll('.node rect, .node polygon, .node path, .node circle, g.statediagram-state rect')].map((element) => getComputedStyle(element).fill);
-      return { inks: unique(inks), fills: unique(fills) };
+      const paint = (selector: string, property: 'stroke' | 'fill'): string[] => unique([...svg.querySelectorAll(selector)].map((element) => getComputedStyle(element)[property]));
+      const ink = (element: Element): string => (element instanceof SVGElement ? getComputedStyle(element).fill : getComputedStyle(element).color);
+      return {
+        kind: svg.getAttribute('aria-roledescription') ?? '',
+        inks: unique(inks),
+        fills: unique(fills),
+        lines: paint('path.transition, path.flowchart-link, path.relation', 'stroke'),
+        clusterInks: unique([...svg.querySelectorAll('.cluster-label text, .cluster-label span, .cluster-label p')].map(ink)),
+        clusterFills: paint('.cluster > rect', 'fill'),
+        terminals: unique([...svg.querySelectorAll('.edgeTerminals text, .edgeTerminals tspan')].map(ink)),
+      };
     }),
   };
 }

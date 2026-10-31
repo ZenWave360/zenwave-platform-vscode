@@ -74,7 +74,20 @@ export interface PreviewContentProbe {
   /** Every resource the page has requested, by URL. */
   readonly resources: readonly string[];
   /** The diagrams drawn (every SVG of the preview area), in order, with the colours they are painted in (computed, as `rgb(...)`). */
-  readonly diagramColours: readonly { readonly inks: readonly string[]; readonly fills: readonly string[] }[];
+  readonly diagramColours: readonly {
+    /** `aria-roledescription` of the SVG: `classDiagram`, `stateDiagram`, `flowchart-v2`, `sequence`. */
+    readonly kind: string;
+    /** Text colours, except the multiplicity labels (`terminals`). */
+    readonly inks: readonly string[];
+    readonly fills: readonly string[];
+    /** Strokes of relations, transitions and flowchart links. */
+    readonly lines: readonly string[];
+    /** Text and fill of the title bar of a flowchart subgraph. */
+    readonly clusterInks: readonly string[];
+    readonly clusterFills: readonly string[];
+    /** Text of the multiplicity labels at the ends of a class relation. */
+    readonly terminals: readonly string[];
+  }[];
 }
 
 /** What the page reports when probed. For tests and diagnostics. */
