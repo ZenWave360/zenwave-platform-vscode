@@ -57,6 +57,8 @@ export interface EventFlowApi {
   editorsFor(documentUri: string): readonly EventFlowEditorApi[];
   /** The diagram editor with focus, if any. */
   readonly active: EventFlowEditorApi | undefined;
+  /** What `zenwave.eventflowViewMode` was last set to, for tests: the context key cannot be read back. */
+  readonly contextViewMode: ViewMode | undefined;
 }
 
 interface Initial {
@@ -165,7 +167,10 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
 
   private receive(message: unknown): void {
     const wasReady = this.session.page.kind === 'ready';
+    const viewMode = this.session.viewMode;
     this.session.receive(message);
+    // The user chose a view in the page's selector: the title bar follows, for the focused editor only.
+    if (this.session.viewMode !== viewMode && this.panel.active) this.deps.onFocus(this);
     if (!wasReady && this.session.page.kind === 'ready') {
       if (this.loadTimer !== undefined) clearTimeout(this.loadTimer);
       this.loadTimer = undefined;
@@ -217,9 +222,11 @@ export function registerEventFlowEditor(
 ): EventFlowApi {
   const editors = new Set<EventFlowEditor>();
   let active: EventFlowEditor | undefined;
+  let contextViewMode: ViewMode | undefined;
 
   function publish(editor: EventFlowEditor): void {
     active = editor;
+    contextViewMode = editor.session.viewMode;
     void vscode.commands.executeCommand('setContext', EVENTFLOW_CONTEXT_KEYS.viewMode, editor.session.viewMode);
     void vscode.commands.executeCommand('setContext', EVENTFLOW_CONTEXT_KEYS.humanizeLabels, editor.session.displaySettings.humanizeLabels);
   }
@@ -317,5 +324,6 @@ export function registerEventFlowEditor(
     get editors() { return [...editors]; },
     editorsFor: (documentUri) => [...editors].filter((editor) => editor.documentUri === documentUri),
     get active() { return active && editors.has(active) ? active : undefined; },
+    get contextViewMode() { return contextViewMode; },
   };
 }

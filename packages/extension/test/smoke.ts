@@ -615,6 +615,42 @@ async function eventflowDiagrams(api: LanguageServerApi, explorer: ModelExplorer
     `Controls were not relayed: ${flow.session.posted.join()}`);
   console.log('PASS: the title-bar toggles switch this diagram to the service view and to labels as written');
 
+  // EF-R3: the page's own selector and the title-bar toggle end in the same state. A page without a selector (the
+  // published 0.1.0) has nothing to drive, so these checks are skipped, not failed.
+  if ((await flow.probe()).viewSelector === undefined) {
+    console.log('SKIP: the EventFlow page has no view selector (webview/ page, pin 0.1.0): selector, viewModeChanged and context key checks not run');
+  } else {
+    const selectorShows = (view: string) => async () => (await flow.probe()).viewSelector === view;
+    const drawsFlow = async () => { const probe = await flow.probe(); return flowIds.every((id) => probe.nodeIds.includes(id)); };
+    await waitFor(selectorShows('services'), 'The selector did not follow the title-bar command to services', 15000);
+    await vscode.commands.executeCommand('workbench.action.focusSecondEditorGroup');
+    await waitFor(() => flow.panel.active && eventflow.active === flow, 'The diagram did not take focus', 10000);
+    assert(eventflow.contextViewMode === 'services', `Context key after focusing the diagram: ${eventflow.contextViewMode}`);
+    const postedViewModes = (): number => flow.session.posted.filter((type) => type === 'setViewMode').length;
+    const before = postedViewModes();
+    flow.session.selectView('flow');
+    await waitFor(async () => flow.session.viewMode === 'flow' && (await drawsFlow()) && eventflow.contextViewMode === 'flow' ? true : undefined,
+      `Choosing Flow in the selector: session ${flow.session.viewMode}, context key ${eventflow.contextViewMode}`, 15000);
+    assert(postedViewModes() === before, 'The extension posted setViewMode back for a change the page made');
+    await flow.session.refresh();
+    assert(flow.session.lastRenderBundle?.viewMode === 'flow', `A re-render after the selector change carries ${flow.session.lastRenderBundle?.viewMode}`);
+    assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.showServiceView', placeOrderUri), 'View toggle found no diagram');
+    await waitFor(async () => (await flow.probe()).viewSelector === 'services' && eventflow.contextViewMode === 'services' ? true : undefined,
+      `The selector did not follow the title command: context key ${eventflow.contextViewMode}`, 15000);
+    assert(flow.session.viewMode === 'services', `Session after the title command: ${flow.session.viewMode}`);
+    // A change in a diagram that is not focused leaves the focused editor's context key alone.
+    await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+    await waitFor(() => !flow.panel.active, 'The diagram kept focus', 10000);
+    flow.session.selectView('flow');
+    await waitFor(() => flow.session.viewMode === 'flow' ? true : undefined, 'The selector change was not recorded', 15000);
+    assert(eventflow.contextViewMode === 'services', `An unfocused diagram changed the context key to ${eventflow.contextViewMode}`);
+    await vscode.commands.executeCommand('workbench.action.focusSecondEditorGroup');
+    await waitFor(() => eventflow.contextViewMode === 'flow' ? true : undefined, `Focusing the diagram did not publish its view: ${eventflow.contextViewMode}`, 10000);
+    assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.showServiceView', placeOrderUri), 'View toggle found no diagram');
+    await waitFor(async () => (await flow.probe()).viewSelector === 'services' && eventflow.contextViewMode === 'services' ? true : undefined, 'The service view was not restored', 15000);
+    console.log('PASS: choosing a view in the page selector updates the session and context key without echoing to the page, survives a re-render, and the title command moves the selector; an unfocused diagram leaves the context key alone');
+  }
+
   // In place: the text tab of checkout.zfl becomes its diagram at the same position; a second diagram keeps its own choices.
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(checkoutUri), { viewColumn: vscode.ViewColumn.One, preview: false });
   const groupOne = (): vscode.TabGroup => vscode.window.tabGroups.all.find((group) => group.viewColumn === vscode.ViewColumn.One)!;

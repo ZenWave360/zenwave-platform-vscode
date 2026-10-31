@@ -117,6 +117,10 @@ export class DiagramSession {
         this.present(true);
         return;
       }
+      case 'viewModeChanged':
+        // The page already shows this view: record it without telling the page (EF-R3).
+        this.viewMode = message.payload.viewMode;
+        return;
       case 'zenwave.host.loadError':
         if (this.page.kind === 'ready') {
           this.ports.log.warn(`EventFlow diagram for ${this.ports.fileName}: page error: ${message.payload.message}`);
@@ -165,6 +169,11 @@ export class DiagramSession {
   highlightNode(nodeId: string | null): void {
     this.highlight = nodeId;
     if (this.rendered) this.post({ type: 'highlightNode', payload: { nodeId } });
+  }
+
+  /** Clicks the page's view selector through the host script. For tests; a page without a selector ignores it. */
+  selectView(viewMode: ViewMode): void {
+    this.post({ type: 'zenwave.host.selectView', payload: { viewMode } });
   }
 
   /** Asks the host script what the page rendered. */

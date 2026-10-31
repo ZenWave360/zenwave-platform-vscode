@@ -30,7 +30,9 @@ export type PageMessage =
 /** Host → host script. */
 export type HostMessage =
   | { readonly type: 'zenwave.host.state'; readonly payload: StatePresentation | null }
-  | { readonly type: 'zenwave.host.probe'; readonly payload: { readonly requestId: number } };
+  | { readonly type: 'zenwave.host.probe'; readonly payload: { readonly requestId: number } }
+  /** Clicks the page's own view selector, as a user would. For tests. */
+  | { readonly type: 'zenwave.host.selectView'; readonly payload: { readonly viewMode: ViewMode } };
 
 export type OutboundMessage = PageMessage | HostMessage;
 
@@ -60,6 +62,8 @@ export interface PageProbe {
   /** The `kind` of the state the host script is showing, if any. */
   readonly stateKind: string | undefined;
   readonly stateMode: string | undefined;
+  /** The view the page's selector shows, or undefined when the page has no selector. */
+  readonly viewSelector: string | undefined;
   /** Stylesheets loaded from a URL (the page's own CSS). */
   readonly stylesheets: number;
   /** Content security policy violations the page reported, as directive and blocked URI. */
@@ -91,6 +95,7 @@ export function readiness(payload: unknown): Readiness {
 
 /** Inbound messages from the page and the host script, by type. Anything else is ignored. */
 export type InboundMessage =
+  | { readonly type: 'viewModeChanged'; readonly payload: { readonly viewMode: ViewMode } }
   | { readonly type: 'webviewReady'; readonly payload?: unknown }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
   | { readonly type: 'zenwave.host.action'; readonly payload: { readonly command: string } }
@@ -103,6 +108,9 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
   switch (type) {
     case 'webviewReady':
       return { type, payload };
+    case 'viewModeChanged':
+      // Only the two known views; anything else is ignored like an unknown message.
+      return object?.viewMode === 'flow' || object?.viewMode === 'services' ? { type, payload: { viewMode: object.viewMode } } : undefined;
     case 'zenwave.host.loadError':
       return { type, payload: { message: typeof object?.message === 'string' ? object.message : 'unknown error' } };
     case 'zenwave.host.action':

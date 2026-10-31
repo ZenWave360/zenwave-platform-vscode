@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import { builtinModules, createRequire } from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { chooseEventFlowPage } from './scripts/eventflow-page.mjs';
 import { linkedSiblings } from './scripts/siblings.mjs';
 
 const watch = process.argv.includes('--watch');
@@ -68,8 +69,10 @@ function languageServerPackage() {
 
 /**
  * The EventFlow diagram page is `@zenwave360/vistas-eventflow-webview`, built in
- * zenwave-architectural-vistas and shipped inside the VSIX: its `webview/` page
- * (index.html plus content-hashed assets) is copied into dist/eventflow-webview.
+ * zenwave-architectural-vistas and shipped inside the VSIX: its `webview-toolbar/`
+ * page, or `webview/` for a package that has none (the pinned 0.1.0), is copied
+ * (index.html plus content-hashed assets) into dist/eventflow-webview. See
+ * scripts/eventflow-page.mjs.
  * As with the language server, the exact package version and the page protocol
  * version are pinned in package.json (`zenwaveEventFlowWebview`), with the same
  * version as a dev dependency.
@@ -105,20 +108,21 @@ function eventFlowWebviewPackage() {
   if (found.name !== pinned.package || (versionMustMatch && found.version !== pinned.version)) {
     throw new Error(`Found ${found.name}@${found.version} in ${directory}, expected ${pinned.package}@${pinned.version}.${NEWLINE_INDENT}${help}`);
   }
-  const page = path.join(directory, 'webview');
-  const protocolFile = path.join(page, 'protocol.json');
-  if (!fs.existsSync(path.join(page, 'index.html')) || !fs.existsSync(protocolFile)) {
-    throw new Error(`${pinned.package}@${pinned.version} in ${directory} has no built webview/index.html and webview/protocol.json.${NEWLINE_INDENT}${help}`);
+  const chosen = chooseEventFlowPage(directory);
+  if (!chosen) {
+    throw new Error(`${pinned.package}@${pinned.version} in ${directory} has no built webview-toolbar/ or webview/ with index.html and protocol.json.${NEWLINE_INDENT}${help}`);
   }
+  const { page, name } = chosen;
+  const protocolFile = path.join(page, 'protocol.json');
   const protocol = JSON.parse(fs.readFileSync(protocolFile, 'utf8'));
   if (protocol.protocol !== pinned.protocol || protocol.protocolVersion !== pinned.protocolVersion) {
     throw new Error(`${pinned.package}@${pinned.version} speaks ${protocol.protocol} version ${protocol.protocolVersion}; ` +
       `this extension is pinned to ${pinned.protocol} version ${pinned.protocolVersion}.`);
   }
-  return page;
+  return { page, name };
 }
 
-function copyEventFlowWebview(page) {
+function copyEventFlowWebview({ page, name }) {
   const target = path.join(projectDir, 'dist/eventflow-webview');
   // Asset names carry content hashes: stale ones from an earlier build must not linger.
   fs.rmSync(target, { recursive: true, force: true });
@@ -128,7 +132,7 @@ function copyEventFlowWebview(page) {
     if (/\.(js|css)$/.test(entry)) fs.copyFileSync(path.join(page, 'assets', entry), path.join(target, 'assets', entry));
   }
   const pinned = packageManifest.zenwaveEventFlowWebview;
-  console.log(`[eventflow] copied ${pinned.package}@${pinned.version} (protocol version ${pinned.protocolVersion})`);
+  console.log(`[eventflow] copied ${pinned.package}@${pinned.version} (protocol version ${pinned.protocolVersion}, page ${name}/)`);
 }
 
 /**
