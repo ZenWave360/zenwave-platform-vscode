@@ -63,8 +63,14 @@ dependency or an old catalogue. A stable release is a new build from its own tag
 ## Credentials
 
 The `verify` job never sees one. The `publish` job runs in the GitHub environment `vscode-prerelease` (limited to
-`develop`) or `vscode-release` (limited to `v*` tags, with a reviewer), with no checkout and no `npm ci`, and runs
-`@vscode/vsce` and `ovsx` at the exact versions named in the workflow.
+`develop`) or `vscode-release` (limited to `v*` tags, with a reviewer), with no checkout and no `npm ci` of the
+repository. It installs `@vscode/vsce` and `ovsx` from `packages/extension/publish-tools`, a small private package with
+its own lockfile, outside the workspaces and outside the VSIX. `verify` copies its two files into the artifact next to
+the VSIX, under the same `SHA256SUMS`; `publish` runs `npm ci --ignore-scripts` from that copy in a step with no secret,
+and the publishing steps run the installed binaries, never `npx`. To change a tool or its version, edit that package and
+its lock (`npm install --package-lock-only --ignore-scripts` in that directory); a unit test refuses a range, or a lock
+entry without an integrity hash. `@vscode/vsce-sign`, the one dependency with an install script, is only called when
+signing, which this pipeline does not do.
 
 Each registry uses its secret (`VSCE_PAT`, `OVSX_PAT`) when the environment has one, and trusted publishing (`vsce --oidc`,
 `ovsx --trusted-publishing`) when it has not, with no fallback between them. To move a registry to trusted publishing,

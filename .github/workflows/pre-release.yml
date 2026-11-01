@@ -51,9 +51,6 @@ jobs:
       openvsx: ${{ steps.openvsx.outcome }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
-      # Exact versions, so a new release of the tools cannot change what publishes. vsce 4.1.0 is the first to have --oidc.
-      VSCE_VERSION: 4.1.0
-      OVSX_VERSION: 1.3.0
 
     steps:
       - name: Download the verified VSIX
@@ -67,6 +64,9 @@ jobs:
           set -euo pipefail
           cd artifacts
           sha256sum --check SHA256SUMS
+          # The lock of the publishing tools is covered by the same sums, so what is installed is what verify saw.
+          grep -q ' publish-tools/package-lock.json$' SHA256SUMS
+          grep -q ' publish-tools/package.json$' SHA256SUMS
           vsix=$(ls zenwave-platform-*.vsix)
           [ "$(printf '%s\n' "$vsix" | wc -l)" -eq 1 ]
           [ "$(unzip -p "$vsix" extension/package.json | jq -r .version)" = "$VERSION" ]
@@ -78,6 +78,17 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+
+      # The tools come from the lock that verify checked and hashed with the VSIX, not from a floating npx install, and
+      # install scripts do not run. No repository secret is in this step's environment; the job's OIDC request
+      # variables are, as in every step of a job that may publish, which is why the tree is locked and hashed. The publishing
+      # steps only run what it installed (spec:release#r-r13). vsce 4.1.0 is the first to have --oidc.
+      - name: Install the publishing tools from their lock
+        working-directory: artifacts/publish-tools
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          echo "TOOLS=$PWD/node_modules/.bin" >> "$GITHUB_ENV"
 
       # A token when the environment holds one, trusted publishing when it does not, and no fallback between them:
       # deleting the secret is how this moves to trusted publishing (spec:release#r-r13). --skip-duplicate counts a
@@ -99,7 +110,7 @@ jobs:
             unset VSCE_PAT
           fi
           status=0
-          npx --yes "@vscode/vsce@$VSCE_VERSION" publish --packagePath "$VSIX" --pre-release --skip-duplicate "${credential[@]}" 2>&1 \
+          "$TOOLS/vsce" publish --packagePath "$VSIX" --pre-release --skip-duplicate "${credential[@]}" 2>&1 \
             | tee "$RUNNER_TEMP/marketplace.log" || status=$?
           grep -qi 'already published' "$RUNNER_TEMP/marketplace.log" && echo 'already=true' >> "$GITHUB_OUTPUT"
           exit "$status"
@@ -121,7 +132,7 @@ jobs:
             unset OVSX_PAT
           fi
           status=0
-          npx --yes "ovsx@$OVSX_VERSION" publish "$VSIX" --skip-duplicate "${credential[@]}" 2>&1 \
+          "$TOOLS/ovsx" publish "$VSIX" --skip-duplicate "${credential[@]}" 2>&1 \
             | tee "$RUNNER_TEMP/openvsx.log" || status=$?
           grep -qi 'already published' "$RUNNER_TEMP/openvsx.log" && echo 'already=true' >> "$GITHUB_OUTPUT"
           exit "$status"
@@ -189,7 +200,10 @@ jobs:
           set -euo pipefail
           tag="v$VERSION-pre"
           vsix=$(ls artifacts/zenwave-platform-*.vsix)
-          existing=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          # matching-refs answers 200 with a list, empty when the tag is absent, so only a tag that exists gives a value
+          # and any failure (a 5xx, a bad token) stops the job. git/ref answers 404 for an absent tag, and gh then prints
+          # the error body on stdout and skips --jq.
+          existing=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .object.sha")
           if [ -n "$existing" ] && [ "$existing" != "$GITHUB_SHA" ]; then
             echo "::error::$tag already points at $existing, not at $GITHUB_SHA"
             exit 1
