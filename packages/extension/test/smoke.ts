@@ -249,8 +249,12 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   assert(again.kind === 'unchanged' && flow.version === versionBefore && flow.getText() === organizedText,
     `Organizing an organized flow must change nothing: ${JSON.stringify(again)} v${versionBefore}→${flow.version}`);
   await vscode.window.showTextDocument(flow);
+  const versionBeforeUndo = flow.version;
   await vscode.commands.executeCommand('undo');
-  assert(flow.getText() === checkoutText, `One undo did not restore the document exactly:\n${flow.getText()}`);
+  // `undo` is the workbench's global command: it acts on whatever has focus. A failure says whether the flow's own undo
+  // stack was used (the version moved) or something else was (REL/8).
+  assert(flow.getText() === checkoutText,
+    `One undo did not restore the document exactly (version ${versionBeforeUndo}→${flow.version}, active editor ${vscode.window.activeTextEditor?.document.uri.toString()}):\n${flow.getText()}`);
   console.log('PASS: organize applies the server arrangement as one edit, keeps a later cursor, is idempotent, and one undo restores the text');
 
   const broken = await vscode.workspace.openTextDocument({ language: 'zfl', content: 'flow Broken {\n    when {{ do\n' });
