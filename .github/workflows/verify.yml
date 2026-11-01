@@ -4,7 +4,7 @@ name: Verify
 # publishes nothing: it uploads the VSIX it verified, and a separate job of the calling workflow publishes those bytes.
 #
 #   development  a pull request or a push to main: build and check, no version stamp
-#   pre-release  develop, and pull requests into it as a dry run: the odd-minor, pin and changelog checks and the stamp
+#   pre-release  develop, and pull requests into it as a dry run: the version, pin and release-notes checks and the stamp
 #   stable       a version tag: the stable checks, the tag on main, a current SDK catalogue
 
 on:
@@ -68,13 +68,13 @@ jobs:
             { echo "::error::$REF_NAME is not on main, so it publishes nothing"; exit 1; }
 
       - name: Check the release rules
-        # Before npm ci, so a wrong channel, a moving tag or a missing changelog section fails at once.
+        # Before npm ci, so a wrong version, a moving tag or missing release notes fail at once.
         if: inputs.channel != 'development'
         run: |
           if [ "$CHANNEL" = stable ]; then
-            node "$SCRIPTS/release.mjs" check --channel stable --tag "$REF_NAME"
+            node "$SCRIPTS/release.mjs" check --channel stable --tag "$REF_NAME" --git-tags
           else
-            node "$SCRIPTS/release.mjs" check --channel pre-release --git-tags
+            node "$SCRIPTS/release.mjs" check --channel pre-release --git-tags --run-number "$RUN_NUMBER"
           fi
 
       - name: Install locked dependencies
@@ -109,8 +109,8 @@ jobs:
             printf '### Warning\n\n%s Run `npm run generate:sdk-catalogue --workspace packages/extension` and commit the result.\n\n' "$problem" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Stamp the pre-release version and changelog
-        # In this checkout only, and never committed (spec:release#r-r8, r-r10).
+      - name: Stamp the pre-release version
+        # In this checkout only, and never committed (spec:release#r-r8). Packaging writes the changelog from the notes.
         if: inputs.channel == 'pre-release'
         run: node "$SCRIPTS/release.mjs" stamp --run-number "$RUN_NUMBER"
 
@@ -185,7 +185,7 @@ jobs:
           set -euo pipefail
           node "$SCRIPTS/release.mjs" info "$VSIX" > artifacts/release-info.json
           (cd artifacts && sha256sum "$(basename "$VSIX")" > SHA256SUMS)
-          # The notes of this version: its changelog section, without the heading.
+          # The notes of this version: its section of the generated changelog, without the heading; empty when there are none.
           awk -v heading="## [$VERSION]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' \
             packages/extension/CHANGELOG.md > artifacts/release-notes.md
           {

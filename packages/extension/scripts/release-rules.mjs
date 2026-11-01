@@ -1,7 +1,7 @@
 /**
  * What makes a build releasable, as pure functions: spec:release#r-r8 (channel and stamped version),
- * spec:release#r-r9 (exact `@zenwave360/*` pins), spec:release#r-r10 (changelog stamp) and
- * spec:release#r-r11 (stable tag). One source of truth: `package.mjs` and `release.mjs` both call
+ * spec:release#r-r9 (exact `@zenwave360/*` pins), spec:release#r-r10 (release notes, the generated
+ * changelog) and spec:release#r-r11 (stable tag and notes). One source of truth: `package.mjs` and `release.mjs` both call
  * `releaseProblems`, and the workflows call `release.mjs`.
  */
 
@@ -76,82 +76,134 @@ export function pinProblems(manifest, { lock, stable = false } = {}) {
   return problems;
 }
 
-/** spec:release#r-r8. Odd minor is pre-release, even is stable, as the Marketplace takes no suffix. */
-export function channelProblems(version, channel) {
-  const parsed = parseExtensionVersion(version);
-  if (!parsed) return [`The manifest version "${version}" is not major.minor.patch`];
-  const odd = parsed.minor % 2 === 1;
-  if (channel === 'pre-release' && !odd) {
-    return [`Version ${version} has an even minor, which is stable: raise the minor to the next odd number on develop`];
-  }
-  if (channel === 'stable' && odd) {
-    return [`Version ${version} has an odd minor, which is pre-release: a stable release needs an even minor`];
-  }
-  return [];
+/** The files of `release-notes/`: `next.md` for what is on develop, one `release-notes.vX.Y.Z.md` per stable release. */
+export const NEXT_NOTES = 'next.md';
+export const RELEASE_NOTES_FILE = /^release-notes\.v(\d+)\.(\d+)\.(\d+)\.md$/;
+export const releaseNotesFile = (version) => `release-notes.v${version}.md`;
+
+export const formatVersion = ({ major, minor, patch }) => `${major}.${minor}.${patch}`;
+/** Semantic order, so 0.10.0 is above 0.9.0; a string or file name compare would put it below. */
+export const compareVersions = (a, b) => a.major - b.major || a.minor - b.minor || a.patch - b.patch;
+
+/** spec:release#r-r8. The highest stable release among the tags `vX.Y.Z`, any minor. A `-pre` tag and any other tag are ignored. */
+export function latestStable(tags) {
+  return tags
+    .map((tag) => STABLE_TAG.exec(tag))
+    .filter(Boolean)
+    .map(([, major, minor, patch]) => ({ major: Number(major), minor: Number(minor), patch: Number(patch) }))
+    .sort(compareVersions)
+    .at(-1);
 }
 
 /**
- * The highest stable version among tags `vX.EVEN.Z`. A `-pre` tag, an odd minor (which `release.yml` refuses and the
- * rules call pre-release) and any other tag are ignored; a failed even tag still counts (spec:release#r-r8).
+ * spec:release#r-r8. A pre-release is the manifest's major.minor and the run number, as the Marketplace takes no suffix
+ * and no leading zero. Without `tags` nothing is checked against them; without `runNumber` the stamped version is not.
  */
-export function latestStable(tags) {
-  const versions = tags
-    .map((tag) => STABLE_TAG.exec(tag))
-    .filter((match) => match && Number(match[2]) % 2 === 0)
-    .map(([, major, minor, patch]) => ({ major: Number(major), minor: Number(minor), patch: Number(patch) }));
-  return versions.sort((a, b) => a.major - b.major || a.minor - b.minor || a.patch - b.patch).at(-1);
+export function preReleaseVersionProblems(version, tags, runNumber) {
+  const current = parseExtensionVersion(version);
+  if (!current) return [`The manifest version "${version}" is not major.minor.patch`];
+  if (!tags) return [];
+  const stable = latestStable(tags);
+  const expected = stable ? `${stable.major}.${stable.minor}` : '0.0';
+  const problems = [];
+  if (`${current.major}.${current.minor}` !== expected) {
+    problems.push(
+      `The manifest says ${version}, but pre-releases take the major.minor of the last stable release, ` +
+        `${expected}${stable ? ` (v${formatVersion(stable)})` : ', as there is none yet'}: merge main back into develop`,
+    );
+  }
+  if (stable && runNumber !== undefined && compareVersions({ ...current, patch: runNumber }, stable) <= 0) {
+    problems.push(
+      `The pre-release ${current.major}.${current.minor}.${runNumber} is not above the stable release ${formatVersion(stable)}, ` +
+        `so users on the pre-release channel would be moved back. A hotfix takes a low patch, such as v${current.major}.${current.minor}.1, ` +
+        'never one above the run numbers; until the next minor the pipeline fails',
+    );
+  }
+  return problems;
 }
 
-/** spec:release#r-r8. `develop` always sits above the latest stable release: compared on major.minor. */
-export function aboveStableProblems(version, tags) {
-  const current = parseExtensionVersion(version);
-  const stable = latestStable(tags);
-  if (!current || !stable) return [];
-  if (current.major < stable.major || (current.major === stable.major && current.minor <= stable.minor)) {
-    return [
-      `Version ${version} is not above the stable release ${stable.major}.${stable.minor}.${stable.patch}: ` +
-        `raise the minor on develop to ${stable.major}.${stable.minor + (stable.minor % 2 === 0 ? 1 : 2)}.0, or users on the pre-release channel are moved back`,
-    ];
+/** spec:release#r-r10, r-r11. `notes.next` and `notes.release` are the text of the files, undefined when a file is absent. */
+export function notesProblems({ channel, version, notes = {} }) {
+  if (channel === 'pre-release') {
+    return notes.next === undefined ? [`release-notes/${NEXT_NOTES} is missing; it may be empty`] : [];
   }
+  if (channel !== 'stable') return [];
+  const file = `release-notes/${releaseNotesFile(version)}`;
+  if (notes.release === undefined) return [`${file} is missing: run "npm run release:prepare -- ${version}" on main`];
+  const first = notes.release.split(/\r?\n/).find((line) => line.trim() !== '');
+  if (first === undefined) return [`${file} is empty`];
+  if (/draft/i.test(first)) return [`${file} is marked as a draft: "${first.trim()}"`];
   return [];
 }
 
-export const changelogHasSection = (changelog, heading) =>
-  new RegExp(`^## \\[${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'm').test(changelog);
+/** spec:release#r-r11. What stops `prepare` from setting `version` on main. */
+export function prepareProblems(version, tags, { targetExists = false, nextExists = true } = {}) {
+  const wanted = parseExtensionVersion(version);
+  if (!wanted) return [`"${version}" is not major.minor.patch`];
+  const problems = [];
+  const stable = latestStable(tags);
+  if (stable && compareVersions(wanted, stable) <= 0) {
+    problems.push(`${version} is not above the stable release ${formatVersion(stable)}`);
+  }
+  if (targetExists) problems.push(`release-notes/${releaseNotesFile(version)} already exists`);
+  if (!nextExists) problems.push(`release-notes/${NEXT_NOTES} is missing`);
+  return problems;
+}
 
 /**
  * All the problems with building `channel` from this checkout. Empty means releasable. Inputs are plain data so the
  * rules can be tested; `release.mjs` and `package.mjs` read the real ones.
  *
- * - `changelogHeading`: the section that must exist, `Unreleased` before the stamp, the version after it.
  * - `tag`: the release tag, for the stable channel.
  * - `linked`: sibling builds linked into node_modules, which neither channel may ship.
- * - `tags`: the repository's tags, to keep a pre-release above stable.
+ * - `tags`: the repository's tags; without them the rules that need them are skipped.
+ * - `runNumber`: the pre-release's run number, to check the stamped version against the tags.
+ * - `notes`: see `notesProblems`.
  */
-export function releaseProblems({ channel, manifest, changelog, changelogHeading, lock, tag, linked = [], tags }) {
-  const problems = [...channelProblems(manifest.version, channel)];
+export function releaseProblems({ channel, manifest, lock, tag, linked = [], tags, runNumber, notes }) {
+  const problems = [];
   if (channel === 'stable') {
     const match = tag === undefined ? undefined : STABLE_TAG.exec(tag);
+    if (!parseExtensionVersion(manifest.version)) {
+      problems.push(`The manifest version "${manifest.version}" is not major.minor.patch`);
+    }
     if (tag === undefined || !match) {
-      problems.push(
-        `Tag ${tag ?? '(none)'} is not a stable release tag: use vMAJOR.EVEN_MINOR.PATCH; a -pre tag never publishes`,
-      );
+      problems.push(`Tag ${tag ?? '(none)'} is not a stable release tag: use vMAJOR.MINOR.PATCH; a -pre tag never publishes`);
     } else if (`${match[1]}.${match[2]}.${match[3]}` !== manifest.version) {
       problems.push(`Tag ${tag} does not match package version ${manifest.version}`);
     }
+    if (tags?.includes(`v${manifest.version}-pre`)) {
+      problems.push(
+        `The pre-release tag v${manifest.version}-pre exists: a pre-release never becomes a stable release, so use a new version`,
+      );
+    }
+  } else {
+    problems.push(...preReleaseVersionProblems(manifest.version, tags, runNumber));
   }
-  if (tags && channel === 'pre-release') problems.push(...aboveStableProblems(manifest.version, tags));
   problems.push(...pinProblems(manifest, { lock, stable: channel === 'stable' }));
-  const heading = changelogHeading ?? manifest.version;
-  if (changelog !== undefined && !changelogHasSection(changelog, heading)) {
-    problems.push(`CHANGELOG.md has no "## [${heading}]" section`);
-  }
+  problems.push(...notesProblems({ channel, version: manifest.version, notes }));
   if (linked.length > 0) {
     problems.push(
       `A ${channel} can't ship sibling builds: ${linked.join(', ')}. Run npm ci with ZENWAVE_USE_LOCAL_DEPENDENCIES=false`,
     );
   }
   return problems;
+}
+
+/**
+ * spec:release#r-r10. CHANGELOG.md from the notes, full content, highest version first. `next` is `{ heading, text }`
+ * or undefined (a stable build leaves it out); `releases` are `{ version, text, date }`.
+ */
+export function buildChangelog({ next, releases }) {
+  const ordered = [...releases].sort((a, b) => compareVersions(parseExtensionVersion(b.version), parseExtensionVersion(a.version)));
+  const sections = [
+    ...(next ? [{ heading: next.heading, text: next.text }] : []),
+    ...ordered.map(({ version, date, text }) => ({ heading: `## [${version}] - ${date}`, text })),
+  ].map(({ heading, text }) => {
+    const body = text.replace(/\r\n/g, '\n').trim();
+    return body ? `${heading}\n\n${body}` : heading;
+  });
+  return `# Changelog\n\n${sections.join('\n\n')}\n`;
 }
 
 /** spec:release#r-r8. The workflow's run number replaces the patch. Text in, text out, so the file keeps its line ends. */
@@ -166,9 +218,9 @@ export function stampVersion(manifestText, runNumber) {
   };
 }
 
-/** spec:release#r-r10. `## [Unreleased]` becomes the stamped version and date; fails without it. */
-export function stampChangelog(changelogText, version, date) {
-  const pattern = /^## \[Unreleased\][^\S\r\n]*$/m;
-  if (!pattern.test(changelogText)) throw new Error('CHANGELOG.md has no "## [Unreleased]" section');
-  return changelogText.replace(pattern, `## [${version}] - ${date}`);
+/** spec:release#r-r11. The manifest's version, set whole by `prepare`. Text in, text out. */
+export function setVersion(manifestText, version) {
+  const pattern = /^(  "version": ")\d+\.\d+\.\d+(")/m;
+  if (!pattern.test(manifestText)) throw new Error('package.json has no top-level "version" of the form major.minor.patch');
+  return manifestText.replace(pattern, `$1${version}$2`);
 }

@@ -11,6 +11,8 @@ const ALWAYS_REQUIRED = ['package.json', 'readme.md', 'changelog.md', 'LICENSE.t
 const FORBIDDEN = [
   /^extension\/(src|test|tests|fixtures|scripts)\//,
   /^extension\/\.vscode/,
+  // The notes are what CHANGELOG.md is made from; only the changelog ships (spec:release#r-r10).
+  /^extension\/release-notes\//,
   /^extension\/.*\.(?:ts|tsx|map|tsbuildinfo)$/,
   /^extension\/(?:esbuild\.mjs|tsconfig\.json|runtime-files\.json)$/,
 ];

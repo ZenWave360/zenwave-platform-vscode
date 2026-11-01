@@ -1,23 +1,39 @@
 # Releasing
 
-What each rule is and why is in `zenwave-specs/zenwave-platform-vscode/release.md` (R-R1 to R-R13) and decision 0023.
+What each rule is and why is in `zenwave-specs/zenwave-platform-vscode/release.md` (R-R1 to R-R13) and decisions 0023 and 0024.
 This file is how to work with the pipelines in `.github/workflows/`.
 
 | Workflow | Starts on | Does |
 | --- | --- | --- |
 | `ci.yml` | a pull request, a push to `main` | `verify.yml` and nothing else. A pull request into `develop` is the dry run of the pre-release. |
 | `verify.yml` | called by the others | The checks, the package, both smoke tests, and the verified VSIX as an artifact. No registry credential. |
-| `pre-release.yml` | a push to `develop` that changes the extension | Verifies, publishes a pre-release to both registries, tags `vX.ODD.Z-pre` and creates the GitHub pre-release. |
-| `release.yml` | a tag `vX.EVEN.Z` | Verifies, waits for the reviewer of `vscode-release`, publishes a stable release. |
+| `pre-release.yml` | a push to `develop` that changes the extension | Verifies, publishes a pre-release to both registries, tags `vX.Y.Z-pre` and creates the GitHub pre-release. |
+| `release.yml` | a tag `vX.Y.Z` | Verifies, waits for the reviewer of `vscode-release`, publishes a stable release. |
+
+## Versions and release notes
+
+There is no odd and even minor. A pre-release takes the `major.minor` of the last stable release and the workflow's run
+number as its patch: `0.0.57` before the first release, `0.1.58` after `v0.1.0`. The patch has no padding, because the
+Marketplace refuses a leading zero. The version is raised only for a stable release, on `main`; `develop` gets it by
+merging `main` back.
+
+Release notes are files in `packages/extension/release-notes/`: `next.md` is what is on `develop`, and
+`release-notes.vX.Y.Z.md` is the notes of each stable release. `CHANGELOG.md` is generated from them every time the
+extension is packaged, in every channel, with their full text, highest version first, and is not committed. In a
+pre-release `next.md` is the section of the stamped version and the date of the commit, and the GitHub pre-release has
+the same text. In a development package it is under `## [Unreleased]`. A stable release's section is dated by its tag,
+or by the commit being built when the tag does not exist yet. `npm run package` writes the file, so a clean checkout
+needs no step before it; building and the unit tests do not read it. The `release-notes/` folder is not in the VSIX.
 
 ## A pre-release
 
-Merge to `develop`. Nothing else: the version is `MAJOR.MINOR.<run number>`, stamped by the workflow in its own checkout,
-and `## [Unreleased]` in `CHANGELOG.md` becomes that version's section there. Neither is committed.
+Merge to `develop`. Nothing else: the version is `MAJOR.MINOR.<run number>`, stamped by the workflow in its own checkout
+and never committed.
 
-- The manifest on `develop` holds an **odd minor**, and above the latest stable release. After `v0.2.0`, move `develop` to
-  `0.3.0` in a commit of its own, or the pipeline fails rather than publish below stable.
-- Keep `## [Unreleased]` in `CHANGELOG.md`; the pipeline fails without it. It is the release notes.
+- Write what changed in `release-notes/next.md`. The file must exist; it may be empty, as it is right after a release.
+- The manifest on `develop` holds the `major.minor` of the last stable tag (`0.0.0` before the first). After a stable
+  release, merge `main` back into `develop`; until then the pipeline fails and says so, rather than publish below
+  stable. The stamped version must also be above the highest stable tag.
 - Do not rename `pre-release.yml`: the run number is the patch, and restarts for a new file name. If it must be renamed,
   raise the minor in the same commit.
 - Only documentation (`docs/`, `.claude/`, `.github/` other than `pre-release.yml` and `verify.yml`, Markdown at the
@@ -49,16 +65,34 @@ it, and the tag and GitHub pre-release are updated, never duplicated.
 
 ## A stable release
 
-1. On `main`: an **even minor** in `packages/extension/package.json`, every `@zenwave360/*` at a stable version (run
-   `npm run pins:raise` only for `next`; set stable pins by hand), `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`, and
-   `resources/sdk-plugin-catalogue.json` current (`npm run generate:sdk-catalogue --workspace packages/extension`).
-2. Tag that commit `vX.Y.Z`, or create a GitHub release that creates the tag. A tag with a suffix such as `-pre` publishes
-   nothing.
-3. Approve the `publish` job when `vscode-release` asks. Nothing publishes before.
-4. Afterwards move `develop` to the next odd minor.
+1. Merge `develop` into `main`. Every `@zenwave360/*` must be at a stable version on `main` (set stable pins by hand;
+   `npm run pins:raise` only moves to `next`), and `resources/sdk-plugin-catalogue.json` current
+   (`npm run generate:sdk-catalogue --workspace packages/extension`).
+2. Prepare the release, still on `main`:
 
-The workflow refuses a tag that is not on `main`, differs from the manifest, has no changelog section, has a `next`
-dependency or an old catalogue. A stable release is a new build from its own tag, never a promoted pre-release.
+   ```console
+   npm run release:prepare --workspace packages/extension -- 0.2.0
+   ```
+
+   It sets the version in `package.json`, renames `next.md` to `release-notes.v0.2.0.md` and leaves an empty `next.md`.
+   It refuses a version that is not above the highest stable tag, and a notes file that already exists. It commits
+   nothing: read the notes, make sure the first line does not say "draft", and commit the three files.
+3. Tag that commit `v0.2.0`, or create a GitHub release that creates the tag. A tag with a suffix such as `-pre` publishes
+   nothing.
+4. Approve the `publish` job when `vscode-release` asks. Nothing publishes before.
+5. Merge `main` back into `develop`, so its manifest holds `0.2` and its pre-releases are above the release.
+
+The workflow refuses a tag that is not on `main`, differs from the manifest, has no release notes, empty notes or notes
+whose first line says draft, a version that already has a `vX.Y.Z-pre` tag, a `next` dependency or an old catalogue. A
+stable release is a new build from its own tag, never a promoted pre-release.
+
+### A hotfix
+
+Release it from `main` with a low patch: after `v0.1.0`, the next is `v0.1.1`, with `prepare` as above. Do not number
+it high, such as `v0.1.1057`: VS Code installs the highest version, so a stable `0.1.1057` would sit above every later
+pre-release of `0.1`, whose patch is the run number, and the pre-release channel could not be offered again until the next
+minor. The pipeline fails a pre-release that would end below the highest stable tag. A low patch leaves the pre-releases
+above it, so users on them stay where they are and users on stable get the fix.
 
 ## Credentials
 
@@ -86,9 +120,10 @@ Every runtime file is named in `runtime-files.json`. Package verification fails 
 refers to, is missing from the VSIX, and if `dist/`, `resources/` or `syntaxes/` contains a file the list does not name.
 Adding or removing a runtime asset therefore means editing that list in the same change.
 
-`npm run package` reads `ZENWAVE_RELEASE_TAG` (stable) or `ZENWAVE_RELEASE_CHANNEL=pre-release`, runs the rules in
+`npm run package` writes `CHANGELOG.md` from `release-notes/`, reads `ZENWAVE_RELEASE_TAG` (stable) or `ZENWAVE_RELEASE_CHANNEL=pre-release`, runs the rules in
 `scripts/release-rules.mjs`, and flags a pre-release VSIX with `vsce --pre-release`. `ovsx` ignores that flag for a
 prepackaged file: Open VSX reads `Microsoft.VisualStudio.Code.PreRelease` from the VSIX manifest, and `verify:vsix --channel`
 checks it is there.
 
-Tests of the rules are `test/unit/release-rules.test.ts`.
+Tests of the rules are `test/unit/release-rules.test.ts`; the VSIX must contain `CHANGELOG.md`, with a section for its
+version, and nothing from `release-notes/`.

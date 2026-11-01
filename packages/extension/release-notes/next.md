@@ -1,7 +1,3 @@
-# Changelog
-
-## [Unreleased]
-
 ### Added
 - A ZenWave container in the activity bar with an Architecture tree (the domains and
   subdomains of the workspace's architecture manifest) and a Model tree (the model
@@ -34,14 +30,3 @@
   a renderer shipped in the extension, offers a diagram selector and, for ZFL, a
   render mode, follows edits and the colour theme, and explains why it has nothing
   to show. The menu is now also offered for `.zdl` files and is hidden in diff editors.
-
-## [0.1.0] - 2026-09-15
-
-### Added
-- ZDL and ZFL language support: file associations, TextMate grammars, and editor
-  configuration for comments, brackets, folding and indentation.
-- Dual extension host support — runs in both desktop VS Code and browser-based
-  VS Code (vscode.dev, github.dev).
-- Host capability detection, so features that cannot work in the current host are
-  hidden rather than presented and broken. Detected capabilities are logged to
-  the ZenWave output channel.

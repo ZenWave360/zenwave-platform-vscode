@@ -14,3 +14,6 @@ tmp/
 # Local Serena HTTP client wiring (localhost ports; do not commit)
 .codex/
 .grok/config.toml
+
+# Generated from release-notes/ when packaging
+packages/extension/CHANGELOG.md

@@ -1,10 +1,11 @@
 name: Release
 
-# A tag vMAJOR.EVEN_MINOR.PATCH publishes a stable release, once a reviewer approves (spec:release#r-r11).
+# A tag vMAJOR.MINOR.PATCH publishes a stable release, once a reviewer approves (spec:release#r-r11).
 # Creating a GitHub release that creates such a tag counts as creating the tag.
 #
-#   verify   no credential: the tag is on main and matches the manifest, the changelog section, the stable pins, a current
-#            SDK catalogue, then the same build checks as every other build
+#   verify   no credential: the tag is on main and matches the manifest, its release notes exist and are not a draft, no
+#            pre-release tag of that version exists, the stable pins, a current SDK catalogue, then the same build checks
+#            as every other build
 #   publish  waits for the reviewer of the vscode-release environment, then publishes the verified bytes to both registries
 #
 # The tag pattern matches only a stable-shaped tag: v0.1.99-pre starts nothing here, and neither does the tag the

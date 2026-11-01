@@ -81,3 +81,13 @@ test('development files in the package fail the release', () => {
   });
   assert.equal(problems.length, 2);
 });
+
+test('R-R10 the release notes do not ship, only the changelog made from them', () => {
+  const problems: string[] = checkPackageContents({
+    listed,
+    manifest,
+    onDisk: built,
+    packaged: [...packaged, 'extension/release-notes/next.md'],
+  });
+  assert.deepEqual(problems, ['VSIX contains development-only file: extension/release-notes/next.md']);
+});

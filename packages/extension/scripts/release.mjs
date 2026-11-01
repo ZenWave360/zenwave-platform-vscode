@@ -1,22 +1,27 @@
-// The release checks and the CI stamp, as commands the workflows call (spec:release#r-r8, r-r9, r-r10, r-r11).
+// The release checks, the CI stamp and the release preparation, as commands the workflows and maintainers call
+// (spec:release#r-r8, r-r9, r-r10, r-r11).
 //
-//   node scripts/release.mjs check --channel pre-release|stable [--tag vX.Y.Z] [--stamped] [--git-tags]
-//   node scripts/release.mjs stamp --run-number N [--date YYYY-MM-DD]   (default: the date of HEAD)
+//   node scripts/release.mjs check --channel pre-release|stable [--tag vX.Y.Z] [--run-number N] [--git-tags]
+//   node scripts/release.mjs stamp --run-number N
+//   node scripts/release.mjs prepare <version>
 //   node scripts/release.mjs info <file.vsix>
 //
-// `check` prints every problem and exits 1. `stamp` rewrites the version and the changelog heading in this checkout
-// and commits nothing. `info` prints what a VSIX says about itself as JSON.
+// `check` prints every problem and exits 1; `--run-number` also checks the version the stamp will give, and
+// `--git-tags` the tags of the repository. `stamp` sets the patch of the version in this checkout and commits
+// nothing. `prepare`, on main, sets the manifest version and turns `release-notes/next.md` into
+// `release-notes.v<version>.md`, leaving an empty `next.md`; it commits nothing. `info` prints what a VSIX says about
+// itself as JSON.
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { releaseProblems, stampChangelog, stampVersion } from './release-rules.mjs';
+import { prepareProblems, releaseNotesFile, releaseProblems, setVersion, stampVersion, NEXT_NOTES } from './release-rules.mjs';
+import { notesDirectory, readNotes } from './release-notes.mjs';
 import { linkedSiblings } from './siblings.mjs';
 
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = path.resolve(projectDir, '../..');
 const manifestFile = path.join(projectDir, 'package.json');
-const changelogFile = path.join(projectDir, 'CHANGELOG.md');
 
 const [command, ...args] = process.argv.slice(2);
 const option = (name) => {
@@ -33,31 +38,21 @@ function gitTags() {
   return result.stdout.split(/\r?\n/).filter(Boolean);
 }
 
-/**
- * The day of the commit being built, in its own time zone, not today: running the same run again later gives the same
- * changelog bytes (spec:release#r-r1).
- */
-function commitDate() {
-  const result = spawnSync('git', ['show', '-s', '--format=%cI', 'HEAD'], { cwd: repositoryRoot, encoding: 'utf8' });
-  const date = result.status === 0 ? result.stdout.trim().slice(0, 10) : '';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`The date of the commit is unknown: ${result.stderr || result.error?.message}`);
-  return date;
-}
-
 function check() {
   const channel = option('--channel');
   if (channel !== 'pre-release' && channel !== 'stable') throw new Error('Use --channel pre-release or --channel stable');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  const stamped = args.includes('--stamped') || channel === 'stable';
+  const runNumber = option('--run-number');
+  const notes = readNotes(projectDir);
   const problems = releaseProblems({
     channel,
     manifest,
-    changelog: fs.readFileSync(changelogFile, 'utf8'),
-    changelogHeading: stamped ? manifest.version : 'Unreleased',
     lock: JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package-lock.json'), 'utf8')),
     tag: option('--tag'),
     linked: linkedSiblings().map((sibling) => sibling.package),
     tags: args.includes('--git-tags') ? gitTags() : undefined,
+    runNumber: runNumber === undefined ? undefined : Number(runNumber),
+    notes: { next: notes.next, release: notes.releases.find(({ version }) => version === manifest.version)?.text },
   });
   if (problems.length > 0) {
     for (const problem of problems) console.error(`error: ${problem}`);
@@ -67,13 +62,26 @@ function check() {
 }
 
 function stamp() {
-  const runNumber = Number(option('--run-number'));
-  const date = option('--date') ?? commitDate();
-  const manifest = stampVersion(fs.readFileSync(manifestFile, 'utf8'), runNumber);
-  const changelog = stampChangelog(fs.readFileSync(changelogFile, 'utf8'), manifest.version, date);
+  const manifest = stampVersion(fs.readFileSync(manifestFile, 'utf8'), Number(option('--run-number')));
   fs.writeFileSync(manifestFile, manifest.text);
-  fs.writeFileSync(changelogFile, changelog);
   console.log(manifest.version);
+}
+
+function prepare() {
+  const version = args[0];
+  if (!version) throw new Error('Usage: node scripts/release.mjs prepare <version>');
+  const directory = notesDirectory(projectDir);
+  const next = path.join(directory, NEXT_NOTES);
+  const target = path.join(directory, releaseNotesFile(version));
+  const problems = prepareProblems(version, gitTags(), { targetExists: fs.existsSync(target), nextExists: fs.existsSync(next) });
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`error: ${problem}`);
+    process.exit(1);
+  }
+  fs.writeFileSync(manifestFile, setVersion(fs.readFileSync(manifestFile, 'utf8'), version));
+  fs.renameSync(next, target);
+  fs.writeFileSync(next, '');
+  console.log(`Set ${version}, and moved the notes to release-notes/${releaseNotesFile(version)}. Review them, then commit and tag v${version} on main.`);
 }
 
 async function info() {
@@ -86,8 +94,8 @@ async function info() {
 }
 
 try {
-  const commands = { check, stamp, info };
-  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|info ...');
+  const commands = { check, stamp, prepare, info };
+  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|prepare|info ...');
   await commands[command]();
 } catch (error) {
   console.error(`error: ${error.message}`);

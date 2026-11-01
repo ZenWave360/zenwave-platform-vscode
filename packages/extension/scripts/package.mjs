@@ -4,12 +4,12 @@ import * as path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { releaseProblems } from './release-rules.mjs';
+import { generateChangelog, readNotes } from './release-notes.mjs';
 import { linkedSiblings, repositoryRoot } from './siblings.mjs';
 
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
 const manifest = JSON.parse(fs.readFileSync(path.join(projectDir, 'package.json'), 'utf8'));
-const changelog = fs.readFileSync(path.join(projectDir, 'CHANGELOG.md'), 'utf8');
 const tag = process.env.ZENWAVE_RELEASE_TAG?.trim();
 const outFlagIndex = process.argv.indexOf('--out');
 const requestedOutput = outFlagIndex >= 0 ? process.argv[outFlagIndex + 1] : undefined;
@@ -25,13 +25,14 @@ if (channel !== undefined && channel !== 'stable' && channel !== 'pre-release') 
   throw new Error(`Invalid ZENWAVE_RELEASE_CHANNEL ${channel}; use pre-release`);
 }
 const preRelease = channel === 'pre-release';
+const notes = readNotes(projectDir);
 const linked = linkedSiblings().map((sibling) => sibling.package);
 
 if (channel) {
   const problems = releaseProblems({
     channel,
     manifest,
-    changelog,
+    notes: { next: notes.next, release: notes.releases.find(({ version }) => version === manifest.version)?.text },
     lock: JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package-lock.json'), 'utf8')),
     tag,
     linked,
@@ -59,6 +60,10 @@ function run(command, args, extraEnvironment = {}) {
     );
   }
 }
+
+// CHANGELOG.md is not committed: it is made from release-notes/ on every package, on every channel, so vsce finds it and
+// the listing cannot disagree with the notes (spec:release#r-r10). Building does not need it.
+generateChangelog({ projectDir, repositoryRoot, channel, version: manifest.version });
 
 run('node', ['esbuild.mjs', '--production']);
 

@@ -2,17 +2,20 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, test } from 'node:test';
 // @ts-expect-error A build script without type declarations.
 import { raisePins, raisePinsText } from '../../scripts/raise-pins.mjs';
 import {
-  aboveStableProblems,
-  channelProblems,
+  buildChangelog,
   latestStable,
+  notesProblems,
+  parseExtensionVersion,
   pinProblems,
+  prepareProblems,
   releaseProblems,
-  stampChangelog,
+  setVersion,
   stampVersion,
   // @ts-expect-error A build script without type declarations.
 } from '../../scripts/release-rules.mjs';
@@ -42,88 +45,248 @@ const consistentLock = lockFor({
   '@zenwave360/vistas-eventflow-webview': '0.0.0-next-20261101112236',
 });
 
-test('R-R8 a pre-release needs an odd minor and a stable release an even one', () => {
-  assert.deepEqual(channelProblems('0.1.0', 'pre-release'), []);
-  assert.deepEqual(channelProblems('0.2.0', 'stable'), []);
-  assert.match(channelProblems('0.2.0', 'pre-release')[0], /even minor.*raise the minor/);
-  assert.match(channelProblems('0.3.0', 'stable')[0], /odd minor/);
-  assert.match(channelProblems('0.1', 'stable')[0], /not major.minor.patch/);
+const preRelease = (version: string, tags: string[] | undefined, runNumber?: number) =>
+  releaseProblems({ channel: 'pre-release', manifest: manifest({ version }), tags, runNumber, notes: { next: '' } });
+
+test('R-R8 a pre-release is the manifest major.minor and the run number, with no offset and no padding', () => {
+  assert.equal(stampVersion('{\n  "version": "0.0.0"\n}\n', 57).version, '0.0.57');
+  assert.equal(stampVersion('{\n  "version": "0.1.0"\n}\n', 58).version, '0.1.58');
+  assert.equal(stampVersion('{\n  "version": "0.1.0"\n}\n', 5).version, '0.1.5');
+  assert.deepEqual(preRelease('0.0.0', [], 57), []);
+  assert.deepEqual(preRelease('0.1.0', ['v0.1.0'], 58), []);
+  // Any minor is a stable release: nothing is odd or even.
+  assert.deepEqual(preRelease('0.2.0', ['v0.2.0'], 3), []);
+  assert.deepEqual(preRelease('0.3.0', ['v0.3.0'], 3), []);
+  assert.match(preRelease('0.1', undefined)[0], /not major.minor.patch/);
 });
 
-test('R-R8 the stamp replaces only the patch and keeps the file as it was', () => {
-  const text = '{\r\n  "name": "x",\r\n  "version": "0.1.0",\r\n  "engines": { "vscode": "^1.90.0", "version": "9.9.9" }\r\n}\r\n';
-  const stamped = stampVersion(text, 57);
-  assert.equal(stamped.version, '0.1.57');
-  assert.equal(stamped.text, text.replace('"version": "0.1.0"', '"version": "0.1.57"'));
-  assert.throws(() => stampVersion(text, 0), /positive integer/);
-  assert.throws(() => stampVersion('{ "version": "next" }', 1), /no top-level "version"/);
+test('R-R8 a manifest that was not merged back from main fails before building', () => {
+  const problems = preRelease('0.0.0', ['v0.1.0'], 60);
+  assert.match(problems[0], /0\.0\.0.*major\.minor of the last stable release, 0\.1 \(v0\.1\.0\).*merge main back/);
+  // And a stable release is not expected before the first one.
+  assert.match(preRelease('0.1.0', [], 60)[0], /0\.0.*as there is none yet.*merge main back/);
+  assert.match(preRelease('0.2.0', ['v0.1.0', 'v0.1.4-pre'], 1)[0], /0\.1 \(v0\.1\.0\)/);
 });
 
-test('R-R8 a pre-release stays above the latest stable release', () => {
-  const tags = ['v0.1.99-pre', 'v0.2.0', 'v0.2.1', 'not-a-tag', 'v0.3.4-pre'];
-  assert.deepEqual(latestStable(tags), { major: 0, minor: 2, patch: 1 });
-  // A stray tag with an odd minor is not a stable release: release.yml refuses it, so it does not move develop.
-  assert.deepEqual(latestStable([...tags, 'v0.5.0', 'v0.3.9']), { major: 0, minor: 2, patch: 1 });
-  assert.equal(latestStable(['v0.1.5']), undefined);
-  assert.deepEqual(aboveStableProblems('0.3.0', ['v0.2.0', 'v0.5.0']), []);
+test('R-R8 the stamped version must be above the highest stable tag, and a hotfix takes a low patch', () => {
+  const tags = ['v0.1.0', 'v0.1.99-pre', 'not-a-tag'];
+  assert.deepEqual(preRelease('0.1.0', tags, 60), []);
+  assert.deepEqual(preRelease('0.1.0', ['v0.1.0', 'v0.1.1'], 60), []);
+  const high = preRelease('0.1.0', ['v0.1.0', 'v0.1.1057'], 60);
+  assert.equal(high.length, 1);
+  assert.match(high[0], /0\.1\.60 is not above the stable release 0\.1\.1057.*hotfix.*v0\.1\.1, never one above the run numbers/);
+  assert.match(preRelease('0.1.0', ['v0.1.60'], 60)[0], /not above/);
+});
+
+test('R-R8 the highest stable tag counts every stable-shaped tag, in semantic order, and never a -pre tag', () => {
+  const tags = ['v0.9.0', 'v0.10.0', 'v0.2.7', 'v0.10.0-pre', 'v0.11.5-pre', 'v1.0', 'not-a-tag'];
+  assert.deepEqual(latestStable(tags), { major: 0, minor: 10, patch: 0 });
+  assert.deepEqual(latestStable(['v0.1.5']), { major: 0, minor: 1, patch: 5 });
+  assert.deepEqual(latestStable(['v0.3.9', 'v0.2.0']), { major: 0, minor: 3, patch: 9 });
   assert.equal(latestStable(['v0.1.1-pre']), undefined);
-  assert.match(aboveStableProblems('0.1.5', tags)[0], /not above the stable release 0\.2\.1.*0\.3\.0/);
-  assert.match(aboveStableProblems('0.2.7', tags)[0], /not above/);
-  assert.deepEqual(aboveStableProblems('0.3.0', tags), []);
-  assert.deepEqual(aboveStableProblems('0.1.0', []), []);
+  assert.equal(latestStable([]), undefined);
 });
 
-test('R-R10 the changelog heading becomes the stamped version and date, and its absence fails', () => {
-  const text = '# Changelog\r\n\r\n## [Unreleased]\r\n\r\n### Added\r\n- x\r\n\r\n## [0.1.0] - 2026-09-15\r\n';
+test('R-R10 a pre-release needs next.md, which may be empty', () => {
+  const base = { channel: 'pre-release', manifest: manifest(), lock: consistentLock };
+  assert.deepEqual(notesProblems({ channel: 'pre-release', version: '0.0.1', notes: { next: '' } }), []);
+  assert.match(releaseProblems({ ...base, notes: {} })[0], /release-notes\/next\.md is missing; it may be empty/);
+});
+
+test('R-R10 the changelog has the full notes, highest version first, in semantic order', () => {
+  const releases = [
+    { version: '0.9.0', date: '2026-01-01', text: '### Added\r\n- nine\r\n' },
+    { version: '0.10.0', date: '2026-02-01', text: '- ten\n' },
+    { version: '0.2.1', date: '2026-01-15', text: '' },
+  ];
   assert.equal(
-    stampChangelog(text, '0.1.57', '2026-11-02'),
-    '# Changelog\r\n\r\n## [0.1.57] - 2026-11-02\r\n\r\n### Added\r\n- x\r\n\r\n## [0.1.0] - 2026-09-15\r\n',
+    buildChangelog({ next: { heading: '## [0.10.57] - 2026-03-01', text: '- next\n' }, releases }),
+    '# Changelog\n\n## [0.10.57] - 2026-03-01\n\n- next\n\n## [0.10.0] - 2026-02-01\n\n- ten\n\n' +
+      '## [0.9.0] - 2026-01-01\n\n### Added\n- nine\n\n## [0.2.1] - 2026-01-15\n',
   );
-  assert.throws(() => stampChangelog('# Changelog\n\n## [0.1.0] - 2026-09-15\n', '0.1.57', '2026-11-02'), /no "## \[Unreleased\]"/);
+  // An empty next.md leaves a heading with nothing under it, and no stable build includes next.md.
+  assert.equal(buildChangelog({ next: { heading: '## [Unreleased]', text: '' }, releases: [] }), '# Changelog\n\n## [Unreleased]\n');
+  assert.equal(buildChangelog({ releases: releases.slice(2) }), '# Changelog\n\n## [0.2.1] - 2026-01-15\n');
 });
 
-test('R-R1 the changelog is stamped with the date of the commit, so running the same run again gives the same bytes', () => {
-  const repo = mkdtempSync(join(tmpdir(), 'zenwave-stamp-'));
-  try {
-    const scripts = join(repo, 'packages/extension/scripts');
-    mkdirSync(scripts, { recursive: true });
-    for (const file of ['release.mjs', 'release-rules.mjs', 'siblings.mjs']) {
-      writeFileSync(join(scripts, file), readFileSync(join(import.meta.dirname, '../../scripts', file)));
-    }
-    const manifestFile = join(repo, 'packages/extension/package.json');
-    const changelogFile = join(repo, 'packages/extension/CHANGELOG.md');
-    const manifestText = '{\n  "version": "0.1.0"\n}\n';
-    const changelogText = '# Changelog\n\n## [Unreleased]\n\n- x\n';
-    writeFileSync(manifestFile, manifestText);
-    writeFileSync(changelogFile, changelogText);
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
-      GIT_COMMITTER_DATE: '2026-03-04T23:30:00+02:00', GIT_AUTHOR_DATE: '2026-03-04T23:30:00+02:00',
-      GIT_CONFIG_GLOBAL: '', GIT_CONFIG_SYSTEM: '', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'commit.gpgsign', GIT_CONFIG_VALUE_0: 'false',
-    };
-    const git = (...args: string[]) => {
-      const run = spawnSync('git', args, { cwd: repo, env, encoding: 'utf8' });
-      assert.equal(run.status, 0, run.stderr);
-    };
-    git('init', '-q');
-    git('add', '.');
-    git('commit', '-q', '-m', 'x');
-    const stamp = () => {
-      writeFileSync(manifestFile, manifestText);
-      writeFileSync(changelogFile, changelogText);
-      const run = spawnSync(process.execPath, [join(scripts, 'release.mjs'), 'stamp', '--run-number', '7'], { env, encoding: 'utf8' });
-      assert.equal(run.status, 0, run.stderr);
-      return readFileSync(changelogFile, 'utf8');
-    };
-    const first = stamp();
-    assert.equal(first, '# Changelog\n\n## [0.1.7] - 2026-03-04\n\n- x\n');
-    assert.equal(stamp(), first);
-    // An explicit date still wins.
-    writeFileSync(changelogFile, changelogText);
-    const run = spawnSync(process.execPath, [join(scripts, 'release.mjs'), 'stamp', '--run-number', '7', '--date', '2030-01-02'], { env, encoding: 'utf8' });
+/** A scratch repository with the release scripts, one commit, and notes; tests choose the files and the commit date. */
+function scratchRepository(files: Record<string, string>, date = '2026-03-04T23:30:00+02:00') {
+  const repo = mkdtempSync(join(tmpdir(), 'zenwave-release-'));
+  const scripts = join(repo, 'packages/extension/scripts');
+  mkdirSync(scripts, { recursive: true });
+  for (const file of ['release.mjs', 'release-rules.mjs', 'release-notes.mjs', 'siblings.mjs']) {
+    writeFileSync(join(scripts, file), readFileSync(join(import.meta.dirname, '../../scripts', file)));
+  }
+  writeFileSync(join(repo, 'package-lock.json'), JSON.stringify({ packages: {} }));
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(repo, name)), { recursive: true });
+    writeFileSync(join(repo, name), content);
+  }
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+    GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date,
+    GIT_CONFIG_GLOBAL: '', GIT_CONFIG_SYSTEM: '', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'commit.gpgsign', GIT_CONFIG_VALUE_0: 'false',
+  };
+  const git = (...args: string[]) => {
+    const run = spawnSync('git', args, { cwd: repo, env, encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
-    assert.match(readFileSync(changelogFile, 'utf8'), /## \[0\.1\.7\] - 2030-01-02/);
+  };
+  git('init', '-q');
+  git('add', '.');
+  git('commit', '-q', '-m', 'x');
+  const release = (...args: string[]) =>
+    spawnSync(process.execPath, [join(scripts, 'release.mjs'), ...args], { cwd: repo, env, encoding: 'utf8' });
+  return { repo, git, release, env, scripts, extension: join(repo, 'packages/extension') };
+}
+
+test('R-R10 the generated changelog is deterministic, dated by the commits, and a stable release uses the date of its tag', () => {
+  const extensionFiles = {
+    'packages/extension/package.json': '{\n  "version": "0.1.0"\n}\n',
+    'packages/extension/release-notes/next.md': '- next\n',
+    'packages/extension/release-notes/release-notes.v0.1.0.md': '- one\n',
+    'packages/extension/release-notes/release-notes.v0.10.0.md': '- ten\n',
+  };
+  const { repo, git, env, extension } = scratchRepository(extensionFiles);
+  try {
+    const generate = (channel: string | undefined, version: string) => {
+      const run = spawnSync(
+        process.execPath,
+        ['--input-type=module', '-e', `import { generateChangelog } from ${JSON.stringify(pathToFileURL(join(extension, 'scripts/release-notes.mjs')).href)};
+          process.stdout.write(generateChangelog({ projectDir: ${JSON.stringify(extension)}, repositoryRoot: ${JSON.stringify(repo)}, channel: ${JSON.stringify(channel)}, version: ${JSON.stringify(version)} }));`],
+        { env, encoding: 'utf8' },
+      );
+      assert.equal(run.status, 0, run.stderr);
+      assert.equal(readFileSync(join(extension, 'CHANGELOG.md'), 'utf8'), run.stdout);
+      return run.stdout;
+    };
+    // No tag: every stable section has the date of HEAD.
+    const pre = generate('pre-release', '0.0.57');
+    assert.equal(
+      pre,
+      '# Changelog\n\n## [0.0.57] - 2026-03-04\n\n- next\n\n## [0.10.0] - 2026-03-04\n\n- ten\n\n## [0.1.0] - 2026-03-04\n\n- one\n',
+    );
+    assert.equal(generate('pre-release', '0.0.57'), pre);
+    assert.match(generate(undefined, '0.0.0'), /^# Changelog\n\n## \[Unreleased\]\n\n- next\n\n## \[0\.10\.0\]/);
+    // A tag on an older commit gives its section that commit's date; a stable build leaves next.md out.
+    git('tag', 'v0.1.0');
+    writeFileSync(join(repo, 'later.txt'), 'x');
+    git('add', 'later.txt');
+    const later = { ...env, GIT_COMMITTER_DATE: '2026-05-06T10:00:00+00:00', GIT_AUTHOR_DATE: '2026-05-06T10:00:00+00:00' };
+    const commit = spawnSync('git', ['commit', '-q', '-m', 'later'], { cwd: repo, env: later, encoding: 'utf8' });
+    assert.equal(commit.status, 0, commit.stderr);
+    const stable = generate('stable', '0.10.0');
+    assert.equal(stable, '# Changelog\n\n## [0.10.0] - 2026-05-06\n\n- ten\n\n## [0.1.0] - 2026-03-04\n\n- one\n');
+    assert.equal(generate('stable', '0.10.0'), stable);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('R-R8 the stamp changes only the version and commits nothing', () => {
+  const manifestText = '{\r\n  "version": "0.1.0",\r\n  "engines": { "version": "9.9.9" }\r\n}\r\n';
+  const { repo, release, extension } = scratchRepository({ 'packages/extension/package.json': manifestText });
+  try {
+    const run = release('stamp', '--run-number', '58');
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout.trim(), '0.1.58');
+    assert.equal(readFileSync(join(extension, 'package.json'), 'utf8'), manifestText.replace('"0.1.0"', '"0.1.58"'));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+const stableManifest = (version = '0.2.0') =>
+  manifest({ version, devDependencies: {}, zenwaveLanguageServer: undefined, zenwaveEventFlowWebview: undefined });
+
+test('R-R11 only a stable-shaped tag that matches the manifest releases, on any minor', () => {
+  const base = { channel: 'stable', manifest: stableManifest(), notes: { release: '- x\n' } };
+  assert.deepEqual(releaseProblems({ ...base, tag: 'v0.2.0' }), []);
+  assert.deepEqual(releaseProblems({ ...base, manifest: stableManifest('0.3.0'), tag: 'v0.3.0' }), []);
+  assert.match(releaseProblems({ ...base, tag: 'v0.2.1' })[0], /does not match package version 0\.2\.0/);
+  assert.match(releaseProblems({ ...base, tag: 'v0.1.99-pre' })[0], /not a stable release tag/);
+  assert.match(releaseProblems({ ...base, tag: undefined })[0], /not a stable release tag/);
+  assert.match(releaseProblems({ ...base, tag: 'v0.2.0', linked: ['@zenwave360/dsl'] }).join(), /sibling builds: @zenwave360\/dsl/);
+});
+
+test('R-R11 a stable release refuses missing, empty and draft notes, and an existing -pre tag', () => {
+  const base = { channel: 'stable', manifest: stableManifest(), tag: 'v0.2.0' };
+  assert.match(releaseProblems({ ...base, notes: {} })[0], /release-notes\.v0\.2\.0\.md is missing/);
+  assert.match(releaseProblems({ ...base, notes: { release: '' } })[0], /is empty/);
+  assert.match(releaseProblems({ ...base, notes: { release: '\r\n  \n' } })[0], /is empty/);
+  assert.match(releaseProblems({ ...base, notes: { release: '\n# DRAFT release notes\n- x\n' } })[0], /marked as a draft/);
+  assert.match(releaseProblems({ ...base, notes: { release: 'Draft: x' } })[0], /marked as a draft/);
+  // Only the first non-blank line says whether it is a draft.
+  assert.deepEqual(releaseProblems({ ...base, notes: { release: '# 0.2.0\n- fixes the draft preview\n' } }), []);
+  assert.match(releaseProblems({ ...base, notes: { release: '- x' }, tags: ['v0.2.0-pre'] })[0], /v0\.2\.0-pre exists/);
+  assert.deepEqual(releaseProblems({ ...base, notes: { release: '- x' }, tags: ['v0.1.0-pre', 'v0.2.1-pre', 'v0.1.0'] }), []);
+});
+
+test('R-R11 prepare sets the version and the notes, refusing a version that is not above the highest stable tag', () => {
+  assert.deepEqual(prepareProblems('0.1.0', []), []);
+  assert.deepEqual(prepareProblems('0.1.1', ['v0.1.0', 'v0.2.0-pre']), []);
+  assert.match(prepareProblems('0.1.0', ['v0.1.0'])[0], /not above the stable release 0\.1\.0/);
+  assert.match(prepareProblems('0.1.9', ['v0.2.0'])[0], /not above the stable release 0\.2\.0/);
+  assert.match(prepareProblems('0.1.0', [], { targetExists: true })[0], /release-notes\.v0\.1\.0\.md already exists/);
+  assert.match(prepareProblems('0.1', [])[0], /not major.minor.patch/);
+  assert.equal(setVersion('{\n  "version": "0.0.0",\n  "x": { "version": "9.9.9" }\n}\n', '0.1.0'), '{\n  "version": "0.1.0",\n  "x": { "version": "9.9.9" }\n}\n');
+});
+
+test('R-R11 the prepare command moves next.md, leaves an empty one, and commits nothing', () => {
+  const { repo, release, git, extension } = scratchRepository({
+    'packages/extension/package.json': '{\n  "version": "0.0.0"\n}\n',
+    'packages/extension/release-notes/next.md': '- the notes\n',
+  });
+  try {
+    const refused = release('prepare', '0.1');
+    assert.notEqual(refused.status, 0);
+    git('tag', 'v0.1.0');
+    const old = release('prepare', '0.1.0');
+    assert.notEqual(old.status, 0);
+    assert.match(old.stderr, /not above the stable release 0\.1\.0/);
+    assert.equal(readFileSync(join(extension, 'release-notes/next.md'), 'utf8'), '- the notes\n');
+
+    const done = release('prepare', '0.2.0');
+    assert.equal(done.status, 0, done.stderr);
+    assert.equal(readFileSync(join(extension, 'package.json'), 'utf8'), '{\n  "version": "0.2.0"\n}\n');
+    assert.equal(readFileSync(join(extension, 'release-notes/release-notes.v0.2.0.md'), 'utf8'), '- the notes\n');
+    assert.equal(readFileSync(join(extension, 'release-notes/next.md'), 'utf8'), '');
+    const log = spawnSync('git', ['log', '--oneline'], { cwd: repo, encoding: 'utf8' });
+    assert.equal(log.stdout.trim().split('\n').length, 1);
+
+    // The target notes now exist: a second prepare of the same version, even above the tag, refuses and changes nothing.
+    writeFileSync(join(extension, 'release-notes/next.md'), '- more\n');
+    const again = release('prepare', '0.2.0');
+    assert.notEqual(again.status, 0);
+    assert.match(again.stderr, /already exists/);
+    assert.equal(readFileSync(join(extension, 'release-notes/next.md'), 'utf8'), '- more\n');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('R-R8 and R-R11 the check command reads the tags of the repository', () => {
+  const { repo, release, git, extension } = scratchRepository({
+    'packages/extension/package.json': '{\n  "version": "0.0.0"\n}\n',
+    'packages/extension/release-notes/next.md': '',
+  });
+  try {
+    assert.equal(release('check', '--channel', 'pre-release', '--git-tags', '--run-number', '57').status, 0);
+    git('tag', 'v0.1.0');
+    const notMerged = release('check', '--channel', 'pre-release', '--git-tags', '--run-number', '57');
+    assert.equal(notMerged.status, 1);
+    assert.match(notMerged.stderr, /merge main back/);
+    writeFileSync(join(extension, 'package.json'), '{\n  "version": "0.1.0"\n}\n');
+    assert.equal(release('check', '--channel', 'pre-release', '--git-tags', '--run-number', '58').status, 0);
+    git('tag', 'v0.1.1057');
+    assert.match(release('check', '--channel', 'pre-release', '--git-tags', '--run-number', '60').stderr, /v0\.1\.1, never one above/);
+    // A stable release: notes needed, and the -pre tag of its version refuses it.
+    writeFileSync(join(extension, 'package.json'), '{\n  "version": "0.2.0"\n}\n');
+    assert.match(release('check', '--channel', 'stable', '--tag', 'v0.2.0', '--git-tags').stderr, /release-notes\.v0\.2\.0\.md is missing/);
+    writeFileSync(join(extension, 'release-notes/release-notes.v0.2.0.md'), '- x\n');
+    assert.equal(release('check', '--channel', 'stable', '--tag', 'v0.2.0', '--git-tags').status, 0);
+    git('tag', 'v0.2.0-pre');
+    assert.match(release('check', '--channel', 'stable', '--tag', 'v0.2.0', '--git-tags').stderr, /v0\.2\.0-pre exists/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -174,34 +337,12 @@ test('R-R11 a stable release refuses every next pin and names it', () => {
   assert.deepEqual(pinProblems(stable, { stable: true }), []);
 });
 
-test('R-R11 only a stable-shaped tag that matches the manifest releases', () => {
-  const stable = manifest({ version: '0.2.0', devDependencies: {}, zenwaveLanguageServer: undefined, zenwaveEventFlowWebview: undefined });
-  const base = { channel: 'stable', manifest: stable, changelog: '## [0.2.0] - 2026-12-01\n' };
-  assert.deepEqual(releaseProblems({ ...base, tag: 'v0.2.0' }), []);
-  assert.match(releaseProblems({ ...base, tag: 'v0.2.1' })[0], /does not match package version 0\.2\.0/);
-  assert.match(releaseProblems({ ...base, tag: 'v0.1.99-pre' })[0], /not a stable release tag/);
-  assert.match(releaseProblems({ ...base, tag: undefined })[0], /not a stable release tag/);
-  assert.match(releaseProblems({ ...base, tag: 'v0.2.0', changelog: '## [0.1.0]\n' }).join(), /no "## \[0\.2\.0\]" section/);
-  assert.match(releaseProblems({ ...base, tag: 'v0.2.0', linked: ['@zenwave360/dsl'] }).join(), /sibling builds: @zenwave360\/dsl/);
-});
-
-test('R-R10 a pre-release needs an Unreleased section before the stamp and its version after', () => {
-  const base = { channel: 'pre-release', manifest: manifest(), lock: consistentLock };
-  assert.deepEqual(releaseProblems({ ...base, changelog: '## [Unreleased]\n', changelogHeading: 'Unreleased' }), []);
-  assert.deepEqual(releaseProblems({ ...base, changelog: '## [0.1.0] - x\n' }), []);
-  assert.match(releaseProblems({ ...base, changelog: '## [0.1.0] - x\n', changelogHeading: 'Unreleased' })[0], /no "## \[Unreleased\]"/);
-  assert.match(releaseProblems({ ...base, manifest: manifest({ version: '0.2.0' }), changelog: '' })[0], /even minor/);
-});
-
 test('the pins committed in this repository pass the pre-release checks', () => {
   const root = join(import.meta.dirname, '../../../..');
   const real = JSON.parse(readFileSync(join(root, 'packages/extension/package.json'), 'utf8'));
   const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
   assert.deepEqual(pinProblems(real, { lock }), []);
-  // The channel is the one the version selects, so this holds for a pre-release and for a stable version alike; the
-  // parity rule itself is tested above.
-  const channel = Number(real.version.split('.')[1]) % 2 === 1 ? 'pre-release' : 'stable';
-  assert.deepEqual(channelProblems(real.version, channel), []);
+  assert.ok(parseExtensionVersion(real.version), real.version);
 });
 
 // The pin-raising script, with npm replaced by what a test chooses.

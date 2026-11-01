@@ -58,6 +58,12 @@ if (channel) {
     );
   }
   problems.push(...pinProblems(info.manifest, { stable: channel === 'stable' }));
+  // The listing shows the notes of this version (spec:release#r-r10).
+  const changelogEntry = [...archive.keys()].find((file) => file.toLowerCase() === 'extension/changelog.md');
+  const changelogText = changelogEntry ? archive.get(changelogEntry).toString('utf8') : '';
+  if (!`\n${changelogText}`.includes(`\n## [${info.version}]`)) {
+    problems.push(`The VSIX's CHANGELOG.md has no "## [${info.version}]" section`);
+  }
 }
 if (problems.length > 0) {
   throw new Error(`Package verification failed:\n  ${problems.join('\n  ')}`);
