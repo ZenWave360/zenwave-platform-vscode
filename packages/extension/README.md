@@ -40,60 +40,50 @@ Event Storming board.
   (`zenwave.eventflow.defaultView`, `zenwave.eventflow.humanizeLabels` set how it
   opens). When it has nothing to draw it says why. Clicking a node does not
   navigate to its source yet.
+- A preview of ZDL, ZW and ZFL models, drawn from what the language server returns
+  with the Mermaid renderer shipped in the extension (no network): from the
+  ZenWave icon in the editor title bar, or **ZenWave: Open Preview**
+  (`Ctrl+Shift+V`) and **Open Preview to the Side** (`Ctrl+K V`). A ZDL model shows
+  its classes and diagrams; a ZW file shows its plugin configuration, with each
+  plugin described from the catalogue the extension ships; a ZFL flow shows its flowchart and one sequence per outcome,
+  with selectors for the diagram and for how sequence variants are rendered. It
+  follows edits as you type, keeps the last good drawing while the model cannot be
+  read, follows the colour theme, and says why when it has nothing to show.
+  Opening a model file still gives its text.
 
 More is on the way; see the repository for what is planned.
 
 ## Development dependencies
 
-`@zenwave360/dsl@1.9.0-SNAPSHOT` is not published to npm yet, so a clean
-`npm install`/`npm ci` currently fails. Build the sibling `dsl-kotlin` repository
-and link its generated package without changing this manifest's version-based
-dependency:
+`@zenwave360/dsl`, `@zenwave360/lsp-js` and
+`@zenwave360/vistas-eventflow-webview` are pinned to published versions, so
+`npm ci` works on a clean checkout. The build copies the server's two bundles
+into `dist/server`, the diagram page into `dist/eventflow-webview` and the pinned
+Mermaid bundle into `dist/preview-webview`, and checks the first two against `zenwaveLanguageServer` and `zenwaveEventFlowWebview` in
+`package.json`.
+
+To work against your checkouts without publishing, keep the sibling repositories
+next to this one. As with the composite builds of `zenwave-lsp`, a sibling that
+exists and is built wins, and anything else comes from the registry. Every
+install links them into `node_modules` and prints what it linked:
 
 ```console
-npm link --no-save --workspace packages/extension ../dsl-kotlin/build/js/packages/dsl-kotlin
+npm run build:siblings   # builds dsl-kotlin, zenwave-lsp and zenwave-architectural-vistas, then links them
+npm run link:siblings    # only links what is already built
 ```
 
-Once that exact version is published, clean installs work without a manifest
-change.
-
-The language server, `@zenwave360/lsp-js@0.1.0-SNAPSHOT`, is not published
-either. It is not a dependency of the extension: the build copies its two
-bundles into `dist/server`, and the version it must be is pinned in
-`package.json` under `zenwaveLanguageServer`. `npm run build` fails, naming
-what to do, until it is available. Build `zenwave-lsp`
-(`./gradlew :lsp-js:lspJsNpmPack`) and point the build at the unpacked package:
+Unlike Gradle, npm doesn't rebuild a sibling for you: a link shows what was built
+last, so run `build:siblings` after changing one. To build against the pinned
+versions, as CI does:
 
 ```console
-export ZENWAVE_LSP_JS_DIR="$PWD/../zenwave-lsp/lsp-js/build/npm-package"   # absolute; run from the repository root
-npm run build    # also npm run test:desktop, test:browser, run-in-browser, package
+ZENWAVE_USE_LOCAL_DEPENDENCIES=false npm ci
 ```
 
-Installing the tarball without saving it also works, but only where npm can
-resolve every other dependency — today it cannot, because
-`@zenwave360/dsl@1.9.0-SNAPSHOT` is not on the registry either, so the
-environment variable is the dependable route:
-
-```console
-npm install --no-save --workspace packages/extension ../zenwave-lsp/lsp-js/build/npm-pack/zenwave360-lsp-js-0.1.0-SNAPSHOT.tgz
-```
-
-The EventFlow diagram page, `@zenwave360/vistas-eventflow-webview@0.1.0`, is not
-published either. The build copies its `webview/` page into
-`dist/eventflow-webview`, pinned in `package.json` under
-`zenwaveEventFlowWebview` together with the page protocol version it must state,
-and fails, naming what to do, until it is available. Build it in
-`zenwave-architectural-vistas` and point the build at the package directory:
-
-```console
-# in zenwave-architectural-vistas
-pnpm --filter @zenwave360/vistas-eventflow-webview build
-# here; absolute path
-export ZENWAVE_VISTAS_WEBVIEW_DIR="$PWD/../zenwave-architectural-vistas/packages/eventflow-webview"
-```
-
-A packed tarball works too: extract it (`tar -xzf zenwave360-vistas-eventflow-webview-0.1.0.tgz`)
-and point `ZENWAVE_VISTAS_WEBVIEW_DIR` at the extracted `package` directory.
+`npm run package` warns when the VSIX carries a sibling build, and refuses when
+`ZENWAVE_RELEASE_TAG` is set. `ZENWAVE_LSP_JS_DIR` and
+`ZENWAVE_VISTAS_WEBVIEW_DIR` still point the build at another directory, and
+there the version must match the pin.
 
 ## Replaces
 

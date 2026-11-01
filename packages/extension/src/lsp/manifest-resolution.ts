@@ -121,9 +121,13 @@ export function sameInitialization(left: ResolvedManifest, right: ResolvedManife
   return left.manifestUri === right.manifestUri && left.configUri === right.configUri;
 }
 
-/** What the server is initialised with: `{ zenwave: { configUri, projectManifestUri } }`, absent keys omitted. */
-export function initializationOptions(resolved: ResolvedManifest, credentialRequest: boolean): {
+/**
+ * What the server is initialised with: `{ zenwave: { configUri, projectManifestUri }, pluginCatalogue? }`, absent keys
+ * omitted. The catalogue sits at the top level beside `zenwave`, where the server reads it.
+ */
+export function initializationOptions(resolved: ResolvedManifest, credentialRequest: boolean, pluginCatalogue?: object): {
   zenwave: { configUri?: string; projectManifestUri?: string; clientCapabilities: { credentialRequest: boolean } };
+  pluginCatalogue?: object;
 } {
   return {
     zenwave: {
@@ -131,6 +135,7 @@ export function initializationOptions(resolved: ResolvedManifest, credentialRequ
       ...(resolved.manifestUri ? { projectManifestUri: resolved.manifestUri } : {}),
       clientCapabilities: { credentialRequest },
     },
+    ...(pluginCatalogue ? { pluginCatalogue } : {}),
   };
 }
 

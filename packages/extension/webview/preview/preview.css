@@ -1,0 +1,106 @@
+html, body { height: 100%; margin: 0; padding: 0; }
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+}
+[hidden] { display: none !important; }
+
+body > #controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  align-items: center;
+  flex: none;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, transparent));
+  background: var(--vscode-editorWidget-background, transparent);
+}
+body > #controls label { display: inline-flex; align-items: center; gap: 6px; }
+body > #controls select {
+  max-width: 28rem;
+  padding: 2px 4px;
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  border-radius: 2px;
+  font: inherit;
+}
+body > #controls select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+body > #view { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; outline: none; user-select: text; }
+body > #view svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+body > #state { box-sizing: border-box; flex: none; }
+body > #state.overlay { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; }
+body > #state.banner {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
+}
+body > #state .box { max-width: 40rem; padding: 24px; text-align: center; }
+body > #state.banner .box { max-width: none; padding: 0; text-align: left; flex: 1; }
+body > #state .title { margin: 0 0 8px; font-weight: 600; }
+body > #state.banner .title { display: inline; margin: 0; }
+body > #state .detail { margin: 0 0 16px; opacity: .85; white-space: pre-wrap; }
+body > #state.banner .detail { display: inline; margin: 0 0 0 8px; }
+body > #state .actions { display: inline; }
+body > #state button {
+  margin: 4px;
+  padding: 4px 12px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  font: inherit;
+}
+body > #state button:hover { background: var(--vscode-button-hoverBackground); }
+
+.notice { max-width: 60rem; margin: 12px auto; }
+.notice p { margin: 0 0 8px; color: var(--vscode-errorForeground, inherit); }
+.notice pre {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  background: var(--vscode-textCodeBlock-background, transparent);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+
+/* A Markdown or HTML representation, in the editor's colours and fonts. */
+.document { max-width: 60rem; margin: 0 auto; line-height: 1.5; overflow-wrap: anywhere; }
+.document h1, .document h2, .document h3, .document h4, .document h5, .document h6 { margin: 1.4em 0 .5em; line-height: 1.25; font-weight: 600; }
+.document h1 { margin-top: 0; font-size: 1.8em; padding-bottom: .3em; border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, transparent)); }
+.document h2 { font-size: 1.45em; padding-bottom: .25em; border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, transparent)); }
+.document h3 { font-size: 1.2em; }
+.document h4, .document h5, .document h6 { font-size: 1em; }
+.document p, .document ul, .document ol, .document table, .document pre, .document blockquote { margin: 0 0 1em; }
+.document ul, .document ol { padding-left: 2em; }
+.document a { color: var(--vscode-textLink-foreground); text-decoration: none; }
+.document a:hover { color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); text-decoration: underline; }
+.document code { padding: 1px 4px; border-radius: 3px; background: var(--vscode-textCodeBlock-background, transparent); font-family: var(--vscode-editor-font-family, monospace); font-size: .95em; }
+.document pre { padding: 8px 12px; overflow: auto; border-radius: 3px; background: var(--vscode-textCodeBlock-background, transparent); }
+.document pre code { padding: 0; background: none; font-size: var(--vscode-editor-font-size, 13px); }
+.document blockquote { padding: 0 1em; border-left: 4px solid var(--vscode-textBlockQuote-border, var(--vscode-editorWidget-border, transparent)); background: var(--vscode-textBlockQuote-background, transparent); }
+.document hr { border: 0; border-top: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, transparent)); }
+.document table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.document th, .document td { padding: 4px 10px; border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, currentColor)); text-align: left; vertical-align: top; }
+.document th { font-weight: 600; background: var(--vscode-editorWidget-background, transparent); }
+.document img { max-width: 100%; }
+.zw-diagram { margin: 0 0 1em; overflow-x: auto; }
+.zw-diagram-error { margin: 0 0 1em; padding: 8px 12px; border-left: 3px solid var(--vscode-errorForeground, currentColor); }
+.zw-diagram-error p { margin: 0 0 8px; color: var(--vscode-errorForeground, inherit); }
+.zw-diagram-error pre { margin: 0; }
+
+/* Multiplicity labels (the `*` on a `*--` relation) sit directly on the page, not on a node or a label background,
+   and Mermaid paints them #333 in every theme: the editor's own foreground is the colour that reads on the page.
+   The id raises the specificity above Mermaid's `#diagram-id`-scoped rules; nothing else in a diagram is touched. */
+#view svg g.edgeTerminals text,
+#view svg g.edgeTerminals tspan { fill: var(--vscode-editor-foreground, var(--vscode-foreground)); }

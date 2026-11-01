@@ -15,6 +15,9 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "node packages/extension/scripts/siblings.mjs",
+    "link:siblings": "node packages/extension/scripts/siblings.mjs",
+    "build:siblings": "node packages/extension/scripts/build-siblings.mjs",
     "build": "npm run build --workspaces --if-present",
     "watch": "npm run watch --workspace packages/extension",
     "typecheck": "npm run typecheck --workspaces --if-present",

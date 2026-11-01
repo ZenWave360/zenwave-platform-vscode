@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DIAGRAM_STATE_KINDS, presentState, type DataState } from '../../src/eventflow/diagram-state.js';
 import { buildFallbackHtml, buildPageHtml, contentSecurityPolicy, createNonce, HOST_SCRIPT } from '../../src/eventflow/page.js';
-import { EVENTFLOW_PROTOCOL, EVENTFLOW_PROTOCOL_VERSION, EVENTFLOW_VIEW_TYPE, readiness, type OutboundMessage } from '../../src/eventflow/protocol.js';
+import { EVENTFLOW_PROTOCOL, EVENTFLOW_PROTOCOL_VERSION, EVENTFLOW_VIEW_TYPE, inboundMessage, readiness, type OutboundMessage } from '../../src/eventflow/protocol.js';
 import { DiagramSession } from '../../src/eventflow/session.js';
 import { ZenwaveRequests, type EventFlowViews } from '../../src/lsp/requests.js';
 import type { RequestResult } from '../../src/lsp/supervisor.js';
@@ -201,6 +201,39 @@ test('view and label choices are kept per diagram and survive a re-render', asyn
   assert.equal(services.ofType('renderBundle')[0]?.payload.viewMode, 'services', 'the configured default view is the initial one');
 });
 
+test('a view chosen in the page selector is recorded without telling the page, and the next render carries it', async () => {
+  const value = { flowGraph: {}, serviceGraph: {} };
+  const { session, ofType, posted } = harness(() => ({ kind: 'ok', value }));
+  session.receive(READY);
+  await session.refresh();
+  const before = posted.length;
+  session.receive({ type: 'viewModeChanged', payload: { viewMode: 'services' } });
+  assert.equal(session.viewMode, 'services');
+  assert.equal(posted.length, before, 'nothing is posted back to the page');
+  assert.equal(ofType('setViewMode').length, 0);
+  await session.refresh();
+  assert.equal(ofType('renderBundle').at(-1)?.payload.viewMode, 'services', 're-render after a selector change');
+  // The title commands end in the same state: the same view as a command is not posted twice, the other one is.
+  session.setViewMode('services');
+  assert.equal(ofType('setViewMode').length, 0);
+  session.setViewMode('flow');
+  assert.deepEqual(ofType('setViewMode').map((message) => message.payload), [{ viewMode: 'flow' }]);
+  // Then the page flips back.
+  session.receive({ type: 'viewModeChanged', payload: { viewMode: 'flow' } });
+  session.receive({ type: 'viewModeChanged', payload: { viewMode: 'services' } });
+  assert.equal(session.viewMode, 'services');
+});
+
+test('viewModeChanged with another view than flow or services is ignored', () => {
+  const { session } = harness(() => ({ kind: 'no-server', reason: 'off' }));
+  for (const payload of [{ viewMode: 'timeline' }, { viewMode: 3 }, {}, null, 'services']) {
+    session.receive({ type: 'viewModeChanged', payload });
+    assert.equal(session.viewMode, 'flow', JSON.stringify(payload));
+    assert.equal(inboundMessage({ type: 'viewModeChanged', payload }), undefined);
+  }
+  assert.deepEqual(inboundMessage({ type: 'viewModeChanged', payload: { viewMode: 'services', extra: 1 } }), { type: 'viewModeChanged', payload: { viewMode: 'services' } });
+});
+
 test('a highlight asked for before the diagram is on the page is applied once it is', async () => {
   const { session, ofType } = harness(() => ({ kind: 'ok', value: { flowGraph: {}, serviceGraph: {} } }));
   session.highlightNode('command:createOrder');
@@ -242,13 +275,14 @@ test('the page gets webview URIs for its assets, a CSP without remote or inline 
 
 test('the manifest registers an optional diagram editor for .zfl and offers it from one submenu', () => {
   const contributes = manifest.contributes;
-  assert.deepEqual(contributes.customEditors, [{ viewType: EVENTFLOW_VIEW_TYPE, displayName: 'ZenWave EventFlow Diagram', selector: [{ filenamePattern: '*.zfl' }], priority: 'option' }]);
+  assert.deepEqual(contributes.customEditors.filter((editor: { viewType: string }) => editor.viewType === EVENTFLOW_VIEW_TYPE), [{ viewType: EVENTFLOW_VIEW_TYPE, displayName: 'ZenWave EventFlow Diagram', selector: [{ filenamePattern: '*.zfl' }], priority: 'option' }]);
   assert.deepEqual(manifest.zenwaveEventFlowWebview, { package: '@zenwave360/vistas-eventflow-webview', version: '0.1.0', protocol: EVENTFLOW_PROTOCOL, protocolVersion: EVENTFLOW_PROTOCOL_VERSION });
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
-  assert.deepEqual(title.filter((item) => item.submenu).map((item) => [item.submenu, item.when]), [['zenwave.modelViews', 'resourceExtname == .zfl']]);
+  assert.deepEqual(title.filter((item) => item.submenu).map((item) => [item.submenu, item.when]), [['zenwave.modelViews', '(resourceExtname == .zfl || resourceExtname == .zdl || resourceExtname == .zw) && !isInDiffEditor']]);
   assert.ok(!title.some((item) => item.command === 'zenwave.eventflow.open' || item.command === 'zenwave.eventflow.openToSide'), 'no title-bar icon of its own');
   const submenu = contributes.menus['zenwave.modelViews'] as { command: string; when: string }[];
-  assert.deepEqual(submenu.map((item) => item.command).sort(), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.eventflow.showText']);
+  assert.deepEqual(submenu.map((item) => item.command).filter((command) => command.startsWith('zenwave.eventflow.')).sort(), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.eventflow.showText']);
+  for (const item of submenu.filter((entry) => entry.command === 'zenwave.eventflow.open' || entry.command === 'zenwave.eventflow.openToSide')) assert.match(item.when, /^resourceExtname == .zfl /, `${item.command} stays on ZFL only`);
   for (const item of title.filter((entry) => entry.command)) {
     assert.match(item.when, /^activeCustomEditorId == zenwave\.eventflow && /, `${item.command} is not scoped to the diagram editor`);
   }

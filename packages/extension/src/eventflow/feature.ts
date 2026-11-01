@@ -4,6 +4,7 @@ import type { DiagramPanels, Registration } from '../explorer/diagram-selection.
 import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
 import { commandDocument, isZflDocument } from '../model/active-document.js';
+import { fileName, findTab, replaceInPlace } from '../model/editor-tabs.js';
 import { buildFallbackHtml, buildPageHtml, createNonce } from './page.js';
 import { EVENTFLOW_VIEW_TYPE, type PageProbe, type ViewMode } from './protocol.js';
 import { DiagramSession } from './session.js';
@@ -25,8 +26,8 @@ export const EVENTFLOW_CONTEXT_KEYS = {
 } as const;
 
 /**
- * The editor-title submenu gathering the ways to view a model document (diagram
- * here, preview in 005). One ZenWave icon instead of one icon per view.
+ * The editor-title submenu gathering the ways to view a model document (the
+ * EventFlow diagram here, the preview in `src/preview`). One ZenWave icon instead of one icon per view.
  */
 export const MODEL_VIEWS_SUBMENU = 'zenwave.modelViews';
 
@@ -56,10 +57,8 @@ export interface EventFlowApi {
   editorsFor(documentUri: string): readonly EventFlowEditorApi[];
   /** The diagram editor with focus, if any. */
   readonly active: EventFlowEditorApi | undefined;
-}
-
-function fileName(uri: vscode.Uri): string {
-  return uri.path.slice(uri.path.lastIndexOf('/') + 1) || uri.toString();
+  /** What `zenwave.eventflowViewMode` was last set to, for tests: the context key cannot be read back. */
+  readonly contextViewMode: ViewMode | undefined;
 }
 
 interface Initial {
@@ -168,7 +167,10 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
 
   private receive(message: unknown): void {
     const wasReady = this.session.page.kind === 'ready';
+    const viewMode = this.session.viewMode;
     this.session.receive(message);
+    // The user chose a view in the page's selector: the title bar follows, for the focused editor only.
+    if (this.session.viewMode !== viewMode && this.panel.active) this.deps.onFocus(this);
     if (!wasReady && this.session.page.kind === 'ready') {
       if (this.loadTimer !== undefined) clearTimeout(this.loadTimer);
       this.loadTimer = undefined;
@@ -212,36 +214,6 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
   }
 }
 
-/**
- * Replaces a tab with another view of the same document, keeping its place among
- * the tabs: open the replacement in the tab's group, close the tab, and move the
- * replacement to the index the tab had.
- */
-async function replaceInPlace(tab: vscode.Tab, open: (column: vscode.ViewColumn) => Thenable<unknown>): Promise<void> {
-  const column = tab.group.viewColumn;
-  const index = tab.group.tabs.indexOf(tab);
-  const input = tab.input;
-  await open(column);
-  const group = vscode.window.tabGroups.all.find((candidate) => candidate.viewColumn === column);
-  const original = group?.tabs.find((candidate) => sameInput(candidate.input, input));
-  if (original && !original.isDirty) await vscode.window.tabGroups.close(original, true);
-  const active = vscode.window.tabGroups.activeTabGroup;
-  const position = active.activeTab ? active.tabs.indexOf(active.activeTab) : -1;
-  if (active.viewColumn === column && index >= 0 && position >= 0 && position !== index) {
-    await vscode.commands.executeCommand('moveActiveEditor', { to: 'position', by: 'tab', value: index + 1 });
-  }
-}
-
-function sameInput(a: unknown, b: unknown): boolean {
-  if (a instanceof vscode.TabInputText && b instanceof vscode.TabInputText) return a.uri.toString() === b.uri.toString();
-  if (a instanceof vscode.TabInputCustom && b instanceof vscode.TabInputCustom) return a.uri.toString() === b.uri.toString() && a.viewType === b.viewType;
-  return false;
-}
-
-function findTab(group: vscode.TabGroup, matches: (input: unknown) => boolean): vscode.Tab | undefined {
-  return group.activeTab && matches(group.activeTab.input) ? group.activeTab : group.tabs.find((tab) => matches(tab.input));
-}
-
 export function registerEventFlowEditor(
   context: vscode.ExtensionContext,
   server: LanguageServerApi,
@@ -250,9 +222,11 @@ export function registerEventFlowEditor(
 ): EventFlowApi {
   const editors = new Set<EventFlowEditor>();
   let active: EventFlowEditor | undefined;
+  let contextViewMode: ViewMode | undefined;
 
   function publish(editor: EventFlowEditor): void {
     active = editor;
+    contextViewMode = editor.session.viewMode;
     void vscode.commands.executeCommand('setContext', EVENTFLOW_CONTEXT_KEYS.viewMode, editor.session.viewMode);
     void vscode.commands.executeCommand('setContext', EVENTFLOW_CONTEXT_KEYS.humanizeLabels, editor.session.displaySettings.humanizeLabels);
   }
@@ -350,5 +324,6 @@ export function registerEventFlowEditor(
     get editors() { return [...editors]; },
     editorsFor: (documentUri) => [...editors].filter((editor) => editor.documentUri === documentUri),
     get active() { return active && editors.has(active) ? active : undefined; },
+    get contextViewMode() { return contextViewMode; },
   };
 }

@@ -46,7 +46,7 @@
     "package": "node scripts/package.mjs",
     "generate:sdk-catalogue": "node scripts/generate-sdk-catalogue.mjs",
     "verify:vsix": "node scripts/verify-vsix.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p webview/tsconfig.json",
     "test": "tsx --test test/unit/*.test.ts",
     "test:desktop": "npm run build && npm run build:smoke && node scripts/run-desktop-smoke.mjs",
     "test:browser": "npm run build && npm run build:smoke && node scripts/run-browser-smoke.mjs",
@@ -55,7 +55,7 @@
   },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
-    "version": "0.1.0-SNAPSHOT"
+    "version": "0.1.0-next.12.1"
   },
   "zenwaveEventFlowWebview": {
     "package": "@zenwave360/vistas-eventflow-webview",
@@ -365,6 +365,40 @@
         "title": "Showing Labels as Written: Humanize Labels",
         "category": "ZenWave",
         "icon": "$(symbol-text)"
+      },
+      {
+        "command": "zenwave.preview.openToSide",
+        "title": "Open Preview to the Side",
+        "category": "ZenWave",
+        "icon": {
+          "light": "./resources/zenwave-preview-light.svg",
+          "dark": "./resources/zenwave-preview-dark.svg"
+        }
+      },
+      {
+        "command": "zenwave.preview.open",
+        "title": "Open Preview",
+        "category": "ZenWave",
+        "icon": {
+          "light": "./resources/zenwave-preview-light.svg",
+          "dark": "./resources/zenwave-preview-dark.svg"
+        }
+      },
+      {
+        "command": "zenwave.preview.showText",
+        "title": "Show Model Text",
+        "category": "ZenWave",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "zenwave.preview.selectDiagram",
+        "title": "Select Preview Diagram...",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.preview.selectRenderMode",
+        "title": "Select Preview Render Mode...",
+        "category": "ZenWave"
       }
     ],
     "menus": {
@@ -444,6 +478,26 @@
         {
           "command": "zenwave.eventflow.showHumanizedLabels",
           "when": "activeCustomEditorId == zenwave.eventflow && !zenwave.eventflowHumanizeLabels"
+        },
+        {
+          "command": "zenwave.preview.openToSide",
+          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+        },
+        {
+          "command": "zenwave.preview.open",
+          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+        },
+        {
+          "command": "zenwave.preview.showText",
+          "when": "activeCustomEditorId == zenwave.preview"
+        },
+        {
+          "command": "zenwave.preview.selectDiagram",
+          "when": "activeCustomEditorId == zenwave.preview"
+        },
+        {
+          "command": "zenwave.preview.selectRenderMode",
+          "when": "activeCustomEditorId == zenwave.preview && resourceExtname == .zfl"
         }
       ],
       "editor/context": [
@@ -480,7 +534,7 @@
       "editor/title": [
         {
           "submenu": "zenwave.modelViews",
-          "when": "resourceExtname == .zfl",
+          "when": "(resourceExtname == .zfl || resourceExtname == .zdl || resourceExtname == .zw) && !isInDiffEditor",
           "group": "navigation@90"
         },
         {
@@ -519,6 +573,21 @@
           "command": "zenwave.eventflow.showText",
           "when": "activeCustomEditorId == zenwave.eventflow",
           "group": "0_text@1"
+        },
+        {
+          "command": "zenwave.preview.showText",
+          "when": "activeCustomEditorId == zenwave.preview",
+          "group": "0_text@2"
+        },
+        {
+          "command": "zenwave.preview.openToSide",
+          "when": "resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && activeCustomEditorId != zenwave.preview",
+          "group": "2_preview@1"
+        },
+        {
+          "command": "zenwave.preview.open",
+          "when": "resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && activeCustomEditorId != zenwave.preview",
+          "group": "2_preview@2"
         }
       ]
     },
@@ -710,6 +779,22 @@
           }
         ],
         "priority": "option"
+      },
+      {
+        "viewType": "zenwave.preview",
+        "displayName": "ZenWave Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.zdl"
+          },
+          {
+            "filenamePattern": "*.zw"
+          },
+          {
+            "filenamePattern": "*.zfl"
+          }
+        ],
+        "priority": "option"
       }
     ],
     "submenus": [
@@ -721,9 +806,26 @@
           "dark": "./resources/zenwave-preview-dark.svg"
         }
       }
+    ],
+    "keybindings": [
+      {
+        "command": "zenwave.preview.open",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorTextFocus && resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && !isInDiffEditor"
+      },
+      {
+        "command": "zenwave.preview.openToSide",
+        "key": "ctrl+k v",
+        "mac": "cmd+k v",
+        "when": "editorTextFocus && resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && !isInDiffEditor"
+      }
     ]
   },
   "devDependencies": {
+    "@zenwave360/lsp-js": "0.1.0-next.12.1",
+    "@zenwave360/vistas-eventflow-webview": "0.1.0",
+    "@types/markdown-it": "14.2.0",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
@@ -732,7 +834,10 @@
     "tsx": "^4.23.13"
   },
   "dependencies": {
-    "@zenwave360/dsl": "1.9.0-SNAPSHOT",
+    "@zenwave360/dsl": "1.10.0",
+    "dompurify": "3.4.17",
+    "markdown-it": "14.3.2",
+    "mermaid": "12.2.0",
     "vscode-languageclient": "9.0.1"
   }
 }

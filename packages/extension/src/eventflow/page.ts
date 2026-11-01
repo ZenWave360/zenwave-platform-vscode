@@ -131,6 +131,10 @@ export const HOST_SCRIPT = `(function () {
     box.appendChild(actions);
     element.appendChild(box);
   }
+  function selectedView() {
+    var checked = document.querySelector('.view-selector input:checked');
+    return checked ? String(checked.value) : '';
+  }
   function probe(requestId) {
     var nodes = Array.prototype.slice.call(document.querySelectorAll('.react-flow__node[data-id]'));
     var root = document.getElementById('root');
@@ -143,6 +147,7 @@ export const HOST_SCRIPT = `(function () {
       text: root ? String(root.innerText || root.textContent || '').slice(0, 20000) : '',
       stateKind: shown ? shown.kind : undefined,
       stateMode: shown ? shown.mode : undefined,
+      viewSelector: selectedView() || undefined,
       stylesheets: Array.prototype.filter.call(document.styleSheets, function (sheet) { return !!sheet.href; }).length,
       cspViolations: violations.slice()
     } });
@@ -152,5 +157,9 @@ export const HOST_SCRIPT = `(function () {
     if (!message || typeof message.type !== 'string') return;
     if (message.type === 'zenwave.host.state') show(message.payload || null);
     if (message.type === 'zenwave.host.probe' && message.payload) probe(message.payload.requestId);
+    if (message.type === 'zenwave.host.selectView' && message.payload) {
+      var input = document.querySelector('.view-selector input[value="' + (message.payload.viewMode === 'services' ? 'services' : 'flow') + '"]');
+      if (input) input.click();
+    }
   });
 })();`;

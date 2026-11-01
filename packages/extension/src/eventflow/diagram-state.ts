@@ -1,4 +1,4 @@
-import { documentFailure, ZENWAVE_REQUESTS, type EventFlowViews } from '../lsp/requests.js';
+import { documentFailure, ZENWAVE_REQUESTS } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import type { StateAction, StatePresentation } from './protocol.js';
 
@@ -38,8 +38,8 @@ function diagnosticMessage(diagnostic: unknown): string | undefined {
   return typeof message === 'string' ? message : undefined;
 }
 
-/** What an `eventFlowViews` answer means for the editor. */
-export function dataStateFromResult(result: RequestResult<EventFlowViews>): DataState {
+/** What a document request's answer (`eventFlowViews`, `preview`) means for the editor. */
+export function dataStateFromResult(result: RequestResult<unknown>): DataState {
   switch (result.kind) {
     case 'ok': return { kind: 'rendered' };
     case 'no-server': return { kind: 'no-server', reason: result.reason };

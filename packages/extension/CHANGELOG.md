@@ -17,6 +17,13 @@
 - ZenWave: Go to What This References / Go to What References This, from the
   editor context menu and the palette, and ZenWave: Organize ZFL Services as one
   undoable edit. Offered only while a language server supporting them is connected.
+- A read-only preview of ZDL, ZW and ZFL models (a ZW file shows its plugin
+  configuration, resolved), from the editor title bar's ZenWave
+  menu, the palette (**ZenWave: Open Preview**, **Open Preview to the Side**) and
+  `Ctrl+Shift+V` / `Ctrl+K V`. It draws the language server's Mermaid diagrams with
+  a renderer shipped in the extension, offers a diagram selector and, for ZFL, a
+  render mode, follows edits and the colour theme, and explains why it has nothing
+  to show. The menu is now also offered for `.zdl` files and is hidden in diff editors.
 
 ## [0.1.0] - 2026-09-15
 

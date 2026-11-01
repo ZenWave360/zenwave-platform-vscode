@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { linkedSiblings } from './siblings.mjs';
 
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
@@ -40,6 +41,14 @@ if (tag) {
   if (!changelog.includes(`## [${manifest.version}]`)) {
     throw new Error(`CHANGELOG.md has no release section for ${manifest.version}`);
   }
+}
+
+const linked = linkedSiblings().map((sibling) => sibling.package);
+if (linked.length > 0) {
+  if (tag) {
+    throw new Error(`A release can't ship sibling builds: ${linked.join(', ')}. Run npm ci with ZENWAVE_USE_LOCAL_DEPENDENCIES=false`);
+  }
+  console.warn(`warning: this VSIX ships sibling builds: ${linked.join(', ')}`);
 }
 
 function run(command, args, extraEnvironment = {}) {

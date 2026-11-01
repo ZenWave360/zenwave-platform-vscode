@@ -87,6 +87,10 @@ try {
     ['EventFlow diagram for place-order-flow.zfl: rendered', 'a diagram request outcome'],
     ['EventFlow diagram for place-order-flow.zfl: the language server could not read the document', 'why a diagram could not be produced'],
     ['EventFlow diagram for checkout.zfl: needs the ZenWave language server', 'that a diagram needs the server'],
+    ['Preview of checkout.zfl: page loaded', 'that the preview page loaded'],
+    ['Preview of checkout.zfl: received', 'a preview request outcome'],
+    ['Preview of smoke-unreadable.zfl: the language server could not read the document', 'why a preview could not be produced'],
+    ['Preview of orders.zdl: needs the ZenWave language server', 'that a preview needs the server'],
   ]) {
     if (!logs.includes(expected)) throw new Error(`The ZenWave output channel does not record ${what} ("${expected}")`);
   }

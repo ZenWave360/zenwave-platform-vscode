@@ -28,7 +28,6 @@ the extension detects what the host can do and hides what it cannot — see
 
 ```
 packages/extension/        the VS Code extension
-packages/preview-renderer/ ZDL/ZFL → Markdown + Mermaid   (placeholder)
 docs/                      pointer to the design documentation in zenwave-specs
 ```
 

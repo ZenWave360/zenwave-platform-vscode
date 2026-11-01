@@ -25,6 +25,16 @@ export function isZflDocument(uri: vscode.Uri, languageId: string | undefined): 
 }
 
 /**
+ * A ZDL, ZW or ZFL document, the models that have a preview: by language when open as text,
+ * otherwise by extension. An untitled buffer is not one: a preview is of a saved file.
+ */
+export function isPreviewableDocument(uri: vscode.Uri, languageId: string | undefined): boolean {
+  if (uri.scheme === 'untitled') return false;
+  if (languageId !== undefined) return languageId === 'zdl' || languageId === 'zw' || languageId === 'zfl';
+  return /\.(zdl|zw|zfl)$/i.test(uri.path);
+}
+
+/**
  * The command argument when a menu passed a URI (editor/title, explorer
  * context), otherwise the model document in the active tab.
  */
