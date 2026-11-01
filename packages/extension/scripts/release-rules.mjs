@@ -90,11 +90,14 @@ export function channelProblems(version, channel) {
   return [];
 }
 
-/** The highest stable version among tags `vX.Y.Z`; `-pre` and any other tag are ignored. */
+/**
+ * The highest stable version among tags `vX.EVEN.Z`. A `-pre` tag, an odd minor (which `release.yml` refuses and the
+ * rules call pre-release) and any other tag are ignored; a failed even tag still counts (spec:release#r-r8).
+ */
 export function latestStable(tags) {
   const versions = tags
     .map((tag) => STABLE_TAG.exec(tag))
-    .filter(Boolean)
+    .filter((match) => match && Number(match[2]) % 2 === 0)
     .map(([, major, minor, patch]) => ({ major: Number(major), minor: Number(minor), patch: Number(patch) }));
   return versions.sort((a, b) => a.major - b.major || a.minor - b.minor || a.patch - b.patch).at(-1);
 }

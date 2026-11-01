@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,6 +62,10 @@ test('R-R8 the stamp replaces only the patch and keeps the file as it was', () =
 test('R-R8 a pre-release stays above the latest stable release', () => {
   const tags = ['v0.1.99-pre', 'v0.2.0', 'v0.2.1', 'not-a-tag', 'v0.3.4-pre'];
   assert.deepEqual(latestStable(tags), { major: 0, minor: 2, patch: 1 });
+  // A stray tag with an odd minor is not a stable release: release.yml refuses it, so it does not move develop.
+  assert.deepEqual(latestStable([...tags, 'v0.5.0', 'v0.3.9']), { major: 0, minor: 2, patch: 1 });
+  assert.equal(latestStable(['v0.1.5']), undefined);
+  assert.deepEqual(aboveStableProblems('0.3.0', ['v0.2.0', 'v0.5.0']), []);
   assert.equal(latestStable(['v0.1.1-pre']), undefined);
   assert.match(aboveStableProblems('0.1.5', tags)[0], /not above the stable release 0\.2\.1.*0\.3\.0/);
   assert.match(aboveStableProblems('0.2.7', tags)[0], /not above/);
@@ -75,6 +80,53 @@ test('R-R10 the changelog heading becomes the stamped version and date, and its 
     '# Changelog\r\n\r\n## [0.1.57] - 2026-11-02\r\n\r\n### Added\r\n- x\r\n\r\n## [0.1.0] - 2026-09-15\r\n',
   );
   assert.throws(() => stampChangelog('# Changelog\n\n## [0.1.0] - 2026-09-15\n', '0.1.57', '2026-11-02'), /no "## \[Unreleased\]"/);
+});
+
+test('R-R1 the changelog is stamped with the date of the commit, so running the same run again gives the same bytes', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'zenwave-stamp-'));
+  try {
+    const scripts = join(repo, 'packages/extension/scripts');
+    mkdirSync(scripts, { recursive: true });
+    for (const file of ['release.mjs', 'release-rules.mjs', 'siblings.mjs']) {
+      writeFileSync(join(scripts, file), readFileSync(join(import.meta.dirname, '../../scripts', file)));
+    }
+    const manifestFile = join(repo, 'packages/extension/package.json');
+    const changelogFile = join(repo, 'packages/extension/CHANGELOG.md');
+    const manifestText = '{\n  "version": "0.1.0"\n}\n';
+    const changelogText = '# Changelog\n\n## [Unreleased]\n\n- x\n';
+    writeFileSync(manifestFile, manifestText);
+    writeFileSync(changelogFile, changelogText);
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+      GIT_COMMITTER_DATE: '2026-03-04T23:30:00+02:00', GIT_AUTHOR_DATE: '2026-03-04T23:30:00+02:00',
+      GIT_CONFIG_GLOBAL: '', GIT_CONFIG_SYSTEM: '', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'commit.gpgsign', GIT_CONFIG_VALUE_0: 'false',
+    };
+    const git = (...args: string[]) => {
+      const run = spawnSync('git', args, { cwd: repo, env, encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+    };
+    git('init', '-q');
+    git('add', '.');
+    git('commit', '-q', '-m', 'x');
+    const stamp = () => {
+      writeFileSync(manifestFile, manifestText);
+      writeFileSync(changelogFile, changelogText);
+      const run = spawnSync(process.execPath, [join(scripts, 'release.mjs'), 'stamp', '--run-number', '7'], { env, encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      return readFileSync(changelogFile, 'utf8');
+    };
+    const first = stamp();
+    assert.equal(first, '# Changelog\n\n## [0.1.7] - 2026-03-04\n\n- x\n');
+    assert.equal(stamp(), first);
+    // An explicit date still wins.
+    writeFileSync(changelogFile, changelogText);
+    const run = spawnSync(process.execPath, [join(scripts, 'release.mjs'), 'stamp', '--run-number', '7', '--date', '2030-01-02'], { env, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(readFileSync(changelogFile, 'utf8'), /## \[0\.1\.7\] - 2030-01-02/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test('R-R9 exact next pins, agreeing everywhere, pass', () => {
@@ -146,7 +198,10 @@ test('the pins committed in this repository pass the pre-release checks', () => 
   const real = JSON.parse(readFileSync(join(root, 'packages/extension/package.json'), 'utf8'));
   const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
   assert.deepEqual(pinProblems(real, { lock }), []);
-  assert.deepEqual(channelProblems(real.version, 'pre-release'), []);
+  // The channel is the one the version selects, so this holds for a pre-release and for a stable version alike; the
+  // parity rule itself is tested above.
+  const channel = Number(real.version.split('.')[1]) % 2 === 1 ? 'pre-release' : 'stable';
+  assert.deepEqual(channelProblems(real.version, channel), []);
 });
 
 // The pin-raising script, with npm replaced by what a test chooses.

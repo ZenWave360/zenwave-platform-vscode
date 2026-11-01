@@ -1,7 +1,7 @@
 // The release checks and the CI stamp, as commands the workflows call (spec:release#r-r8, r-r9, r-r10, r-r11).
 //
 //   node scripts/release.mjs check --channel pre-release|stable [--tag vX.Y.Z] [--stamped] [--git-tags]
-//   node scripts/release.mjs stamp --run-number N [--date YYYY-MM-DD]
+//   node scripts/release.mjs stamp --run-number N [--date YYYY-MM-DD]   (default: the date of HEAD)
 //   node scripts/release.mjs info <file.vsix>
 //
 // `check` prints every problem and exits 1. `stamp` rewrites the version and the changelog heading in this checkout
@@ -33,6 +33,17 @@ function gitTags() {
   return result.stdout.split(/\r?\n/).filter(Boolean);
 }
 
+/**
+ * The day of the commit being built, in its own time zone, not today: running the same run again later gives the same
+ * changelog bytes (spec:release#r-r1).
+ */
+function commitDate() {
+  const result = spawnSync('git', ['show', '-s', '--format=%cI', 'HEAD'], { cwd: repositoryRoot, encoding: 'utf8' });
+  const date = result.status === 0 ? result.stdout.trim().slice(0, 10) : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`The date of the commit is unknown: ${result.stderr || result.error?.message}`);
+  return date;
+}
+
 function check() {
   const channel = option('--channel');
   if (channel !== 'pre-release' && channel !== 'stable') throw new Error('Use --channel pre-release or --channel stable');
@@ -57,7 +68,7 @@ function check() {
 
 function stamp() {
   const runNumber = Number(option('--run-number'));
-  const date = option('--date') ?? new Date().toISOString().slice(0, 10);
+  const date = option('--date') ?? commitDate();
   const manifest = stampVersion(fs.readFileSync(manifestFile, 'utf8'), runNumber);
   const changelog = stampChangelog(fs.readFileSync(changelogFile, 'utf8'), manifest.version, date);
   fs.writeFileSync(manifestFile, manifest.text);
