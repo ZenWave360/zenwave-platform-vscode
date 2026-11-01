@@ -46,6 +46,8 @@
     "package": "node scripts/package.mjs",
     "generate:sdk-catalogue": "node scripts/generate-sdk-catalogue.mjs",
     "verify:vsix": "node scripts/verify-vsix.mjs",
+    "release:check": "node scripts/release.mjs check",
+    "pins:raise": "node scripts/raise-pins.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p webview/tsconfig.json",
     "test": "tsx --test test/unit/*.test.ts",
     "test:desktop": "npm run build && npm run build:smoke && node scripts/run-desktop-smoke.mjs",
@@ -55,11 +57,11 @@
   },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
-    "version": "0.1.0-next.12.1"
+    "version": "0.1.0-next.13.1"
   },
   "zenwaveEventFlowWebview": {
     "package": "@zenwave360/vistas-eventflow-webview",
-    "version": "0.1.0",
+    "version": "0.0.0-next-20261101112236",
     "protocol": "zenwave.eventflow.webview",
     "protocolVersion": 1
   },
@@ -823,8 +825,8 @@
     ]
   },
   "devDependencies": {
-    "@zenwave360/lsp-js": "0.1.0-next.12.1",
-    "@zenwave360/vistas-eventflow-webview": "0.1.0",
+    "@zenwave360/lsp-js": "0.1.0-next.13.1",
+    "@zenwave360/vistas-eventflow-webview": "0.0.0-next-20261101112236",
     "@types/markdown-it": "14.2.0",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^3.1.0",
