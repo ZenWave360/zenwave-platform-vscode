@@ -40,6 +40,19 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
 
     steps:
+      # The publishing tools come from the commit, never from the artifact: verify ran third-party build code in its tree
+      # before it uploaded, so nothing it produced may choose what runs next to a registry token. Only these two files
+      # are fetched, with no credential left in the checkout, and before any step that holds a secret (spec:release#r-r13).
+      - name: Check out the publishing tools
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: packages/extension/publish-tools
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # The VSIX, release-info.json and the notes are only read as data from here on; nothing in artifacts/ is run or
+      # installed.
       - name: Download the verified VSIX
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -51,9 +64,6 @@ jobs:
           set -euo pipefail
           cd artifacts
           sha256sum --check SHA256SUMS
-          # The lock of the publishing tools is covered by the same sums, so what is installed is what verify saw.
-          grep -q ' publish-tools/package-lock.json$' SHA256SUMS
-          grep -q ' publish-tools/package.json$' SHA256SUMS
           vsix=$(ls zenwave-platform-*.vsix)
           [ "$(printf '%s\n' "$vsix" | wc -l)" -eq 1 ]
           [ "$(unzip -p "$vsix" extension/package.json | jq -r .version)" = "$VERSION" ]
@@ -66,12 +76,12 @@ jobs:
         with:
           node-version: 24
 
-      # The tools come from the lock that verify checked and hashed with the VSIX, not from a floating npx install, and
-      # install scripts do not run. No repository secret is in this step's environment; the job's OIDC request
-      # variables are, as in every step of a job that may publish, which is why the tree is locked and hashed. The publishing
-      # steps only run what it installed (spec:release#r-r13). vsce 4.1.0 is the first to have --oidc.
+      # The tools come from the lock in the commit, checked out above, not from a floating npx install or from anything
+      # verify produced, and install scripts do not run. No repository secret is in this step's environment; the job's
+      # OIDC request variables are, as in every step of a job that may publish, which is why the tree is locked. The
+      # publishing steps only run what it installed (spec:release#r-r13). vsce 4.1.0 is the first to have --oidc.
       - name: Install the publishing tools from their lock
-        working-directory: artifacts/publish-tools
+        working-directory: packages/extension/publish-tools
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund

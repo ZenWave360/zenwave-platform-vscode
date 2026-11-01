@@ -184,11 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           node "$SCRIPTS/release.mjs" info "$VSIX" > artifacts/release-info.json
-          # The tools that publish these bytes, with their lock: the publish job installs them from this copy, so they
-          # are hashed with the VSIX (spec:release#r-r13).
-          mkdir -p artifacts/publish-tools
-          cp packages/extension/publish-tools/package.json packages/extension/publish-tools/package-lock.json artifacts/publish-tools/
-          (cd artifacts && sha256sum "$(basename "$VSIX")" publish-tools/package.json publish-tools/package-lock.json > SHA256SUMS)
+          (cd artifacts && sha256sum "$(basename "$VSIX")" > SHA256SUMS)
           # The notes of this version: its changelog section, without the heading.
           awk -v heading="## [$VERSION]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' \
             packages/extension/CHANGELOG.md > artifacts/release-notes.md
@@ -213,7 +209,5 @@ jobs:
             artifacts/release-info.json
             artifacts/release-notes.md
             artifacts/SHA256SUMS
-            artifacts/publish-tools/package.json
-            artifacts/publish-tools/package-lock.json
           if-no-files-found: error
           overwrite: true

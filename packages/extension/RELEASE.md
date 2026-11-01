@@ -63,11 +63,14 @@ dependency or an old catalogue. A stable release is a new build from its own tag
 ## Credentials
 
 The `verify` job never sees one. The `publish` job runs in the GitHub environment `vscode-prerelease` (limited to
-`develop`) or `vscode-release` (limited to `v*` tags, with a reviewer), with no checkout and no `npm ci` of the
-repository. It installs `@vscode/vsce` and `ovsx` from `packages/extension/publish-tools`, a small private package with
-its own lockfile, outside the workspaces and outside the VSIX. `verify` copies its two files into the artifact next to
-the VSIX, under the same `SHA256SUMS`; `publish` runs `npm ci --ignore-scripts` from that copy in a step with no secret,
-and the publishing steps run the installed binaries, never `npx`. To change a tool or its version, edit that package and
+`develop`) or `vscode-release` (limited to `v*` tags, with a reviewer). It never installs or runs anything the `verify`
+job produced: it reads the VSIX, `release-info.json` and the notes as data, and checks the VSIX against `SHA256SUMS`. The
+publishing tools are `@vscode/vsce` and `ovsx`, from `packages/extension/publish-tools`, a small private package with its
+own lockfile, outside the workspaces and outside the VSIX. The job takes those two files from the commit
+(`github.sha`) with a sparse `actions/checkout` before any step that holds a secret, because `verify` runs third-party
+build code in its tree and a file it uploaded could choose what runs next to a token. It runs
+`npm ci --ignore-scripts` there in a step with no secret, and the publishing steps run the installed binaries, never
+`npx`. To change a tool or its version, edit that package and
 its lock (`npm install --package-lock-only --ignore-scripts` in that directory); a unit test refuses a range, or a lock
 entry without an integrity hash. `@vscode/vsce-sign`, the one dependency with an install script, is only called when
 signing, which this pipeline does not do.

@@ -28,3 +28,26 @@ test('R-R13 the lock of the publishing tools names the pinned versions and a has
     .map(([path]) => path);
   assert.deepEqual(unlocked, []);
 });
+
+// The publish jobs must take the tools from the commit. verify runs third-party build code before it uploads, so
+// anything it uploads can have been chosen by that code.
+const workflows = join(import.meta.dirname, '../../../../.github/workflows');
+const read = (name: string) => readFileSync(join(workflows, name), 'utf8').replace(/\r\n/g, '\n');
+
+test('R-R13 verify does not upload the publishing tools', () => {
+  assert.ok(!read('verify.yml').includes('publish-tools'));
+});
+
+for (const name of ['pre-release.yml', 'release.yml']) {
+  test(`R-R13 ${name} installs the publishing tools from a sparse checkout of the commit, not from the artifact`, () => {
+    const text = read(name);
+    const publish = text.slice(text.indexOf('\n  publish:'), text.indexOf('\n  trace:') === -1 ? undefined : text.indexOf('\n  trace:'));
+    assert.match(publish, /uses: actions\/checkout@[0-9a-f]{40}/);
+    assert.match(publish, /ref: \$\{\{ github\.sha \}\}/);
+    assert.match(publish, /sparse-checkout: packages\/extension\/publish-tools\n/);
+    assert.match(publish, /persist-credentials: false/);
+    assert.match(publish, /working-directory: packages\/extension\/publish-tools\n\s+run: \|\n\s+set -euo pipefail\n\s+npm ci --ignore-scripts/);
+    assert.ok(!/artifacts\/publish-tools|SHA256SUMS.*publish-tools/.test(publish));
+    assert.ok(publish.indexOf('actions/checkout@') < publish.indexOf('secrets.'), 'the checkout comes before any step that reads a secret');
+  });
+}
