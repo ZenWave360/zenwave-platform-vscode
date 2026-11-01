@@ -251,10 +251,17 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   await vscode.window.showTextDocument(flow);
   const versionBeforeUndo = flow.version;
   await vscode.commands.executeCommand('undo');
-  // `undo` is the workbench's global command: it acts on whatever has focus. A failure says whether the flow's own undo
-  // stack was used (the version moved) or something else was (REL/8).
-  assert(flow.getText() === checkoutText,
-    `One undo did not restore the document exactly (version ${versionBeforeUndo}→${flow.version}, active editor ${vscode.window.activeTextEditor?.document.uri.toString()}):\n${flow.getText()}`);
+  // `undo` is the workbench's global command. It undoes in the focused code editor, else in an editable DOM element,
+  // else in the last active editor, so the window's focus decides where it lands. A failure reports what was read at once
+  // and again after a wait, with the focus: an unmoved version and a lost focus, a stale read and a moved version are
+  // different causes (REL/8). It does not retry: the assertion still fails.
+  if (flow.getText() !== checkoutText) {
+    const atOnce = `version ${versionBeforeUndo}->${flow.version}, window focused ${vscode.window.state.focused}, active editor ${vscode.window.activeTextEditor?.document.uri.toString()}`;
+    const atOnceText = flow.getText();
+    await delay(500);
+    const later = flow.getText() === checkoutText ? 'restored' : 'still not restored';
+    assert(false, `One undo did not restore the document exactly (${atOnce}); after 500 ms: ${later}, version ${flow.version}, window focused ${vscode.window.state.focused}\n${atOnceText}`);
+  }
   console.log('PASS: organize applies the server arrangement as one edit, keeps a later cursor, is idempotent, and one undo restores the text');
 
   const broken = await vscode.workspace.openTextDocument({ language: 'zfl', content: 'flow Broken {\n    when {{ do\n' });
