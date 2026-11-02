@@ -197,7 +197,8 @@ jobs:
       - name: Say that publication is held back
         env:
           VERSION: ${{ needs.verify.outputs.version }}
-        run: echo "Pre-release $VERSION was not published: ZENWAVE_PUBLISH_PRERELEASE is not true." >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Pre-release $VERSION was not published: ZENWAVE_PUBLISH_PRERELEASE is not true." >> "$GITHUB_STEP_SUMMARY"
 
   trace:
     needs:
