@@ -1,0 +1,168 @@
+name: Release
+
+# A tag vMAJOR.MINOR.PATCH publishes a stable release, once a reviewer approves (spec:release#r-r11).
+# Creating a GitHub release that creates such a tag counts as creating the tag.
+#
+#   verify   no credential: the tag is on main and matches the manifest, its release notes exist and are not a draft, no
+#            pre-release tag of that version exists, the stable pins, a current SDK catalogue, then the same build checks
+#            as every other build
+#   publish  waits for the reviewer of the vscode-release environment, then publishes the verified bytes to both registries
+#
+# The tag pattern matches only a stable-shaped tag: v0.1.99-pre starts nothing here, and neither does the tag the
+# pre-release workflow creates. A stable release is a new build from its own tag, never a promoted pre-release.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+    permissions:
+      contents: read
+    with:
+      channel: stable
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: vscode-release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+
+    steps:
+      # The publishing tools come from the commit, never from the artifact: verify ran third-party build code in its tree
+      # before it uploaded, so nothing it produced may choose what runs next to a registry token. Only these two files
+      # are fetched, with no credential left in the checkout, and before any step that holds a secret (spec:release#r-r13).
+      - name: Check out the publishing tools
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: packages/extension/publish-tools
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # The VSIX, release-info.json and the notes are only read as data from here on; nothing in artifacts/ is run or
+      # installed.
+      - name: Download the verified VSIX
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-vsix
+          path: artifacts
+
+      - name: Identify the VSIX
+        run: |
+          set -euo pipefail
+          cd artifacts
+          sha256sum --check SHA256SUMS
+          vsix=$(ls zenwave-platform-*.vsix)
+          [ "$(printf '%s\n' "$vsix" | wc -l)" -eq 1 ]
+          [ "$(unzip -p "$vsix" extension/package.json | jq -r .version)" = "$VERSION" ]
+          [ "$(jq -r .version release-info.json)" = "$VERSION" ]
+          [ "$(jq -r .preRelease release-info.json)" = false ]
+          echo "VSIX=$PWD/$vsix" >> "$GITHUB_ENV"
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # The tools come from the lock in the commit, checked out above, not from a floating npx install or from anything
+      # verify produced, and install scripts do not run. No repository secret is in this step's environment; the job's
+      # OIDC request variables are, as in every step of a job that may publish, which is why the tree is locked. The
+      # publishing steps only run what it installed (spec:release#r-r13). vsce 4.1.0 is the first to have --oidc.
+      - name: Install the publishing tools from their lock
+        working-directory: packages/extension/publish-tools
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          echo "TOOLS=$PWD/node_modules/.bin" >> "$GITHUB_ENV"
+
+      # A token when the environment holds one, trusted publishing when it does not, and no fallback between them:
+      # deleting the secret is how this moves to trusted publishing (spec:release#r-r13). --skip-duplicate counts a
+      # version the registry already has as done, so a re-run only publishes where it is missing (spec:release#r-r12).
+      - name: Publish to the VS Code Marketplace
+        id: marketplace
+        continue-on-error: true
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -uo pipefail
+          credential=(--oidc)
+          if [ -n "${VSCE_PAT:-}" ]; then
+            echo "Publishing with the VSCE_PAT of this environment."
+            credential=()
+          else
+            echo "No VSCE_PAT in this environment: publishing with trusted publishing (--oidc)."
+            unset VSCE_PAT
+          fi
+          status=0
+          "$TOOLS/vsce" publish --packagePath "$VSIX" --skip-duplicate "${credential[@]}" 2>&1 \
+            | tee "$RUNNER_TEMP/marketplace.log" || status=$?
+          grep -qi 'already published' "$RUNNER_TEMP/marketplace.log" && echo 'already=true' >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Publish the same VSIX to Open VSX
+        id: openvsx
+        continue-on-error: true
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          set -uo pipefail
+          credential=(--trusted-publishing)
+          if [ -n "${OVSX_PAT:-}" ]; then
+            echo "Publishing with the OVSX_PAT of this environment."
+            credential=()
+          else
+            echo "No OVSX_PAT in this environment: publishing with trusted publishing."
+            unset OVSX_PAT
+          fi
+          status=0
+          "$TOOLS/ovsx" publish "$VSIX" --skip-duplicate "${credential[@]}" 2>&1 \
+            | tee "$RUNNER_TEMP/openvsx.log" || status=$?
+          grep -qi 'already published' "$RUNNER_TEMP/openvsx.log" && echo 'already=true' >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Report what each registry did
+        if: ${{ !cancelled() }}
+        env:
+          MARKETPLACE: ${{ steps.marketplace.outcome }}
+          MARKETPLACE_HAD_IT: ${{ steps.marketplace.outputs.already }}
+          OPENVSX: ${{ steps.openvsx.outcome }}
+          OPENVSX_HAD_IT: ${{ steps.openvsx.outputs.already }}
+        run: |
+          describe() {
+            case "$1" in
+              success) [ "$2" = true ] && echo "already had $VERSION, nothing published" || echo "published $VERSION" ;;
+              failure) echo "FAILED: $VERSION is not there" ;;
+              *) echo "not attempted: $VERSION is not there" ;;
+            esac
+          }
+          {
+            echo "## Release $VERSION"
+            echo
+            echo "Built from \`$GITHUB_SHA\`."
+            echo
+            echo '| Registry | Outcome |'
+            echo '| --- | --- |'
+            echo "| VS Code Marketplace | $(describe "$MARKETPLACE" "$MARKETPLACE_HAD_IT") |"
+            echo "| Open VSX | $(describe "$OPENVSX" "$OPENVSX_HAD_IT") |"
+            echo
+            echo '| Package in the VSIX | Version |'
+            echo '| --- | --- |'
+            jq -r '.packages | to_entries[] | "| \(.key) | \(.value) |"' artifacts/release-info.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MARKETPLACE" != success ] || [ "$OPENVSX" != success ]; then
+            echo "::error::A version cannot be withdrawn: run this workflow's failed jobs again to finish publishing $VERSION."
+            exit 1
+          fi

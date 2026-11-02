@@ -1,0 +1,69 @@
+name: 🐞 Bug report
+description: Something in the extension does not work as documented.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. A small model that reproduces the problem is the most useful thing you can give us.
+        Not sure it is a bug? Ask in [Q&A](https://github.com/ZenWave360/zenwave-platform-vscode/discussions/categories/q-a) first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Where does it happen?
+      description: The extension behaves differently on desktop and in the browser.
+      multiple: true
+      options:
+        - VS Code Desktop
+        - vscode.dev / github.dev (browser)
+        - Other VS Code based editor (Cursor, VSCodium...)
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Which language?
+      multiple: true
+      options:
+        - ZDL
+        - ZFL
+        - Not language specific
+    validations:
+      required: true
+  - type: textarea
+    id: model
+    attributes:
+      label: Minimal model to reproduce
+      description: The smallest ZDL or ZFL snippet that shows the problem.
+      render: text
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a .zdl file with...
+        2. ...
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+    validations:
+      required: true
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version and OS
+      placeholder: "1.106.0 on macOS 15"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output panel for desktop. Browser developer tools console for the web.
+      render: text

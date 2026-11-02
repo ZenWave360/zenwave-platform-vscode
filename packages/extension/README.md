@@ -81,7 +81,7 @@ ZENWAVE_USE_LOCAL_DEPENDENCIES=false npm ci
 ```
 
 `npm run package` warns when the VSIX carries a sibling build, and refuses when
-`ZENWAVE_RELEASE_TAG` is set. `ZENWAVE_LSP_JS_DIR` and
+`ZENWAVE_RELEASE_TAG` or `ZENWAVE_RELEASE_CHANNEL` is set. `ZENWAVE_LSP_JS_DIR` and
 `ZENWAVE_VISTAS_WEBVIEW_DIR` still point the build at another directory, and
 there the version must match the pin.
 

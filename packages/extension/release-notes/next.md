@@ -1,8 +1,21 @@
-# Changelog
-
-## [Unreleased]
-
 ### Added
+- ZDL and ZFL language support: file associations, TextMate grammars, and editor
+  configuration for comments, brackets, folding and indentation.
+- Dual extension host support — runs in both desktop VS Code and browser-based
+  VS Code (vscode.dev, github.dev).
+- Host capability detection, so features that cannot work in the current host are
+  hidden rather than presented and broken. Detected capabilities are logged to
+  the ZenWave output channel.
+- A ZenWave container in the activity bar with an Architecture tree (the domains and
+  subdomains of the workspace's architecture manifest) and a Model tree (the model
+  in front of you), built from what the language server knows; each says what is
+  missing when it has nothing to show.
+- An EventFlow diagram for ZFL flows, from the ZenWave icon in a flow's editor title
+  bar, beside the text or in its place: it follows edits as you type, switches
+  between the flow and service views and humanized labels (`zenwave.eventflow.defaultView`,
+  `zenwave.eventflow.humanizeLabels`), and says why when it has nothing to draw.
+- `.zw` files are their own language, and the extension uses the ZenWave brand icons.
+- Duplicate plugin declarations of the same type each have their own Run CodeLens and run independently.
 - Run CodeLens actions for enabled ZenWave SDK plugin declarations in trusted
   desktop workspaces, with task-backed execution and configurable environment.
 - Plugin and option completion and hover help from a ZenWave SDK plugin
@@ -24,14 +37,3 @@
   a renderer shipped in the extension, offers a diagram selector and, for ZFL, a
   render mode, follows edits and the colour theme, and explains why it has nothing
   to show. The menu is now also offered for `.zdl` files and is hidden in diff editors.
-
-## [0.1.0] - 2026-09-15
-
-### Added
-- ZDL and ZFL language support: file associations, TextMate grammars, and editor
-  configuration for comments, brackets, folding and indentation.
-- Dual extension host support — runs in both desktop VS Code and browser-based
-  VS Code (vscode.dev, github.dev).
-- Host capability detection, so features that cannot work in the current host are
-  hidden rather than presented and broken. Detected capabilities are logged to
-  the ZenWave output channel.

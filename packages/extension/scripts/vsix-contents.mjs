@@ -11,6 +11,8 @@ const ALWAYS_REQUIRED = ['package.json', 'readme.md', 'changelog.md', 'LICENSE.t
 const FORBIDDEN = [
   /^extension\/(src|test|tests|fixtures|scripts)\//,
   /^extension\/\.vscode/,
+  // The notes are what CHANGELOG.md is made from; only the changelog ships (spec:release#r-r10).
+  /^extension\/release-notes\//,
   /^extension\/.*\.(?:ts|tsx|map|tsbuildinfo)$/,
   /^extension\/(?:esbuild\.mjs|tsconfig\.json|runtime-files\.json)$/,
 ];
@@ -93,4 +95,11 @@ export function checkPackageContents({ listed, manifest, onDisk, packaged }) {
     }
   }
   return problems;
+}
+
+/** spec:release#r-r10. The listing shows the notes of the version: the changelog in the package has its section. */
+export function changelogProblems(packaged, version) {
+  const entry = [...packaged.keys()].find((file) => file.toLowerCase() === 'extension/changelog.md');
+  const text = entry ? packaged.get(entry).toString('utf8') : '';
+  return `\n${text}`.includes(`\n## [${version}]`) ? [] : [`The VSIX's CHANGELOG.md has no "## [${version}]" section`];
 }

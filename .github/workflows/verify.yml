@@ -1,0 +1,212 @@
+name: Verify
+
+# The checks every build goes through, once (spec:release#r-r5, r-r6, r-r13). It holds no registry credential and
+# publishes nothing: it uploads the VSIX it verified, and a separate job of the calling workflow publishes those bytes.
+#
+#   development  a pull request or a push to main: build and check, no version stamp
+#   pre-release  develop, and pull requests into it as a dry run: the version, pin and release-notes checks and the stamp
+#   stable       a version tag: the stable checks, the tag on main, a current SDK catalogue
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: development, pre-release or stable
+        type: string
+        required: true
+      run-number:
+        description: The calling workflow's run number, which becomes the patch of a pre-release
+        type: string
+        default: ''
+    outputs:
+      version:
+        description: The version of the verified VSIX
+        value: ${{ jobs.verify.outputs.version }}
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      ZENWAVE_BUILD_COMMIT: ${{ github.sha }}
+      ZENWAVE_USE_LOCAL_DEPENDENCIES: 'false'
+      CHANNEL: ${{ inputs.channel }}
+      RUN_NUMBER: ${{ inputs.run-number }}
+      REF_NAME: ${{ github.ref_name }}
+      SCRIPTS: packages/extension/scripts
+
+    steps:
+      - name: Check the channel
+        run: |
+          case "$CHANNEL" in
+            development | pre-release | stable) ;;
+            *) echo "::error::Unknown channel $CHANNEL"; exit 1 ;;
+          esac
+
+      - name: Check out the commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          # All branches and tags: a stable tag must be on main, and a pre-release must be above the latest stable tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check the tag is on main
+        if: inputs.channel == 'stable'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
+            { echo "::error::$REF_NAME is not on main, so it publishes nothing"; exit 1; }
+
+      - name: Check the release rules
+        # Before npm ci, so a wrong version, a moving tag or missing release notes fail at once.
+        if: inputs.channel != 'development'
+        run: |
+          if [ "$CHANNEL" = stable ]; then
+            node "$SCRIPTS/release.mjs" check --channel stable --tag "$REF_NAME" --git-tags
+          else
+            node "$SCRIPTS/release.mjs" check --channel pre-release --git-tags --run-number "$RUN_NUMBER"
+          fi
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install JBang for the catalogue check
+        if: inputs.channel != 'development'
+        uses: jbangdev/setup-jbang@2b1b465a7b75f4222b81426f23a01e013aa7b95c # v0.1.1
+
+      - name: Check the SDK catalogue is current
+        # A stable release fails on an old catalogue; a pre-release says so in the summary and goes on (spec:release#r-r11).
+        if: inputs.channel != 'development'
+        env:
+          # Repository variable; the default is the SDK's published snapshot catalogue.
+          ZENWAVE_SDK_CATALOGUE_COMMAND: ${{ vars.ZENWAVE_SDK_CATALOGUE_COMMAND || 'jbang snapshots@zenwave360/zenwave-sdk' }}
+        run: |
+          file=packages/extension/resources/sdk-plugin-catalogue.json
+          problem=''
+          if ! { jbang trust add https://github.com/zenwave360/ && npm run generate:sdk-catalogue --workspace packages/extension; }; then
+            problem='The SDK plugin catalogue could not be generated, so it was not compared with the one in this build.'
+          elif ! git diff --exit-code --quiet -- "$file"; then
+            problem='The SDK plugin catalogue in this build is out of date.'
+          fi
+          # Build what is committed, whatever the generator wrote.
+          git checkout -- "$file"
+          if [ -n "$problem" ]; then
+            if [ "$CHANNEL" = stable ]; then
+              echo "::error::$problem"
+              exit 1
+            fi
+            echo "::warning::$problem"
+            printf '### Warning\n\n%s Run `npm run generate:sdk-catalogue --workspace packages/extension` and commit the result.\n\n' "$problem" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Stamp the pre-release version
+        # In this checkout only, and never committed (spec:release#r-r8). Packaging writes the changelog from the notes.
+        if: inputs.channel == 'pre-release'
+        run: node "$SCRIPTS/release.mjs" stamp --run-number "$RUN_NUMBER"
+
+      - name: Name the VSIX
+        id: version
+        run: |
+          version=$(node -p "require('./packages/extension/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "VSIX=artifacts/zenwave-platform-$version.vsix" >> "$GITHUB_ENV"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build both extension hosts
+        run: |
+          npm run build
+          test -s packages/extension/dist/node/extension.js
+          test -s packages/extension/dist/browser/extension.js
+
+      - name: Build smoke tests
+        run: npm run build:smoke --workspace packages/extension
+
+      - name: Package the extension
+        run: npm run package --workspace packages/extension -- --out "../../$VSIX"
+        env:
+          ZENWAVE_RELEASE_CHANNEL: ${{ inputs.channel == 'pre-release' && 'pre-release' || '' }}
+          ZENWAVE_RELEASE_TAG: ${{ inputs.channel == 'stable' && github.ref_name || '' }}
+
+      - name: Verify package contents and build identity
+        run: |
+          channel=()
+          [ "$CHANNEL" = development ] || channel=(--channel "$CHANNEL")
+          npm run verify:vsix -- "$VSIX" "${channel[@]}"
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+
+      - name: Prepare the packaged browser extension
+        run: |
+          mkdir -p artifacts/smoke-extension
+          unzip -q "$VSIX" -d artifacts/smoke-extension
+
+      - name: Install and exercise the packaged desktop extension
+        run: xvfb-run -a npm run test:desktop --workspace packages/extension
+        env:
+          ZENWAVE_SMOKE_VSIX: ${{ github.workspace }}/${{ env.VSIX }}
+
+      - name: Install Chromium for the browser-host check
+        run: npx playwright install --with-deps chromium
+
+      - name: Exercise the packaged browser extension
+        run: npm run test:browser --workspace packages/extension
+        env:
+          ZENWAVE_SMOKE_EXTENSION_PATH: ${{ github.workspace }}/artifacts/smoke-extension/extension
+
+      - name: Rebuild and compare package contents
+        run: |
+          npm run package --workspace packages/extension -- --out ../../artifacts/rebuilt.vsix
+          npm run verify:vsix -- "$VSIX" --compare artifacts/rebuilt.vsix
+        env:
+          ZENWAVE_RELEASE_CHANNEL: ${{ inputs.channel == 'pre-release' && 'pre-release' || '' }}
+          ZENWAVE_RELEASE_TAG: ${{ inputs.channel == 'stable' && github.ref_name || '' }}
+
+      - name: Describe the verified VSIX
+        run: |
+          set -euo pipefail
+          node "$SCRIPTS/release.mjs" info "$VSIX" > artifacts/release-info.json
+          (cd artifacts && sha256sum "$(basename "$VSIX")" > SHA256SUMS)
+          # The notes of this version, as the file holds them (next.md, or the stable release's notes); empty for development.
+          node "$SCRIPTS/release.mjs" notes --channel "$CHANNEL" > artifacts/release-notes.md
+          {
+            echo "## Verified $CHANNEL build $VERSION"
+            [ "$CHANNEL" != pre-release ] || [ "$GITHUB_EVENT_NAME" != pull_request ] ||
+              echo "This is a dry run on a pull request: nothing is published, and the patch is this workflow's run number, not the pre-release workflow's."
+            echo
+            echo "Commit \`$GITHUB_SHA\`, $(stat --format=%s "$VSIX") bytes."
+            echo
+            echo '| Package | Version in the VSIX |'
+            echo '| --- | --- |'
+            jq -r '.packages | to_entries[] | "| \(.key) | \(.value) |"' artifacts/release-info.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve the verified VSIX
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-vsix
+          path: |
+            artifacts/zenwave-platform-*.vsix
+            artifacts/release-info.json
+            artifacts/release-notes.md
+            artifacts/SHA256SUMS
+          if-no-files-found: error
+          overwrite: true

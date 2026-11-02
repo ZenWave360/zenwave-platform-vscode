@@ -3,12 +3,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { linkedSiblings } from './siblings.mjs';
+import { releaseProblems } from './release-rules.mjs';
+import { generateChangelog, readNotes } from './release-notes.mjs';
+import { linkedSiblings, repositoryRoot } from './siblings.mjs';
 
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
 const manifest = JSON.parse(fs.readFileSync(path.join(projectDir, 'package.json'), 'utf8'));
-const changelog = fs.readFileSync(path.join(projectDir, 'CHANGELOG.md'), 'utf8');
 const tag = process.env.ZENWAVE_RELEASE_TAG?.trim();
 const outFlagIndex = process.argv.indexOf('--out');
 const requestedOutput = outFlagIndex >= 0 ? process.argv[outFlagIndex + 1] : undefined;
@@ -17,37 +18,29 @@ if (outFlagIndex >= 0 && !requestedOutput) {
 }
 const output = requestedOutput || path.join(projectDir, `${manifest.name}-${manifest.version}.vsix`);
 
-let preRelease = false;
-if (tag) {
-  const match = /^v(\d+)\.(\d+)\.(\d+)(-pre)?$/.exec(tag);
-  if (!match) {
-    throw new Error(
-      `Invalid release tag ${tag}; use vMAJOR.EVEN_MINOR.PATCH for stable or vMAJOR.ODD_MINOR.PATCH-pre for pre-release`,
-    );
-  }
-
-  const [, major, minor, patch, suffix] = match;
-  const tagVersion = `${major}.${minor}.${patch}`;
-  preRelease = suffix === '-pre';
-
-  if (tagVersion !== manifest.version) {
-    throw new Error(`Tag ${tag} does not match package version ${manifest.version}`);
-  }
-  if (preRelease === (Number(minor) % 2 === 0)) {
-    throw new Error(
-      `Tag ${tag} uses the wrong minor-number channel: stable minors are even and pre-release minors are odd`,
-    );
-  }
-  if (!changelog.includes(`## [${manifest.version}]`)) {
-    throw new Error(`CHANGELOG.md has no release section for ${manifest.version}`);
-  }
+// ZENWAVE_RELEASE_TAG selects the stable channel, ZENWAVE_RELEASE_CHANNEL=pre-release the pre-release one; with neither
+// this is a development package and nothing below is enforced. The rules are in release-rules.mjs, shared with release.mjs.
+const channel = tag ? 'stable' : process.env.ZENWAVE_RELEASE_CHANNEL?.trim() || undefined;
+if (channel !== undefined && channel !== 'stable' && channel !== 'pre-release') {
+  throw new Error(`Invalid ZENWAVE_RELEASE_CHANNEL ${channel}; use pre-release`);
 }
-
+const preRelease = channel === 'pre-release';
+const notes = readNotes(projectDir);
 const linked = linkedSiblings().map((sibling) => sibling.package);
-if (linked.length > 0) {
-  if (tag) {
-    throw new Error(`A release can't ship sibling builds: ${linked.join(', ')}. Run npm ci with ZENWAVE_USE_LOCAL_DEPENDENCIES=false`);
+
+if (channel) {
+  const problems = releaseProblems({
+    channel,
+    manifest,
+    notes: { next: notes.next, release: notes.releases.find(({ version }) => version === manifest.version)?.text },
+    lock: JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package-lock.json'), 'utf8')),
+    tag,
+    linked,
+  });
+  if (problems.length > 0) {
+    throw new Error(`Not releasable as ${channel}:\n  ${problems.join('\n  ')}`);
   }
+} else if (linked.length > 0) {
   console.warn(`warning: this VSIX ships sibling builds: ${linked.join(', ')}`);
 }
 
@@ -67,6 +60,10 @@ function run(command, args, extraEnvironment = {}) {
     );
   }
 }
+
+// CHANGELOG.md is not committed: it is made from release-notes/ on every package, on every channel, so vsce finds it and
+// the listing cannot disagree with the notes (spec:release#r-r10). Building does not need it.
+generateChangelog({ projectDir, repositoryRoot, channel, version: manifest.version });
 
 run('node', ['esbuild.mjs', '--production']);
 

@@ -1,0 +1,38 @@
+name: ✨ Feature
+description: An accepted idea, ready to be specified and built.
+labels: ["enhancement", "needs-spec"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New ideas start in [Ideas](https://github.com/ZenWave360/zenwave-platform-vscode/discussions/categories/ideas). Use this form when the idea was already discussed.
+  - type: input
+    id: discussion
+    attributes:
+      label: Link to the discussion
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Expected behaviour
+      description: Describe what the user sees and does. Not how to implement it.
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Hosts
+      multiple: true
+      options:
+        - VS Code Desktop
+        - vscode.dev / github.dev (browser)
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
