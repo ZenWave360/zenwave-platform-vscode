@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+// @ts-expect-error The installed YAML parser has no type declarations.
+import { load } from 'js-yaml';
 
 // The tools that publish a verified VSIX are installed from this lock in the publish job, where a registry token is in
 // the next steps' environment (spec:release#r-r13). A range or an unhashed entry would make that install float.
@@ -50,4 +52,63 @@ for (const name of ['pre-release.yml', 'release.yml']) {
     assert.ok(!/artifacts\/publish-tools|SHA256SUMS.*publish-tools/.test(publish));
     assert.ok(publish.indexOf('actions/checkout@') < publish.indexOf('secrets.'), 'the checkout comes before any step that reads a secret');
   });
+
+  test(`R-R13 ${name} installs publishing tools once, only in packages/extension/publish-tools`, () => {
+    const document = load(read(name)) as { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+    const steps = document.jobs?.publish?.steps ?? [];
+    assert.ok(steps.length > 0, `${name} has a publish job`);
+    assert.deepEqual(npmInstallDirectories(steps), ['packages/extension/publish-tools']);
+  });
+}
+
+type WorkflowStep = { 'working-directory'?: string; run?: string };
+
+function shellCommands(script: string): string[] {
+  return script.split('\n').flatMap((line) => {
+    const code = line.replace(/#.*/, '').trim();
+    if (!code) return [];
+    return code.split(/\s*(?:&&|\|\||;)\s*/).filter(Boolean);
+  });
+}
+
+/** Directory of each `npm ci` or `npm install`, after `cd` and `--prefix`. */
+function npmInstallDirectories(steps: WorkflowStep[]): string[] {
+  const found: string[] = [];
+  for (const step of steps) {
+    if (typeof step.run !== 'string') continue;
+    let directory = step['working-directory'] ?? '.';
+    for (const command of shellCommands(step.run)) {
+      const cd = /^(?:cd|pushd)\s+(\S+)/.exec(command);
+      if (cd) {
+        directory = cd[1];
+        continue;
+      }
+      const install = npmInstallDirectory(command, directory);
+      if (install !== undefined) found.push(install);
+    }
+  }
+  return found;
+}
+
+function npmInstallDirectory(command: string, current: string): string | undefined {
+  const tokens = command.split(/\s+/);
+  if (tokens[0] !== 'npm') return undefined;
+  let prefix: string | undefined;
+  let subcommand: string | undefined;
+  for (let index = 1; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token === '--prefix') {
+      prefix = tokens[index + 1];
+      index++;
+      continue;
+    }
+    if (token.startsWith('--prefix=')) {
+      prefix = token.slice('--prefix='.length);
+      continue;
+    }
+    if (token.startsWith('-')) continue;
+    if (!subcommand) subcommand = token;
+  }
+  if (subcommand !== 'ci' && subcommand !== 'install') return undefined;
+  return prefix ?? current;
 }
