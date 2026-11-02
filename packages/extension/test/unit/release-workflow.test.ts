@@ -37,6 +37,21 @@ test('R-R10 verify.yml takes the GitHub release notes from the notes file, not f
   assert.ok(!/CHANGELOG/i.test(describe.replace(/#[^\n]*/g, '')), 'the notes are not cut from CHANGELOG.md');
 });
 
+test('pre-release.yml publishes only when ZENWAVE_PUBLISH_PRERELEASE is true, and the job that says it was held back has no secret and no environment', () => {
+  const text = read('../../../../.github/workflows/pre-release.yml');
+  const publish = text.slice(text.indexOf('\n  publish:'), text.indexOf('\n  withheld:'));
+  const withheld = text.slice(text.indexOf('\n  withheld:'), text.indexOf('\n  trace:'));
+  const trace = text.slice(text.indexOf('\n  trace:'));
+  assert.match(/^ {4}if: (.*)$/m.exec(publish)?.[1] ?? '', /vars\.ZENWAVE_PUBLISH_PRERELEASE == 'true'/);
+  assert.match(/^ {4}if: (.*)$/m.exec(withheld)?.[1] ?? '', /success\(\) && vars\.ZENWAVE_PUBLISH_PRERELEASE != 'true'/);
+  assert.match(withheld, /needs\.verify\.outputs\.version/);
+  assert.match(withheld, /ZENWAVE_PUBLISH_PRERELEASE/);
+  assert.equal(withheld.includes('secrets.'), false);
+  assert.equal(/^ {4}environment:/m.test(withheld), false);
+  // A skipped publish sets no registry output. trace already requires one, so it skips and does not fail the run.
+  assert.match(/^ {4}if: (.*)$/m.exec(trace)?.[1] ?? '', /needs\.publish\.outputs\.marketplace != ''/);
+});
+
 test('R-R10 verify:vsix checks the changelog of a channel build for the version section', () => {
   const script = read('../../scripts/verify-vsix.mjs');
   const channelBlock = script.slice(script.indexOf('if (channel) {'), script.indexOf('if (problems.length'));

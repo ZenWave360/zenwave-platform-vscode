@@ -7,7 +7,7 @@ This file is how to work with the pipelines in `.github/workflows/`.
 | --- | --- | --- |
 | `ci.yml` | a pull request, a push to `main` | `verify.yml` and nothing else. A pull request into `develop` is the dry run of the pre-release. |
 | `verify.yml` | called by the others | The checks, the package, both smoke tests, and the verified VSIX as an artifact. No registry credential. |
-| `pre-release.yml` | a push to `develop` that changes the extension | Verifies, publishes a pre-release to both registries, tags `vX.Y.Z-pre` and creates the GitHub pre-release. |
+| `pre-release.yml` | a push to `develop` that changes the extension | Verifies, and when `ZENWAVE_PUBLISH_PRERELEASE` is `true`, publishes a pre-release to both registries, tags `vX.Y.Z-pre` and creates the GitHub pre-release. |
 | `release.yml` | a tag `vX.Y.Z` | Verifies, waits for the reviewer of `vscode-release`, publishes a stable release. |
 
 ## Versions and release notes
@@ -34,7 +34,18 @@ history for that reason.
 ## A pre-release
 
 Merge to `develop`. Nothing else: the version is `MAJOR.MINOR.<run number>`, stamped by the workflow in its own checkout
-and never committed.
+and never committed. The push publishes only when the repository variable `ZENWAVE_PUBLISH_PRERELEASE` is `true`.
+When it is not, the run still verifies and ends green, and nothing is published: no registry, no tag and no GitHub
+pre-release. The summary names the variable and the version that would have been published.
+
+To turn publication on, set `ZENWAVE_PUBLISH_PRERELEASE` to `true` under Settings, Secrets and variables, Actions,
+Variables, or:
+
+```console
+gh variable set ZENWAVE_PUBLISH_PRERELEASE --body true --repo ZenWave360/zenwave-platform-vscode
+```
+
+The next push to `develop` then publishes.
 
 - Write what changed in `release-notes/next.md`. The file must exist; it may be empty, as it is right after a release.
 - The manifest on `develop` holds the `major.minor` of the last stable tag (`0.0.0` before the first). After a stable
@@ -60,7 +71,8 @@ npm run pins:raise              # --dry-run to look first; --include @zenwave360
 ```
 
 It commits nothing. Review the diff, then `ZENWAVE_USE_LOCAL_DEPENDENCIES=false npm ci`, the tests, and commit: that
-commit is what publishes the pre-release. The pipeline refuses a tag, a range, `latest`, blocks that disagree with
+commit is what the pre-release workflow builds, and publishes when `ZENWAVE_PUBLISH_PRERELEASE` is `true`. The pipeline
+refuses a tag, a range, `latest`, blocks that disagree with
 `package.json`, a lockfile that disagrees, and linked sibling builds. A pin to a version npm does not have fails `npm ci`.
 
 ### When a registry refuses

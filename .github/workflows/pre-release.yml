@@ -1,11 +1,14 @@
 name: Pre-release
 
-# A push to develop that changes the extension publishes a pre-release (spec:release#r-r7). Do not rename this file:
-# the run number is the patch of the version, and it restarts for a new file name (spec:release#r-r8).
+# A push to develop that changes the extension publishes a pre-release (spec:release#r-r7) when the repository
+# variable ZENWAVE_PUBLISH_PRERELEASE is true. When it is not, verify still runs and nothing is published: no tag,
+# no GitHub pre-release, and the run ends green. Do not rename this file: the run number is the patch of the
+# version, and it restarts for a new file name (spec:release#r-r8).
 #
-#   verify   no credential: the checks, the stamp, the package, the smoke tests; uploads the VSIX
-#   publish  the only job with registry access: publishes those bytes to both registries, whichever way each goes
-#   trace    after the registries were tried: the tag and the GitHub pre-release, with the VSIX attached
+#   verify    no credential: the checks, the stamp, the package, the smoke tests; uploads the VSIX
+#   publish   only when ZENWAVE_PUBLISH_PRERELEASE is true: the only job with registry access
+#   withheld  when it is not, and verify passed: one sentence in the summary; no secret, no environment
+#   trace     after the registries were tried: the tag and the GitHub pre-release, with the VSIX attached
 
 on:
   push:
@@ -41,6 +44,9 @@ jobs:
 
   publish:
     needs: verify
+    # Held back unless the variable is exactly true. No status function here, so the default success() still applies
+    # and a failed verify does not publish. A skipped publish leaves no registry output, so trace's if skips too.
+    if: ${{ vars.ZENWAVE_PUBLISH_PRERELEASE == 'true' }}
     runs-on: ubuntu-latest
     environment: vscode-prerelease
     permissions:
@@ -180,6 +186,18 @@ jobs:
             echo "::error::A version cannot be withdrawn: run this workflow's failed jobs again to finish publishing $VERSION."
             exit 1
           fi
+
+  withheld:
+    needs: verify
+    # The switch is off and the build passed. One sentence, and nothing that can publish.
+    if: ${{ success() && vars.ZENWAVE_PUBLISH_PRERELEASE != 'true' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say that publication is held back
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: echo "Pre-release $VERSION was not published: ZENWAVE_PUBLISH_PRERELEASE is not true." >> "$GITHUB_STEP_SUMMARY"
 
   trace:
     needs:
