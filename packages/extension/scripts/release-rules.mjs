@@ -7,11 +7,13 @@
 
 export const ZENWAVE_SCOPE = '@zenwave360/';
 const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies'];
+/** One number of a version: no leading zero, which the Marketplace refuses (decision 0024). */
+const NUMBER = '(0|[1-9]\\d*)';
 /** A pin that names one build: no range, no tag, no `latest`. A suffix makes it a pre-release of the package. */
-const EXACT_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?$/;
+const EXACT_VERSION = new RegExp(`^${NUMBER}\\.${NUMBER}\\.${NUMBER}(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?$`);
 /** The tag of a stable release. A `-pre` tag, or anything else, matches nothing. */
-export const STABLE_TAG = /^v(\d+)\.(\d+)\.(\d+)$/;
-const EXTENSION_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
+export const STABLE_TAG = new RegExp(`^v${NUMBER}\\.${NUMBER}\\.${NUMBER}$`);
+const EXTENSION_VERSION = new RegExp(`^${NUMBER}\\.${NUMBER}\\.${NUMBER}$`);
 
 /** The manifest blocks that repeat a pinned package's version for the build. */
 export const PIN_BLOCKS = ['zenwaveLanguageServer', 'zenwaveEventFlowWebview'];
@@ -78,7 +80,7 @@ export function pinProblems(manifest, { lock, stable = false } = {}) {
 
 /** The files of `release-notes/`: `next.md` for what is on develop, one `release-notes.vX.Y.Z.md` per stable release. */
 export const NEXT_NOTES = 'next.md';
-export const RELEASE_NOTES_FILE = /^release-notes\.v(\d+)\.(\d+)\.(\d+)\.md$/;
+export const RELEASE_NOTES_FILE = new RegExp(`^release-notes\\.v${NUMBER}\\.${NUMBER}\\.${NUMBER}\\.md$`);
 export const releaseNotesFile = (version) => `release-notes.v${version}.md`;
 
 export const formatVersion = ({ major, minor, patch }) => `${major}.${minor}.${patch}`;
@@ -112,11 +114,12 @@ export function preReleaseVersionProblems(version, tags, runNumber) {
         `${expected}${stable ? ` (v${formatVersion(stable)})` : ', as there is none yet'}: merge main back into develop`,
     );
   }
-  if (stable && runNumber !== undefined && compareVersions({ ...current, patch: runNumber }, stable) <= 0) {
+  // Only when the manifest already has the stable release's major.minor; otherwise "merge main back" above is the remedy.
+  if (stable && runNumber !== undefined && `${current.major}.${current.minor}` === `${stable.major}.${stable.minor}` && runNumber <= stable.patch) {
     problems.push(
       `The pre-release ${current.major}.${current.minor}.${runNumber} is not above the stable release ${formatVersion(stable)}, ` +
         `so users on the pre-release channel would be moved back. A hotfix takes a low patch, such as v${current.major}.${current.minor}.1, ` +
-        'never one above the run numbers; until the next minor the pipeline fails',
+        `never one above the run numbers; the pipeline fails until a run number is above ${stable.patch}, or the minor is raised`,
     );
   }
   return problems;
@@ -130,10 +133,27 @@ export function notesProblems({ channel, version, notes = {} }) {
   if (channel !== 'stable') return [];
   const file = `release-notes/${releaseNotesFile(version)}`;
   if (notes.release === undefined) return [`${file} is missing: run "npm run release:prepare -- ${version}" on main`];
-  const first = notes.release.split(/\r?\n/).find((line) => line.trim() !== '');
-  if (first === undefined) return [`${file} is empty`];
-  if (/draft/i.test(first)) return [`${file} is marked as a draft: "${first.trim()}"`];
+  const lines = notes.release.split(/\r?\n/).filter((line) => line.trim() !== '');
+  if (!lines.some((line) => !HEADING.test(line))) return [`${file} is empty: it needs a line that is not a heading`];
+  // Only the first heading and the first line that is not a heading say whether the file is a draft; a later line may use the word.
+  const marked = [lines.find((line) => HEADING.test(line)), lines.find((line) => !HEADING.test(line))].find((line) => line !== undefined && DRAFT.test(line));
+  if (marked !== undefined) return [`${file} is marked as a draft: "${marked.trim()}"`];
   return [];
+}
+
+/** An ATX heading: one to six `#` and a space. */
+const HEADING = /^\s{0,3}#{1,6}(\s|$)/;
+/** The word `draft` in any case; "overdraft" does not count. */
+const DRAFT = /\bdraft\b/i;
+
+/**
+ * spec:release#r-r10. The text of the GitHub release: the channel's notes file as written, not the generated changelog,
+ * so a line that looks like a changelog heading comes through. Empty for a development build or a blank file.
+ */
+export function releaseNotesText({ channel, notes = {} }) {
+  const text = channel === 'pre-release' ? notes.next : channel === 'stable' ? notes.release : undefined;
+  const body = (text ?? '').replace(/\r\n/g, '\n').trim();
+  return body ? `${body}\n` : '';
 }
 
 /** spec:release#r-r11. What stops `prepare` from setting `version` on main. */
@@ -172,6 +192,14 @@ export function releaseProblems({ channel, manifest, lock, tag, linked = [], tag
     } else if (`${match[1]}.${match[2]}.${match[3]}` !== manifest.version) {
       problems.push(`Tag ${tag} does not match package version ${manifest.version}`);
     }
+    const current = parseExtensionVersion(manifest.version);
+    const highest = tags && latestStable(tags.filter((name) => name !== `v${manifest.version}`));
+    if (current && highest && compareVersions(current, highest) <= 0) {
+      problems.push(
+        `The stable release ${manifest.version} is not above the stable release ${formatVersion(highest)} (v${formatVersion(highest)}): ` +
+          'a stable release must be above every other one, so use a higher version',
+      );
+    }
     if (tags?.includes(`v${manifest.version}-pre`)) {
       problems.push(
         `The pre-release tag v${manifest.version}-pre exists: a pre-release never becomes a stable release, so use a new version`,
@@ -209,7 +237,7 @@ export function buildChangelog({ next, releases }) {
 /** spec:release#r-r8. The workflow's run number replaces the patch. Text in, text out, so the file keeps its line ends. */
 export function stampVersion(manifestText, runNumber) {
   if (!Number.isInteger(runNumber) || runNumber < 1) throw new Error(`Run number ${runNumber} is not a positive integer`);
-  const pattern = /^(  "version": ")(\d+)\.(\d+)\.\d+(")/m;
+  const pattern = new RegExp(`^(  "version": ")${NUMBER}\\.${NUMBER}\\.\\d+(")`, 'm');
   const match = pattern.exec(manifestText);
   if (!match) throw new Error('package.json has no top-level "version" of the form major.minor.patch');
   return {
@@ -223,4 +251,11 @@ export function setVersion(manifestText, version) {
   const pattern = /^(  "version": ")\d+\.\d+\.\d+(")/m;
   if (!pattern.test(manifestText)) throw new Error('package.json has no top-level "version" of the form major.minor.patch');
   return manifestText.replace(pattern, `$1${version}$2`);
+}
+
+/** spec:release#r-r11. The same version in the lock's entry for the extension, so the next `npm install` has nothing to rewrite. */
+export function setLockVersion(lockText, version) {
+  const pattern = /("packages\/extension": \{[^{}]*?"version": ")[^"]*(")/;
+  if (!pattern.test(lockText)) throw new Error('package-lock.json has no "packages/extension" entry with a version');
+  return lockText.replace(pattern, `$1${version}$2`);
 }

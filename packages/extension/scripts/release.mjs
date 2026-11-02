@@ -4,18 +4,20 @@
 //   node scripts/release.mjs check --channel pre-release|stable [--tag vX.Y.Z] [--run-number N] [--git-tags]
 //   node scripts/release.mjs stamp --run-number N
 //   node scripts/release.mjs prepare <version>
+//   node scripts/release.mjs notes --channel development|pre-release|stable
 //   node scripts/release.mjs info <file.vsix>
 //
 // `check` prints every problem and exits 1; `--run-number` also checks the version the stamp will give, and
 // `--git-tags` the tags of the repository. `stamp` sets the patch of the version in this checkout and commits
-// nothing. `prepare`, on main, sets the manifest version and turns `release-notes/next.md` into
+// nothing. `notes` prints the text of the GitHub release, from the notes file of the channel. `prepare`, on main, sets the
+// manifest version, and the extension's entry of package-lock.json, and turns `release-notes/next.md` into
 // `release-notes.v<version>.md`, leaving an empty `next.md`; it commits nothing. `info` prints what a VSIX says about
 // itself as JSON.
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareProblems, releaseNotesFile, releaseProblems, setVersion, stampVersion, NEXT_NOTES } from './release-rules.mjs';
+import { prepareProblems, releaseNotesFile, releaseNotesText, releaseProblems, setLockVersion, setVersion, stampVersion, NEXT_NOTES } from './release-rules.mjs';
 import { notesDirectory, readNotes } from './release-notes.mjs';
 import { linkedSiblings } from './siblings.mjs';
 
@@ -61,6 +63,19 @@ function check() {
   console.log(`The ${channel} checks pass for ${manifest.version}.`);
 }
 
+function notes() {
+  const channel = option('--channel');
+  if (!['development', 'pre-release', 'stable'].includes(channel)) throw new Error('Use --channel development, pre-release or stable');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  const files = readNotes(projectDir);
+  process.stdout.write(
+    releaseNotesText({
+      channel,
+      notes: { next: files.next, release: files.releases.find(({ version }) => version === manifest.version)?.text },
+    }),
+  );
+}
+
 function stamp() {
   const manifest = stampVersion(fs.readFileSync(manifestFile, 'utf8'), Number(option('--run-number')));
   fs.writeFileSync(manifestFile, manifest.text);
@@ -78,7 +93,12 @@ function prepare() {
     for (const problem of problems) console.error(`error: ${problem}`);
     process.exit(1);
   }
-  fs.writeFileSync(manifestFile, setVersion(fs.readFileSync(manifestFile, 'utf8'), version));
+  const lockFile = path.join(repositoryRoot, 'package-lock.json');
+  // Both texts first, so a failure leaves nothing half done.
+  const manifestText = setVersion(fs.readFileSync(manifestFile, 'utf8'), version);
+  const lockText = setLockVersion(fs.readFileSync(lockFile, 'utf8'), version);
+  fs.writeFileSync(manifestFile, manifestText);
+  fs.writeFileSync(lockFile, lockText);
   fs.renameSync(next, target);
   fs.writeFileSync(next, '');
   console.log(`Set ${version}, and moved the notes to release-notes/${releaseNotesFile(version)}. Review them, then commit and tag v${version} on main.`);
@@ -94,8 +114,8 @@ async function info() {
 }
 
 try {
-  const commands = { check, stamp, prepare, info };
-  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|prepare|info ...');
+  const commands = { check, stamp, prepare, notes, info };
+  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|prepare|notes|info ...');
   await commands[command]();
 } catch (error) {
   console.error(`error: ${error.message}`);

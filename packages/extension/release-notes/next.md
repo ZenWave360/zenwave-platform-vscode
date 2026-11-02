@@ -1,4 +1,11 @@
 ### Added
+- ZDL and ZFL language support: file associations, TextMate grammars, and editor
+  configuration for comments, brackets, folding and indentation.
+- Dual extension host support — runs in both desktop VS Code and browser-based
+  VS Code (vscode.dev, github.dev).
+- Host capability detection, so features that cannot work in the current host are
+  hidden rather than presented and broken. Detected capabilities are logged to
+  the ZenWave output channel.
 - A ZenWave container in the activity bar with an Architecture tree (the domains and
   subdomains of the workspace's architecture manifest) and a Model tree (the model
   in front of you), built from what the language server knows; each says what is

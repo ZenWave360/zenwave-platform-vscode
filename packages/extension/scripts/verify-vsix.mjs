@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pinProblems } from './release-rules.mjs';
-import { checkPackageContents, RUNTIME_DIRECTORIES } from './vsix-contents.mjs';
+import { changelogProblems, checkPackageContents, RUNTIME_DIRECTORIES } from './vsix-contents.mjs';
 import { readArchive, vsixInfo } from './vsix-info.mjs';
 
 const args = process.argv.slice(2);
@@ -59,11 +59,7 @@ if (channel) {
   }
   problems.push(...pinProblems(info.manifest, { stable: channel === 'stable' }));
   // The listing shows the notes of this version (spec:release#r-r10).
-  const changelogEntry = [...archive.keys()].find((file) => file.toLowerCase() === 'extension/changelog.md');
-  const changelogText = changelogEntry ? archive.get(changelogEntry).toString('utf8') : '';
-  if (!`\n${changelogText}`.includes(`\n## [${info.version}]`)) {
-    problems.push(`The VSIX's CHANGELOG.md has no "## [${info.version}]" section`);
-  }
+  problems.push(...changelogProblems(archive, info.version));
 }
 if (problems.length > 0) {
   throw new Error(`Package verification failed:\n  ${problems.join('\n  ')}`);

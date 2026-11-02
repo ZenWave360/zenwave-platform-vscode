@@ -185,9 +185,8 @@ jobs:
           set -euo pipefail
           node "$SCRIPTS/release.mjs" info "$VSIX" > artifacts/release-info.json
           (cd artifacts && sha256sum "$(basename "$VSIX")" > SHA256SUMS)
-          # The notes of this version: its section of the generated changelog, without the heading; empty when there are none.
-          awk -v heading="## [$VERSION]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' \
-            packages/extension/CHANGELOG.md > artifacts/release-notes.md
+          # The notes of this version, as the file holds them (next.md, or the stable release's notes); empty for development.
+          node "$SCRIPTS/release.mjs" notes --channel "$CHANNEL" > artifacts/release-notes.md
           {
             echo "## Verified $CHANNEL build $VERSION"
             [ "$CHANNEL" != pre-release ] || [ "$GITHUB_EVENT_NAME" != pull_request ] ||

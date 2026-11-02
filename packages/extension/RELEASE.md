@@ -21,9 +21,15 @@ Release notes are files in `packages/extension/release-notes/`: `next.md` is wha
 `release-notes.vX.Y.Z.md` is the notes of each stable release. `CHANGELOG.md` is generated from them every time the
 extension is packaged, in every channel, with their full text, highest version first, and is not committed. In a
 pre-release `next.md` is the section of the stamped version and the date of the commit, and the GitHub pre-release has
-the same text. In a development package it is under `## [Unreleased]`. A stable release's section is dated by its tag,
-or by the commit being built when the tag does not exist yet. `npm run package` writes the file, so a clean checkout
-needs no step before it; building and the unit tests do not read it. The `release-notes/` folder is not in the VSIX.
+the text of the file itself (`node scripts/release.mjs notes`), not a cut of the changelog. In a development package the
+changelog puts it under a `## [Unreleased]` heading that the generator adds; do not write that heading in `next.md`. A
+stable release's section is dated by its tag, or by the commit being built when the tag does not exist yet. `npm run
+package` writes the file, so a clean checkout needs no step before it; building and the unit tests do not read it. The
+`release-notes/` folder is not in the VSIX.
+
+Packaging needs a git checkout with its tags: the dates of the changelog come from commits and tags, so a source archive
+fails, and a clone made with `--depth 1 --no-tags` dates a stable release by the wrong commit. CI checks out the whole
+history for that reason.
 
 ## A pre-release
 
@@ -76,14 +82,21 @@ it, and the tag and GitHub pre-release are updated, never duplicated.
 
    It sets the version in `package.json`, renames `next.md` to `release-notes.v0.2.0.md` and leaves an empty `next.md`.
    It refuses a version that is not above the highest stable tag, and a notes file that already exists. It commits
-   nothing: read the notes, make sure the first line does not say "draft", and commit the three files.
+   nothing: read the notes, make sure neither the first heading nor the first line says "draft" and that there is at least
+   one line that is not a heading, and commit the four files: `package.json`, `package-lock.json` (its entry for the
+   extension), the new notes and the empty `next.md`.
 3. Tag that commit `v0.2.0`, or create a GitHub release that creates the tag. A tag with a suffix such as `-pre` publishes
    nothing.
 4. Approve the `publish` job when `vscode-release` asks. Nothing publishes before.
-5. Merge `main` back into `develop`, so its manifest holds `0.2` and its pre-releases are above the release.
+5. Merge `main` back into `develop`, so its manifest holds `0.2` and its pre-releases are above the release. If
+   `develop` wrote to `next.md` after the merge to `main`, the merge conflicts there: `main` emptied the file, and
+   `develop` still has the lines that are now in the release's notes. Keep only the lines `develop` added after that
+   merge, and none of what is in `release-notes.v0.2.0.md`; keeping `develop`'s side whole would put the released notes
+   into the next pre-release and the next stable release again.
 
 The workflow refuses a tag that is not on `main`, differs from the manifest, has no release notes, empty notes or notes
-whose first line says draft, a version that already has a `vX.Y.Z-pre` tag, a `next` dependency or an old catalogue. A
+whose first heading or first line says draft, a version not above every other stable tag, a version that already has a
+`vX.Y.Z-pre` tag, a `next` dependency or an old catalogue. A
 stable release is a new build from its own tag, never a promoted pre-release.
 
 ### A hotfix

@@ -96,3 +96,10 @@ export function checkPackageContents({ listed, manifest, onDisk, packaged }) {
   }
   return problems;
 }
+
+/** spec:release#r-r10. The listing shows the notes of the version: the changelog in the package has its section. */
+export function changelogProblems(packaged, version) {
+  const entry = [...packaged.keys()].find((file) => file.toLowerCase() === 'extension/changelog.md');
+  const text = entry ? packaged.get(entry).toString('utf8') : '';
+  return `\n${text}`.includes(`\n## [${version}]`) ? [] : [`The VSIX's CHANGELOG.md has no "## [${version}]" section`];
+}

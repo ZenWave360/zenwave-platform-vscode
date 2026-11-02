@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 // @ts-expect-error: a plain ES module script without type declarations.
-import { checkPackageContents, manifestReferences } from '../../scripts/vsix-contents.mjs';
+import { changelogProblems, checkPackageContents, manifestReferences } from '../../scripts/vsix-contents.mjs';
 
 const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 const listed: string[] = JSON.parse(
@@ -90,4 +90,14 @@ test('R-R10 the release notes do not ship, only the changelog made from them', (
     packaged: [...packaged, 'extension/release-notes/next.md'],
   });
   assert.deepEqual(problems, ['VSIX contains development-only file: extension/release-notes/next.md']);
+});
+
+test('R-R10 the changelog in the package must have the section of its version', () => {
+  const archive = (text: string, name = 'extension/changelog.md') => new Map([[name, Buffer.from(text)]]);
+  assert.deepEqual(changelogProblems(archive('# Changelog\n\n\n## [0.1.71] - 2026-11-01\n\n- x\n'), '0.1.71'), []);
+  assert.deepEqual(changelogProblems(archive('# Changelog\n\n\n## [0.1.71] - 2026-11-01\n', 'extension/CHANGELOG.md'), '0.1.71'), []);
+  const missing = `The VSIX's CHANGELOG.md has no "## [0.1.71]" section`;
+  assert.deepEqual(changelogProblems(archive('# Changelog\n\n\n## [Unreleased]\n'), '0.1.71'), [missing]);
+  assert.deepEqual(changelogProblems(archive('# Changelog\n\n\n## [0.1.7] - 2026-11-01\n'), '0.1.71'), [missing]);
+  assert.deepEqual(changelogProblems(new Map(), '0.1.71'), [missing]);
 });
