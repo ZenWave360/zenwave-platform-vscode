@@ -59,6 +59,18 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
 
     steps:
+      # The version is an output of verify, which ran third-party build code, so it is not trusted. It has to be
+      # major.minor.patch with no leading zero, the same rule as release-rules.mjs, before any step uses it. A shell
+      # test, not that script: this job must not run anything from the artifact, and it checks out only the tools.
+      - name: Check the version is major.minor.patch
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::The version from verify is not major.minor.patch with no leading zeros, so this job stops."
+            exit 1
+          fi
+
       # The publishing tools come from the commit, never from the artifact: verify ran third-party build code in its tree
       # before it uploaded, so nothing it produced may choose what runs next to a registry token. Only these two files
       # are fetched, with no credential left in the checkout, and before any step that holds a secret (spec:release#r-r13).
@@ -218,6 +230,18 @@ jobs:
       OPENVSX: ${{ needs.publish.outputs.openvsx }}
 
     steps:
+      # The version is an output of verify, which ran third-party build code, so it is not trusted. It has to be
+      # major.minor.patch with no leading zero, the same rule as release-rules.mjs, before any step uses it. A shell
+      # test, not that script: this job has no checkout.
+      - name: Check the version is major.minor.patch
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::The version from verify is not major.minor.patch with no leading zeros, so this job stops."
+            exit 1
+          fi
+
       - name: Download the verified VSIX
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -231,8 +255,10 @@ jobs:
           vsix=$(ls artifacts/zenwave-platform-*.vsix)
           # matching-refs answers 200 with a list, empty when the tag is absent, so only a tag that exists gives a value
           # and any failure (a 5xx, a bad token) stops the job. git/ref answers 404 for an absent tag, and gh then prints
-          # the error body on stdout and skips --jq.
-          existing=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .object.sha")
+          # the error body on stdout and skips --jq. The tag is data in the environment: the jq program is fixed, and it
+          # can read $ENV, which includes GH_TOKEN, so the version must not be interpolated into that program.
+          export TAG_REF="refs/tags/$tag"
+          existing=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[] | select(.ref == $ENV.TAG_REF) | .object.sha')
           if [ -n "$existing" ] && [ "$existing" != "$GITHUB_SHA" ]; then
             echo "::error::$tag already points at $existing, not at $GITHUB_SHA"
             exit 1

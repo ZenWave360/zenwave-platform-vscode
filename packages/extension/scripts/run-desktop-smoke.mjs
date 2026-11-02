@@ -2,7 +2,10 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { downloadAndUnzipVSCode, runTests, runVSCodeCommand } from '@vscode/test-electron';
+import { SmokeTimeoutError, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
 
+const timeoutMs = smokeTimeoutMs();
+const timeoutMessage = `Desktop extension-host smoke test timed out after ${timeoutMs}ms. The editor did not finish, so this process is stopping.`;
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const packagedVsix = process.env.ZENWAVE_SMOKE_VSIX;
 // Codex may itself be hosted by Electron. Its Node-mode switch must not turn
@@ -41,29 +44,33 @@ function logContents(directory) {
   }).join('\n');
 }
 
+let timedOut = false;
 try {
-  const vscodeExecutablePath = packagedVsix
-    ? await downloadAndUnzipVSCode('stable')
-    : undefined;
-  if (packagedVsix) {
-    await runVSCodeCommand(['--install-extension', path.resolve(packagedVsix), '--force',
-      '--user-data-dir', userData, '--extensions-dir', extensions], {
-      version: 'stable',
+  // The download, the install and runTests all wait with no deadline of their own. A hung editor never settles.
+  await withDeadline((async () => {
+    const vscodeExecutablePath = packagedVsix
+      ? await downloadAndUnzipVSCode('stable')
+      : undefined;
+    if (packagedVsix) {
+      await runVSCodeCommand(['--install-extension', path.resolve(packagedVsix), '--force',
+        '--user-data-dir', userData, '--extensions-dir', extensions], {
+        version: 'stable',
+      });
+    }
+    await runTests({
+      ...(vscodeExecutablePath ? { vscodeExecutablePath } : {}),
+      extensionDevelopmentPath: packagedVsix
+        ? path.join(projectDir, 'test/smoke-harness')
+        : projectDir,
+      extensionTestsPath: path.join(projectDir, '.test-dist/node/index.js'),
+      launchArgs: [
+        workspace,
+        '--user-data-dir', userData,
+        '--extensions-dir', extensions,
+        ...(packagedVsix ? [] : ['--disable-extensions']),
+      ],
     });
-  }
-  await runTests({
-    ...(vscodeExecutablePath ? { vscodeExecutablePath } : {}),
-    extensionDevelopmentPath: packagedVsix
-      ? path.join(projectDir, 'test/smoke-harness')
-      : projectDir,
-    extensionTestsPath: path.join(projectDir, '.test-dist/node/index.js'),
-    launchArgs: [
-      workspace,
-      '--user-data-dir', userData,
-      '--extensions-dir', extensions,
-      ...(packagedVsix ? [] : ['--disable-extensions']),
-    ],
-  });
+  })(), timeoutMs, timeoutMessage);
   const logs = logContents(path.join(userData, 'logs'));
   if (!logs.includes('ZenWave SDK runs only through a POSIX shell') ||
       !logs.includes('Could not find "definitely-not-a-zenwave-smoke-executable"') ||
@@ -102,4 +109,7 @@ try {
 } catch (error) {
   console.error(`Desktop extension-host smoke test failed; retained evidence in ${isolated}`, error);
   process.exitCode = 1;
+  timedOut = error instanceof SmokeTimeoutError;
 }
+// A rejected deadline does not stop the editor process that is keeping Node alive.
+if (timedOut) process.exit(process.exitCode || 1);
