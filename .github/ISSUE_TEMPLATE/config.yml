@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: ❓ Question or help
+    url: https://github.com/ZenWave360/zenwave-platform-vscode/discussions/categories/q-a
+    about: Not sure if it is a bug? Ask in Q&A first.
+  - name: 💡 Idea or feature proposal
+    url: https://github.com/ZenWave360/zenwave-platform-vscode/discussions/categories/ideas
+    about: Start with the problem you want to solve. Accepted ideas become issues.
+  - name: ⚙️ Code generation problem
+    url: https://github.com/ZenWave360/zenwave-sdk/issues
+    about: Problems with generated code belong to ZenWave SDK.
+  - name: 📐 Design and specs
+    url: https://github.com/ZenWave360/zenwave-specs/tree/main/zenwave-platform-vscode
+    about: How the extension is meant to behave.
