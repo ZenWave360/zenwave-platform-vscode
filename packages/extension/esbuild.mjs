@@ -4,7 +4,7 @@ import { builtinModules, createRequire } from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chooseEventFlowPage } from './scripts/eventflow-page.mjs';
-import { linkedSiblings } from './scripts/siblings.mjs';
+import { linkedSiblings, SIBLINGS } from './scripts/siblings.mjs';
 
 const watch = process.argv.includes('--watch');
 const production = process.argv.includes('--production');
@@ -17,6 +17,14 @@ const packageManifest = JSON.parse(
 
 /** A sibling linked by scripts/siblings.mjs is whatever that checkout last built, so its version can't match the pin. */
 const isLinkedSibling = (packageName) => linkedSiblings().some((sibling) => sibling.package === packageName);
+
+/** The copy log: the version found, and for a linked sibling the directory it came from. */
+function copiedFrom(pinned, found, linked) {
+  const at = `${found.name}@${found.version}`;
+  if (!linked) return at;
+  const directory = SIBLINGS.find((entry) => entry.package === pinned.package).directory;
+  return `${at} from ../${directory} (linked sibling; pinned ${pinned.version})`;
+}
 
 /**
  * The language server is `@zenwave360/lsp-js`, shipped inside the VSIX: its two
@@ -57,7 +65,7 @@ function languageServerPackage() {
   if (found.name !== pinned.package || (versionMustMatch && found.version !== pinned.version)) {
     throw new Error(`Found ${found.name}@${found.version} in ${directory}, expected ${pinned.package}@${pinned.version}.${NEWLINE_INDENT}${help}`);
   }
-  return SERVER_BUNDLES.map(({ exportName, target }) => {
+  const bundles = SERVER_BUNDLES.map(({ exportName, target }) => {
     const entry = found.exports?.[exportName];
     const source = typeof entry === 'string' ? path.join(directory, entry) : undefined;
     if (!source || !fs.existsSync(source)) {
@@ -65,6 +73,7 @@ function languageServerPackage() {
     }
     return { source, target: path.join(projectDir, target) };
   });
+  return { bundles, copied: copiedFrom(pinned, found, !versionMustMatch) };
 }
 
 /**
@@ -119,10 +128,10 @@ function eventFlowWebviewPackage() {
     throw new Error(`${pinned.package}@${pinned.version} speaks ${protocol.protocol} version ${protocol.protocolVersion}; ` +
       `this extension is pinned to ${pinned.protocol} version ${pinned.protocolVersion}.`);
   }
-  return { page, name };
+  return { page, name, copied: copiedFrom(pinned, found, !versionMustMatch) };
 }
 
-function copyEventFlowWebview({ page, name }) {
+function copyEventFlowWebview({ page, name, copied }) {
   const target = path.join(projectDir, 'dist/eventflow-webview');
   // Asset names carry content hashes: stale ones from an earlier build must not linger.
   fs.rmSync(target, { recursive: true, force: true });
@@ -132,7 +141,7 @@ function copyEventFlowWebview({ page, name }) {
     if (/\.(js|css)$/.test(entry)) fs.copyFileSync(path.join(page, 'assets', entry), path.join(target, 'assets', entry));
   }
   const pinned = packageManifest.zenwaveEventFlowWebview;
-  console.log(`[eventflow] copied ${pinned.package}@${pinned.version} (protocol version ${pinned.protocolVersion}, page ${name}/)`);
+  console.log(`[eventflow] copied ${copied} (protocol version ${pinned.protocolVersion}, page ${name}/)`);
 }
 
 /**
@@ -167,12 +176,12 @@ function copyPreviewAssets(mermaid) {
   console.log(`[preview] copied mermaid@${packageManifest.dependencies.mermaid}`);
 }
 
-function copyLanguageServer(bundles) {
+function copyLanguageServer({ bundles, copied }) {
   for (const { source, target } of bundles) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
   }
-  console.log(`[server] copied ${packageManifest.zenwaveLanguageServer.package}@${packageManifest.zenwaveLanguageServer.version}`);
+  console.log(`[server] copied ${copied}`);
 }
 
 let serverBundles = [];

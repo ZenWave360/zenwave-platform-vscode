@@ -85,6 +85,9 @@ ZENWAVE_USE_LOCAL_DEPENDENCIES=false npm ci
 `ZENWAVE_VISTAS_WEBVIEW_DIR` still point the build at another directory, and
 there the version must match the pin.
 
+Building a VSIX from these checkouts and installing it is described in
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
+
 ## Replaces
 
 This extension supersedes **ZDL VSCode** (`ZenWave360.zdl-vscode`). Uninstall the
