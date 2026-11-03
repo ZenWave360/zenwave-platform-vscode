@@ -1479,9 +1479,10 @@ async function rendersWhateverItIsGiven(flow: PreviewEditorApi): Promise<void> {
   assert(markdown.text.includes('This diagram could not be drawn') && markdown.text.includes('this is not a diagram') && markdown.text.includes('The end.') && markdown.content.tables === 1,
     `A malformed block did not report itself in place, or the rest is unreadable: ${markdown.text.slice(0, 300)}`);
   assert(markdown.notice === undefined && markdown.strayElements === 0, `Markdown: ${markdown.notice} strays=${markdown.strayElements}`);
-  assert(markdown.content.hostile === 0 && markdown.content.remoteImages === 0 && markdown.text.includes('<script>window.__pwned = 1</script>'), `Markdown content is not safe: ${JSON.stringify(markdown.content)}`);
+  assert(markdown.content.hostile === 0 && markdown.content.images === 0 && markdown.content.remoteImages === 0 && markdown.text.includes('<script>window.__pwned = 1</script>'), `Markdown content is not safe: ${JSON.stringify(markdown.content)}`);
   assert(!markdown.content.resources.some((url) => url.includes('remote.invalid')) && markdown.cspViolations.length === 0, `A request left the page: ${markdown.content.resources.join()} ${markdown.cspViolations.join()}`);
-  assert(markdown.content.otherLinks === 0 && markdown.content.fragments.join() === '#last-section,#orders-1' && markdown.content.unresolved.length === 0, `Links: ${JSON.stringify(markdown.content)}`);
+  // MP-R20: the one http link stays a link for the host to follow; nothing is fetched (checked just above).
+  assert(markdown.content.otherLinks === 1 && markdown.content.fragments.join() === '#last-section,#orders-1' && markdown.content.unresolved.length === 0, `Links: ${JSON.stringify(markdown.content)}`);
   assert(markdown.diagramSelector.visible, 'The selector is not usable on a Markdown page');
   const followed = await flow.probe('#last-section');
   assert(followed.scrollTop > 0, `An anchor link did not scroll within the page: ${followed.scrollTop}`);
@@ -1494,7 +1495,7 @@ async function rendersWhateverItIsGiven(flow: PreviewEditorApi): Promise<void> {
 
   const html = await show('page');
   assert(html.text.includes('zzmarker') && html.text.includes('cell') && html.content.tables === 1, `HTML: ${html.text}`);
-  assert(html.content.hostile === 0 && html.content.remoteImages === 0 && html.content.otherLinks === 0 && html.content.unresolved.length === 0, `HTML content is not safe: ${JSON.stringify(html.content)}`);
+  assert(html.content.hostile === 0 && html.content.images === 0 && html.content.remoteImages === 0 && html.content.otherLinks <= 1 && html.content.unresolved.length === 0, `HTML content is not safe: ${JSON.stringify(html.content)}`);
   assert(!html.content.resources.some((url) => url.includes('remote.invalid')) && html.cspViolations.length === 0, `A request left the page: ${html.content.resources.join()} ${html.cspViolations.join()}`);
   assert(html.svgCount === 0 && html.notice === undefined, `HTML: ${html.notice}`);
   const other = await show('other');

@@ -242,12 +242,13 @@ export class PreviewSession {
     });
   }
 
+  /**
+   * Runs from the panel's disposal, when the host throws for anything asked of the panel, so nothing is published
+   * here: the host clears the title-bar key when the active preview closes (feature.ts).
+   */
   dispose(): void {
     this.disposed = true;
     this.probes.clear();
-    if (!this.markdownShown) return;
-    this.markdownShown = false;
-    this.ports.setContext(PREVIEW_MARKDOWN_CONTEXT_KEY, false);
   }
 
   private renderIfReady(): void {
