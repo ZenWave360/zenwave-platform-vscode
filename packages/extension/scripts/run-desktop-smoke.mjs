@@ -1,8 +1,13 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { downloadAndUnzipVSCode, runTests, runVSCodeCommand } from '@vscode/test-electron';
-import { SmokeTimeoutError, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
+import { SmokeTimeoutError, captureEditorProcess, editorPid, killProcessTree, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
+
+// test-electron calls require('child_process'). The ESM namespace is read-only, so the capture wraps this object.
+const childProcess = createRequire(import.meta.url)('node:child_process');
+const editorCapture = captureEditorProcess(childProcess);
 
 const timeoutMs = smokeTimeoutMs();
 const timeoutMessage = `Desktop extension-host smoke test timed out after ${timeoutMs}ms. The editor did not finish, so this process is stopping.`;
@@ -110,6 +115,18 @@ try {
   console.error(`Desktop extension-host smoke test failed; retained evidence in ${isolated}`, error);
   process.exitCode = 1;
   timedOut = error instanceof SmokeTimeoutError;
+} finally {
+  editorCapture.restore();
 }
-// A rejected deadline does not stop the editor process that is keeping Node alive.
-if (timedOut) process.exit(process.exitCode || 1);
+// A rejected deadline does not stop the editor. Kill its tree, then exit, or the process keeps Node alive.
+if (timedOut) {
+  const pid = editorPid(editorCapture.editor());
+  if (pid !== undefined) {
+    try {
+      await killProcessTree(pid);
+    } catch (error) {
+      console.error('Could not stop the desktop smoke editor', error);
+    }
+  }
+  process.exit(process.exitCode || 1);
+}
