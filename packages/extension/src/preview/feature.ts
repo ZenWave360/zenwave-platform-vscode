@@ -6,7 +6,8 @@ import { commandDocument, isPreviewableDocument, isZflDocument } from '../model/
 import { fileName, findTab, replaceInPlace } from '../model/editor-tabs.js';
 import { createNonce } from '../eventflow/page.js';
 import { buildFailedHtml, buildPreviewHtml } from './page.js';
-import { PREVIEW_VIEW_TYPE, RENDER_MODES, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
+import { decidePreviewLink } from './links.js';
+import { PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
 import { PreviewSession } from './session.js';
 
 export const PREVIEW_COMMANDS = {
@@ -157,6 +158,8 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
   }
 
   private receive(message: unknown): void {
+    const inbound = inboundMessage(message);
+    if (inbound?.type === 'zenwave.preview.followLink') void this.followLink(inbound.payload.href);
     if (typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'zenwave.preview.copyMermaid') {
       const content = (message as { payload?: { content?: unknown } }).payload?.content;
       if (typeof content === 'string') void Promise.resolve(vscode.env.clipboard.writeText(content)).catch((error: unknown) => {
@@ -170,6 +173,25 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
       this.loadTimer = undefined;
     }
     this.showFailedPage();
+  }
+
+  private async followLink(href: string): Promise<void> {
+    const decision = decidePreviewLink(this.documentUri, href, (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.toString()));
+    try {
+      if (decision.kind === 'external') {
+        await vscode.env.openExternal(vscode.Uri.parse(decision.href, true));
+      } else if (decision.kind === 'workspace') {
+        const target = vscode.Uri.parse(decision.href, true);
+        if (decision.line !== undefined) {
+          const position = new vscode.Position(decision.line - 1, 0);
+          await vscode.window.showTextDocument(target.with({ fragment: '' }), { preview: false, selection: new vscode.Range(position, position) });
+        } else {
+          await vscode.commands.executeCommand('vscode.open', target);
+        }
+      }
+    } catch (error) {
+      this.deps.logger.warn(`Preview of ${fileName(this.uri)}: could not follow ${href}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private viewStateChanged(): void {

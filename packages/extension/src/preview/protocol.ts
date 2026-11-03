@@ -131,6 +131,7 @@ export type InboundMessage =
   | { readonly type: 'zenwave.preview.selectRenderMode'; readonly payload: { readonly mode: RenderMode } }
   | { readonly type: 'zenwave.preview.diagramFailed'; readonly payload: { readonly id: string; readonly message: string } }
   | { readonly type: 'zenwave.preview.copyMermaid'; readonly payload: { readonly content: string } }
+  | { readonly type: 'zenwave.preview.followLink'; readonly payload: { readonly href: string } }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
   | { readonly type: 'zenwave.host.action'; readonly payload: { readonly command: string } }
   | { readonly type: 'zenwave.host.probeResult'; readonly payload: PreviewProbe & { readonly requestId: number } };
@@ -150,6 +151,8 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
       return typeof object?.id === 'string' ? { type, payload: { id: object.id, message: typeof object.message === 'string' ? object.message : 'unknown error' } } : undefined;
     case 'zenwave.preview.copyMermaid':
       return typeof object?.content === 'string' ? { type, payload: { content: object.content } } : undefined;
+    case 'zenwave.preview.followLink':
+      return typeof object?.href === 'string' ? { type, payload: { href: object.href } } : undefined;
     case 'zenwave.host.loadError':
       return { type, payload: { message: typeof object?.message === 'string' ? object.message : 'unknown error' } };
     case 'zenwave.host.action':
