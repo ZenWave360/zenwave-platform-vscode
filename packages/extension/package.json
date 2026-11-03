@@ -429,6 +429,12 @@
         "command": "zenwave.preview.selectRenderMode",
         "title": "Select Preview Render Mode...",
         "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.preview.copyMarkdown",
+        "title": "Copy as Markdown",
+        "category": "ZenWave",
+        "icon": "$(copy)"
       }
     ],
     "menus": {
@@ -548,6 +554,10 @@
         {
           "command": "zenwave.preview.selectRenderMode",
           "when": "activeCustomEditorId == zenwave.preview && resourceExtname == .zfl"
+        },
+        {
+          "command": "zenwave.preview.copyMarkdown",
+          "when": "activeCustomEditorId == zenwave.preview && zenwave.previewMarkdownAvailable"
         }
       ],
       "editor/context": [
@@ -626,6 +636,11 @@
           "command": "zenwave.eventflow.showHumanizedLabels",
           "when": "activeCustomEditorId == zenwave.eventflow && !zenwave.eventflowHumanizeLabels",
           "group": "navigation@81"
+        },
+        {
+          "command": "zenwave.preview.copyMarkdown",
+          "when": "activeCustomEditorId == zenwave.preview && zenwave.previewMarkdownAvailable",
+          "group": "navigation@100"
         }
       ],
       "zenwave.zflViews": [

@@ -8,7 +8,7 @@ import { createNonce } from '../eventflow/page.js';
 import { buildFailedHtml, buildPreviewHtml } from './page.js';
 import { decidePreviewLink } from './links.js';
 import { PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
-import { PreviewSession } from './session.js';
+import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession } from './session.js';
 
 export const PREVIEW_COMMANDS = {
   open: 'zenwave.preview.open',
@@ -19,6 +19,7 @@ export const PREVIEW_COMMANDS = {
   showText: 'zenwave.preview.showText',
   selectDiagram: 'zenwave.preview.selectDiagram',
   selectRenderMode: 'zenwave.preview.selectRenderMode',
+  copyMarkdown: 'zenwave.preview.copyMarkdown',
 } as const;
 
 /** Where the page, its stylesheet and the Mermaid bundle are put by the build (esbuild.mjs). */
@@ -86,6 +87,7 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
       preview: (target, mode) => deps.server.requests.preview(target, mode),
       post: (message) => webview.postMessage(message),
       runCommand: (command) => { void vscode.commands.executeCommand(command); },
+      setContext: (key, value) => this.publishContext(key, value),
       log: deps.logger,
     });
     this.refresher = new CoalescedRefresh(() => this.session.refresh(), EDIT_DELAY_MS);
@@ -194,6 +196,12 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
     }
   }
 
+  /** The title bar follows this preview only while it is the active editor. */
+  private publishContext(key: string, value: boolean): void {
+    if (!this.panel.active) return;
+    void vscode.commands.executeCommand('setContext', key, value);
+  }
+
   private viewStateChanged(): void {
     this.startLoadTimer();
     if (this.panel.active) this.deps.onFocus(this);
@@ -244,8 +252,14 @@ export function registerPreviewEditor(
     resolveCustomEditor: (document, panel) => {
       const editor = new PreviewEditor(document.uri, panel, {
         context, server, logger,
-        onDispose: (closed) => { editors.delete(closed); if (active === closed) active = undefined; },
-        onFocus: (focused) => { active = focused; },
+        onDispose: (closed) => {
+          editors.delete(closed);
+          if (active === closed) {
+            active = undefined;
+            void vscode.commands.executeCommand('setContext', PREVIEW_MARKDOWN_CONTEXT_KEY, false);
+          }
+        },
+        onFocus: (focused) => { active = focused; focused.session.publishActiveMarkdown(); },
       });
       editors.add(editor);
       logger.info(`Preview opened for ${fileName(document.uri)}`);
@@ -363,6 +377,18 @@ export function registerPreviewEditor(
     return { kind: 'selected', value: pick.value };
   }
 
+  /** Copies the Markdown page on screen, unchanged. A diagram page copies nothing (MP-R26). */
+  async function copyMarkdown(argument: unknown): Promise<boolean> {
+    const editor = target(argument);
+    if (!editor) return false;
+    try {
+      return await editor.session.copyMarkdown((text) => vscode.env.clipboard.writeText(text));
+    } catch (error) {
+      logger.warn(`Preview of ${fileName(vscode.Uri.parse(editor.documentUri, true))}: could not copy Markdown: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(PREVIEW_VIEW_TYPE, provider, {
       // A preview keeps its drawing and scroll while its tab is in the background, instead of redrawing on every switch.
@@ -377,6 +403,7 @@ export function registerPreviewEditor(
     vscode.commands.registerCommand(PREVIEW_COMMANDS.showText, showText),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectDiagram, selectDiagram),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectRenderMode, selectRenderMode),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.copyMarkdown, copyMarkdown),
     { dispose: () => { for (const editor of [...editors]) editor.dispose(); } },
   );
 
