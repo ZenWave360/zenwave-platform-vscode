@@ -22,7 +22,21 @@ export interface DisplaySettings {
 
 /** Host → page, per the vistas protocol. `flowGraph` and `serviceGraph` are the server's, by reference. */
 export type PageMessage =
-  | { readonly type: 'renderBundle'; readonly payload: { readonly flowGraph: unknown; readonly serviceGraph: unknown; readonly viewMode: ViewMode; readonly displaySettings: DisplaySettings } }
+  | {
+    readonly type: 'renderBundle';
+    readonly payload: {
+      readonly flowGraph: unknown;
+      readonly serviceGraph: unknown;
+      readonly viewMode: ViewMode;
+      readonly displaySettings: DisplaySettings;
+      /**
+       * Stable for one diagram, so the page keeps pan and zoom across edits.
+       * One editor shows one document, and the server answers one pair of graphs for it,
+       * so this is the document URI.
+       */
+      readonly diagramId: string;
+    };
+  }
   | { readonly type: 'setViewMode'; readonly payload: { readonly viewMode: ViewMode } }
   | { readonly type: 'setDisplaySettings'; readonly payload: { readonly displaySettings: DisplaySettings } }
   | { readonly type: 'highlightNode'; readonly payload: { readonly nodeId: string | null } };
