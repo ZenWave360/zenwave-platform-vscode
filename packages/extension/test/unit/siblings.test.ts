@@ -101,9 +101,28 @@ test('each sibling build uses an absolute Gradle wrapper, and vistas keeps pnpm'
       assert.equal(posix.command, 'pnpm');
       continue;
     }
-    assert.equal(windows.command, join(workspace, build.directory, 'gradlew.bat'));
+    assert.equal(windows.command, `"${join(workspace, build.directory, 'gradlew.bat')}"`);
     assert.equal(posix.command, join(workspace, build.directory, 'gradlew'));
   }
+});
+
+test('a Windows gradlew.bat under a directory with a space is quoted for cmd.exe', () => {
+  const root = join(workspace, 'my workspace', 'zenwave-platform-vscode');
+  const build = SIBLING_BUILDS.find((entry: { directory: string }) => entry.directory === 'dsl-kotlin');
+  assert.ok(build);
+  const checkout = join(workspace, 'my workspace', 'dsl-kotlin');
+  const windows = siblingBuildCommand(root, build, 'win32');
+  const posix = siblingBuildCommand(root, build, 'linux');
+
+  assert.match(checkout, / /);
+  assert.equal(windows.directory, checkout);
+  assert.equal(windows.command, `"${join(checkout, 'gradlew.bat')}"`);
+  assert.deepEqual(windows.args, build.args);
+  assert.equal(windows.shell, true);
+  assert.equal(posix.directory, checkout);
+  assert.equal(posix.command, join(checkout, 'gradlew'));
+  assert.deepEqual(posix.args, build.args);
+  assert.equal(posix.shell, false);
 });
 
 test('opting out leaves the registry package, and removes a link but not what it points at', () => {

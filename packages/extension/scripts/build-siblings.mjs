@@ -16,14 +16,22 @@ export const SIBLING_BUILDS = [
 /**
  * Command for one sibling build. The Gradle wrapper is its absolute path inside that checkout: cmd.exe does not
  * search the current directory when NoDefaultCurrentDirectoryInExePath is set, so a bare gradlew.bat is not found.
- * pnpm stays a bare name.
+ * With a shell, Node joins the executable and its arguments into one cmd.exe line and does not quote them, so the
+ * Windows wrapper path is quoted here. A checkout under a directory with a space otherwise runs only the first word.
+ * The Gradle arguments stay a separate list. pnpm stays a bare name. Other platforms execute the wrapper directly.
  */
 export function siblingBuildCommand(root, build, platform = process.platform) {
   const directory = path.resolve(root, '..', build.directory);
   const shell = platform === 'win32';
   if (build.tool === 'pnpm') return { directory, command: 'pnpm', args: build.args, shell };
   const wrapper = platform === 'win32' ? 'gradlew.bat' : 'gradlew';
-  return { directory, command: path.join(directory, wrapper), args: build.args, shell };
+  const executable = path.join(directory, wrapper);
+  return { directory, command: shell ? quoteForCmd(executable) : executable, args: build.args, shell };
+}
+
+/** One cmd.exe token. A quote inside the path is doubled so it stays inside the surrounding quotes. */
+function quoteForCmd(executable) {
+  return `"${executable.replace(/"/g, '""')}"`;
 }
 
 /** The JDK a repository's .sdkmanrc asks for, when SDKMAN has it: dsl-kotlin and zenwave-lsp don't use the same one. */
