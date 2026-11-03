@@ -286,7 +286,7 @@ test('copy as markdown writes the page the server sent, and a diagram page write
   assert.equal(await docs.session.copyMarkdown(write), true);
   assert.deepEqual(written, [page]);
   docs.session.dispose();
-  assert.deepEqual(docs.markdownContext, [true, false], 'closing the preview clears the markdown context');
+  assert.deepEqual(docs.markdownContext, [true], 'closing the preview does not reach the host: its panel is already disposed and the host throws; the host clears the key');
 
   const diagram = harness(() => ok(ALT));
   diagram.session.receive(READY);
