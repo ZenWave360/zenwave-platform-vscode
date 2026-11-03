@@ -287,7 +287,7 @@ test('the manifest registers an optional diagram editor for .zfl and offers it f
   const submenu = contributes.menus['zenwave.zflViews'] as { command: string; when: string }[];
   assert.deepEqual(submenu.map((item) => item.command).filter((command) => command.startsWith('zenwave.eventflow.')).sort(), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.eventflow.showText']);
   for (const item of submenu.filter((entry) => entry.command === 'zenwave.eventflow.open' || entry.command === 'zenwave.eventflow.openToSide')) assert.match(item.when, /^resourceExtname == .zfl /, `${item.command} stays on ZFL only`);
-  for (const item of title.filter((entry) => entry.command)) {
+  for (const item of title.filter((entry) => entry.command?.startsWith('zenwave.eventflow.'))) {
     assert.match(item.when, /^activeCustomEditorId == zenwave\.eventflow && /, `${item.command} is not scoped to the diagram editor`);
   }
   const toggles = Object.fromEntries(title.filter((entry) => entry.command).map((entry) => [entry.command, entry.when]));

@@ -25,19 +25,25 @@ export interface PreviewSessionPorts {
   post(message: OutboundMessage): PromiseLike<boolean>;
   /** Runs a command the user chose from a state the editor is showing. */
   runCommand(command: string): void;
+  /** `commands.executeCommand('setContext', key, value)`, for the title bar. Applied for the active editor. */
+  setContext(key: string, value: boolean): void;
   readonly log: SessionLog;
 }
 
 const POSTED_HISTORY = 200;
+
+/** Title-bar and palette `when`: the preview on screen is a Markdown page (MP-R26). */
+export const PREVIEW_MARKDOWN_CONTEXT_KEY = 'zenwave.previewMarkdownAvailable';
 
 /**
  * One preview editor's relay between the language server and the preview page.
  * Holds no editor API, so the rules are unit-tested with fakes.
  *
  * Representations are handled by reference to their `id`, `title`, `format` and
- * `content` only to pass them on; the one thing read is the identifier, by
- * `selection.ts`, to keep the selection (MP-R12). Titles and order are the
- * server's (MP-R4).
+ * `content` only to pass them on. `selection.ts` reads the identifier, to keep
+ * the selection (MP-R12). Titles and order are the server's (MP-R4). The page
+ * on screen is Markdown when the selected representation's format is, and that
+ * content is what Copy as Markdown writes, unchanged (MP-R26).
  */
 export class PreviewSession {
   page: PreviewPageState = { kind: 'loading' };
@@ -63,6 +69,8 @@ export class PreviewSession {
   private logged: string | undefined;
   private nextProbe = 1;
   private readonly probes = new Map<number, (probe: PreviewProbe) => void>();
+  /** Whether the host was last told that this preview's page is Markdown. */
+  private markdownShown = false;
   private disposed = false;
 
   constructor(private readonly ports: PreviewSessionPorts) {
@@ -71,6 +79,12 @@ export class PreviewSession {
 
   get hasPreview(): boolean {
     return this.representations.length > 0;
+  }
+
+  /** The Markdown page on screen, exactly as the server sent it. Nothing when the page is not Markdown (MP-R26). */
+  get markdownPage(): string | undefined {
+    const page = this.representations.find((item) => item.id === this.selectedId);
+    return page?.format === 'MARKDOWN' ? page.content : undefined;
   }
 
   get state(): StatePresentation | null {
@@ -124,6 +138,7 @@ export class PreviewSession {
       this.renderIfReady();
     }
     this.present();
+    this.updateMarkdownContext();
   }
 
   /** Shows another representation. Answers whether the id is one of the current set. */
@@ -132,7 +147,24 @@ export class PreviewSession {
     if (this.selectedId === id) return true;
     this.selectedId = id;
     this.renderIfReady();
+    this.updateMarkdownContext();
     return true;
+  }
+
+  /**
+   * Copies the Markdown page on screen through `writeText` (the host clipboard),
+   * exactly as the server sent it. A diagram page copies nothing (MP-R26).
+   */
+  async copyMarkdown(writeText: (text: string) => PromiseLike<void>): Promise<boolean> {
+    const content = this.markdownPage;
+    if (content === undefined) return false;
+    await writeText(content);
+    return true;
+  }
+
+  /** This preview became the active editor, so the title bar follows its page even when the page did not just change. */
+  publishActiveMarkdown(): void {
+    this.updateMarkdownContext(true);
   }
 
   /** Changes how sequence variants are rendered and asks the server again with the new mode (MP-R11). */
@@ -213,6 +245,9 @@ export class PreviewSession {
   dispose(): void {
     this.disposed = true;
     this.probes.clear();
+    if (!this.markdownShown) return;
+    this.markdownShown = false;
+    this.ports.setContext(PREVIEW_MARKDOWN_CONTEXT_KEY, false);
   }
 
   private renderIfReady(): void {
@@ -243,6 +278,14 @@ export class PreviewSession {
     if (!force && key === this.presented) return;
     this.presented = key;
     this.post({ type: 'zenwave.host.state', payload: presentation });
+  }
+
+  /** Publishes whether the page on screen is Markdown. `force` republishes the current value. */
+  private updateMarkdownContext(force = false): void {
+    const showing = this.markdownPage !== undefined;
+    if (!force && showing === this.markdownShown) return;
+    this.markdownShown = showing;
+    this.ports.setContext(PREVIEW_MARKDOWN_CONTEXT_KEY, showing);
   }
 
   private post(message: OutboundMessage): void {

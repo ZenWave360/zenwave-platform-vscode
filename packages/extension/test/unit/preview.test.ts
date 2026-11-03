@@ -8,7 +8,7 @@ import type { RequestResult } from '../../src/lsp/supervisor.js';
 import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from '../../src/preview/page.js';
 import { inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
 import { outcomeOf, reselect } from '../../src/preview/selection.js';
-import { PreviewSession } from '../../src/preview/session.js';
+import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession } from '../../src/preview/session.js';
 import { PREVIEW_STATE_KINDS, presentPreviewState, type PreviewDataState } from '../../src/preview/state.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -37,6 +37,7 @@ function harness(answer: (mode: SequenceRenderMode | undefined) => RequestResult
   const asked: (SequenceRenderMode | undefined)[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
+  const markdownContext: boolean[] = [];
   const session = new PreviewSession({
     documentUri: options.uri ?? ZFL,
     fileName: options.fileName ?? 'checkout.zfl',
@@ -44,10 +45,11 @@ function harness(answer: (mode: SequenceRenderMode | undefined) => RequestResult
     preview: async (_uri, mode) => { asked.push(mode); return answer(mode); },
     post: async (message) => { posted.push(message); return true; },
     runCommand: (command) => { commands.push(command); },
+    setContext: (key, value) => { assert.equal(key, PREVIEW_MARKDOWN_CONTEXT_KEY); markdownContext.push(value); },
     log: { info: (line) => logs.push(line), warn: (line) => logs.push(line), debug: (line) => logs.push(line) },
   });
   const renders = () => posted.flatMap((message) => message.type === 'zenwave.preview.render' ? [message.payload] : []);
-  return { session, posted, asked, logs, commands, renders };
+  return { session, posted, asked, logs, commands, renders, markdownContext };
 }
 
 const ok = (value: Preview): RequestResult<Preview> => ({ kind: 'ok', value });
@@ -267,6 +269,55 @@ test('a probe is relayed to the page and answered', async () => {
   await settle();
 });
 
+test('copy as markdown writes the page the server sent, and a diagram page writes nothing (MP-R26)', async () => {
+  const page = '# Orders\n\nA <tag> & *stars*\n\n```mermaid\nclassDiagram\n  class Order\n```\n';
+  const markdown = { id: 'docs', title: 'Model Docs', format: 'MARKDOWN' as const, content: page };
+  const chart = mermaid('classes', 'Classes');
+  const written: string[] = [];
+  const write = async (text: string): Promise<void> => { written.push(text); };
+
+  const docs = harness(() => ok({ representations: [markdown], defaultRepresentationId: 'docs' }), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
+  assert.equal(await docs.session.copyMarkdown(write), false, 'before a page arrives there is nothing to copy');
+  assert.deepEqual(written, []);
+  docs.session.receive(READY);
+  await docs.session.refresh();
+  assert.deepEqual(docs.markdownContext, [true]);
+  assert.equal(await docs.session.copyMarkdown(write), true);
+  assert.deepEqual(written, [page]);
+  docs.session.dispose();
+  assert.deepEqual(docs.markdownContext, [true, false], 'closing the preview clears the markdown context');
+
+  const diagram = harness(() => ok(ALT));
+  diagram.session.receive(READY);
+  await diagram.session.refresh();
+  assert.deepEqual(diagram.markdownContext, []);
+  assert.equal(await diagram.session.copyMarkdown(write), false);
+  assert.deepEqual(written, [page], 'a diagram page writes nothing');
+  diagram.session.publishActiveMarkdown();
+  assert.deepEqual(diagram.markdownContext, [false], 'a diagram preview clears the markdown context when it is the one on screen');
+
+  let answer: Preview = { representations: [markdown, chart], defaultRepresentationId: 'docs' };
+  const mixed = harness(() => ok(answer), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
+  mixed.session.receive(READY);
+  await mixed.session.refresh();
+  assert.equal(await mixed.session.copyMarkdown(write), true);
+  assert.equal(written[written.length - 1], page);
+  const renamed = '# Orders renamed\n\n```mermaid\nclassDiagram\n  class Order\n```\n';
+  answer = { representations: [{ ...markdown, content: renamed }, chart], defaultRepresentationId: 'docs' };
+  await mixed.session.refresh();
+  assert.deepEqual(mixed.markdownContext, [true], 'editing the markdown page does not republish the context');
+  assert.equal(await mixed.session.copyMarkdown(write), true);
+  assert.equal(written[written.length - 1], renamed);
+  assert.equal(mixed.session.selectRepresentation('classes'), true);
+  assert.deepEqual(mixed.markdownContext, [true, false]);
+  assert.equal(await mixed.session.copyMarkdown(write), false);
+  assert.equal(written[written.length - 1], renamed, 'the diagram that replaced the page is not copied');
+  assert.equal(mixed.session.selectRepresentation('docs'), true);
+  assert.deepEqual(mixed.markdownContext, [true, false, true]);
+  assert.equal(await mixed.session.copyMarkdown(write), true);
+  assert.equal(written[written.length - 1], renamed);
+});
+
 test('messages from the page are read by shape, and anything else is ignored', () => {
   assert.deepEqual(inboundMessage({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } }), { type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } });
   assert.deepEqual(inboundMessage({ type: 'zenwave.preview.copyMermaid', payload: { content: 'sequenceDiagram\nA->>B: hi\n' } }), { type: 'zenwave.preview.copyMermaid', payload: { content: 'sequenceDiagram\nA->>B: hi\n' } });
@@ -313,14 +364,14 @@ test('the manifest registers an optional preview editor and names each supported
   assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === PREVIEW_VIEW_TYPE),
     { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zw' }, { filenamePattern: '*.zfl' }], priority: 'option' });
   const commands = (contributes.commands as { command: string; title: string }[]).map((entry) => entry.command);
-  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode']) {
+  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
     assert.ok(commands.includes(command), `${command} is not contributed`);
   }
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
   const submenus = title.filter((item) => item.submenu);
   assert.deepEqual(submenus.map((item) => item.submenu).sort(), ['zenwave.zdlViews', 'zenwave.zflViews', 'zenwave.zwViews']);
   for (const submenu of submenus) assert.match(submenu.when, /!isInDiffEditor/, 'no preview is offered in a diff (MP-Q4)');
-  assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.')), 'the preview has no title-bar icon of its own');
+  assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.') && item.command !== 'zenwave.preview.copyMarkdown'), 'the preview has no title-bar icon of its own besides Copy as Markdown');
   const menus = contributes.menus as Record<string, { command: string; when: string }[]>;
   const opens = (submenu: string) => menus[submenu]!.map((entry) => entry.command).filter((command) => !command.endsWith('.showText'));
   assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openToSide']);
@@ -335,6 +386,24 @@ test('the manifest registers an optional preview editor and names each supported
   assert.match(palette['zenwave.preview.openScriptsDocs'] ?? '', /zw/);
   assert.match(palette['zenwave.preview.openToSide'] ?? '', /!isInDiffEditor/);
   assert.match(palette['zenwave.preview.selectRenderMode'] ?? '', /resourceExtname == \.zfl/);
+});
+
+test('copy as markdown is on the title bar and in the palette only while that preview shows Markdown (MP-R26)', () => {
+  const commands = manifest.contributes.commands as { command: string; title: string; category?: string; icon?: string }[];
+  const copy = commands.find((entry) => entry.command === 'zenwave.preview.copyMarkdown');
+  assert.equal(copy?.title, 'Copy as Markdown');
+  assert.equal(copy?.category, 'ZenWave');
+  assert.equal(copy?.icon, '$(copy)');
+  const when = `activeCustomEditorId == ${PREVIEW_VIEW_TYPE} && ${PREVIEW_MARKDOWN_CONTEXT_KEY}`;
+  const title = manifest.contributes.menus['editor/title'] as { command?: string; when: string; group?: string }[];
+  const button = title.filter((item) => item.command === 'zenwave.preview.copyMarkdown');
+  assert.deepEqual(button.map((item) => [item.when, item.group]), [[when, 'navigation@100']]);
+  const palette = manifest.contributes.menus.commandPalette as { command: string; when?: string }[];
+  assert.deepEqual(palette.filter((item) => item.command === 'zenwave.preview.copyMarkdown').map((item) => item.when), [when]);
+  const menus = manifest.contributes.menus as Record<string, { command?: string }[]>;
+  for (const submenu of ['zenwave.zflViews', 'zenwave.zdlViews', 'zenwave.zwViews']) {
+    assert.ok(!menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.copyMarkdown'), `${submenu} does not carry Copy as Markdown`);
+  }
 });
 
 test('the preview keybindings are scoped to model editors and cannot reach the built-in Markdown preview', () => {
