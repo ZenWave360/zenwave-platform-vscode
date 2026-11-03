@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Preview, SequenceRenderMode } from '../../src/lsp/requests.js';
 import type { RequestResult } from '../../src/lsp/supervisor.js';
 import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from '../../src/preview/page.js';
+import { decidePreviewLink } from '../../src/preview/links.js';
 import { inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
 import { outcomeOf, reselect } from '../../src/preview/selection.js';
 import { PreviewSession } from '../../src/preview/session.js';
@@ -270,12 +271,30 @@ test('a probe is relayed to the page and answered', async () => {
 test('messages from the page are read by shape, and anything else is ignored', () => {
   assert.deepEqual(inboundMessage({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } }), { type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } });
   assert.deepEqual(inboundMessage({ type: 'zenwave.preview.copyMermaid', payload: { content: 'sequenceDiagram\nA->>B: hi\n' } }), { type: 'zenwave.preview.copyMermaid', payload: { content: 'sequenceDiagram\nA->>B: hi\n' } });
+  assert.deepEqual(inboundMessage({ type: 'zenwave.preview.followLink', payload: { href: '../apis/asyncapi.yml#L8' } }), { type: 'zenwave.preview.followLink', payload: { href: '../apis/asyncapi.yml#L8' } });
+  assert.equal(inboundMessage({ type: 'zenwave.preview.followLink', payload: {} }), undefined);
   assert.equal(inboundMessage({ type: 'zenwave.preview.copyMermaid', payload: {} }), undefined);
   assert.equal(inboundMessage({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'AUTO' } }), undefined, 'AUTO is not offered');
   assert.equal(inboundMessage({ type: 'zenwave.preview.selectRepresentation', payload: {} }), undefined);
   assert.equal(inboundMessage({ type: 'something.else' }), undefined);
   assert.equal(inboundMessage(null), undefined);
   assert.deepEqual(RENDER_MODES.map((mode) => mode.label), ['Alt blocks', 'Separate variants']);
+});
+
+test('preview links open only workspace documents or http(s) through the host', () => {
+  const source = 'vscode-vfs://github.example/org/repo/models/orders.zdl';
+  const folders = ['vscode-vfs://github.example/org/repo'];
+  assert.deepEqual(decidePreviewLink(source, '../apis/asyncapi.yml#L8', folders),
+    { kind: 'workspace', href: 'vscode-vfs://github.example/org/repo/apis/asyncapi.yml#L8', line: 8 });
+  assert.deepEqual(decidePreviewLink(source, 'notes.md#overview', folders),
+    { kind: 'workspace', href: 'vscode-vfs://github.example/org/repo/models/notes.md#overview' });
+  assert.deepEqual(decidePreviewLink('file:///workspace/models/orders.zdl', 'file:///workspace/apis/asyncapi.yml', ['file:///workspace']),
+    { kind: 'workspace', href: 'file:///workspace/apis/asyncapi.yml' });
+  assert.deepEqual(decidePreviewLink(source, 'https://example.test/docs?q=1#part', folders),
+    { kind: 'external', href: 'https://example.test/docs?q=1#part' });
+  for (const href of ['../../outside.yml', 'file:///outside.yml', 'command:workbench.action.quit', 'javascript:alert(1)', 'classpath:api.yml', 'http://[']) {
+    assert.deepEqual(decidePreviewLink(source, href, folders), { kind: 'refused' }, href);
+  }
 });
 
 test('the page has a CSP with no remote, inline-script or eval allowance, only inline styles, and only its own assets', () => {

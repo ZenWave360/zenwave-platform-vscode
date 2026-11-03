@@ -297,13 +297,17 @@ async function showDocument(current: PageRepresentation, token: number, theme: T
   swapIn(article, current.id, hash, theme, keepPlace);
 }
 
-/** A link to `#anchor` scrolls to it inside the page. The sanitiser keeps no other link; a plain anchor that remained would still not navigate the webview. */
+/** A link to `#anchor` scrolls inside the page. Every other link is handed to the host; the page never navigates itself. */
 view.addEventListener('click', (event) => {
   const link = (event.target as Element | null)?.closest('a');
   if (!link || !view.contains(link)) return;
   event.preventDefault();
   const href = link.getAttribute('href') ?? '';
-  if (href.startsWith('#') && href.length > 1) anchorTarget(anchorName(href))?.scrollIntoView({ block: 'start' });
+  if (href.startsWith('#')) {
+    if (href.length > 1) anchorTarget(anchorName(href))?.scrollIntoView({ block: 'start' });
+    return;
+  }
+  if (href) post({ type: 'zenwave.preview.followLink', payload: { href } });
 });
 
 function anchorName(href: string): string {
