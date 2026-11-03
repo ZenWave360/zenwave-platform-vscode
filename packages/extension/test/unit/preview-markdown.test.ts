@@ -46,6 +46,60 @@ test('raw HTML in Markdown is shown as text, not interpreted, and a script link 
   assert.ok(!/href="javascript:/.test(html), html);
 });
 
+test('a collapsible section is the exact details and summary lines, and the body stays Markdown', () => {
+  const html = renderMarkdown([
+    '<details open>',
+    '<summary>Command to run</summary>',
+    '',
+    'Run `jbang`.',
+    '',
+    '</details>',
+    '<details>',
+    '<summary>Configuration</summary>',
+    '</details>',
+    '</summary>',
+  ].join('\n'));
+  assert.ok(html.includes('<details open>\n'), html);
+  assert.ok(html.includes('<summary>Command to run</summary>\n'), html);
+  assert.ok(html.includes('<code>jbang</code>'), html);
+  assert.ok(html.includes('<details>\n'), html);
+  assert.ok(html.includes('<summary>Configuration</summary>\n'), html);
+  assert.ok(html.includes('</details>\n'), html);
+  assert.ok(html.includes('</summary>\n'), html);
+  assert.equal(html.includes('<p>'), true);
+});
+
+test('a details or summary line that is not exact stays text', () => {
+  const misses = [
+    '<details onclick="x">',
+    '<details open="open">',
+    '<details open >',
+    '<details >',
+    '<DETAILS>',
+    '<details/>',
+    ' <details>',
+    '<details open="true">',
+    '<summary></summary>',
+    '<summary> </summary>',
+    '<summary onclick="x">Title</summary>',
+    '<summary>Title</summary><img>',
+    '<summary>Ti<tle</summary>',
+    '</Details>',
+    '</summary >',
+    '<div>no</div>',
+    'See <details> here',
+    '> <details>',
+  ];
+  for (const line of misses) {
+    const html = renderMarkdown(`${line}\n`);
+    assert.ok(!/<details|<summary|<\/details|<\/summary|<div/.test(html), `${line} => ${html}`);
+    assert.ok(html.includes('&lt;'), `${line} => ${html}`);
+  }
+  const fenced = renderMarkdown('```\n<details>\n```\n');
+  assert.ok(!/<details/.test(fenced), fenced);
+  assert.ok(fenced.includes('&lt;details&gt;'), fenced);
+});
+
 test('tables, code and lists render as the elements a theme can style', () => {
   const html = renderMarkdown('| a | b |\n|---|---|\n| 1 | `2` |\n\n- one\n- two\n');
   assert.ok(html.includes('<table>') && html.includes('<th>a</th>') && html.includes('<code>2</code>') && html.includes('<li>one</li>'), html);

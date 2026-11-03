@@ -201,6 +201,7 @@ export class DiagramSession {
       serviceGraph: this.lastGood.serviceGraph,
       viewMode: this.viewMode,
       displaySettings: this.displaySettings,
+      diagramId: this.ports.documentUri,
     };
     this.lastRenderBundle = payload;
     this.rendered = true;

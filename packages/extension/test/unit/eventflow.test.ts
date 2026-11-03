@@ -19,13 +19,13 @@ const URI = 'file:///workspace/place-order-flow.zfl';
 const READY = { type: 'webviewReady', payload: { protocol: EVENTFLOW_PROTOCOL, protocolVersion: 1 } };
 const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }) {
+function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI) {
   const posted: OutboundMessage[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
   const requests = new ZenwaveRequests({ request: async () => answer() });
   const session = new DiagramSession({
-    documentUri: URI,
+    documentUri,
     fileName: 'place-order-flow.zfl',
     eventFlowViews: (uri) => requests.eventFlowViews(uri),
     post: async (message) => { posted.push(message); return true; },
@@ -68,7 +68,8 @@ test('the view model reaches the page as the same objects the server answered, a
   assert.ok(render, 'renderBundle was not posted');
   assert.equal(render.payload.flowGraph, flowGraph, 'flowGraph was replaced or copied');
   assert.equal(render.payload.serviceGraph, serviceGraph, 'serviceGraph was replaced or copied');
-  assert.deepEqual(Object.keys(render.payload).sort(), ['displaySettings', 'flowGraph', 'serviceGraph', 'viewMode']);
+  assert.equal(render.payload.diagramId, URI);
+  assert.deepEqual(Object.keys(render.payload).sort(), ['diagramId', 'displaySettings', 'flowGraph', 'serviceGraph', 'viewMode']);
   assert.deepEqual(touched, [], `the view model was inspected: ${touched.join(', ')}`);
   assert.ok(logs.some((line) => line.endsWith(': rendered')));
 });
@@ -178,6 +179,17 @@ test('each reason for having nothing to show is its own state, explained, with s
   assert.match(presentState('a.zfl', { kind: 'ready', protocolVersion: 1 }, { kind: 'no-server', reason: 'off' }, false)?.title ?? '', /needs the ZenWave language server/);
   const everyKind: DataState['kind'][] = ['loading', 'rendered', 'no-server', 'unsupported', 'unreadable', 'not-found', 'unsupported-document', 'failed'];
   assert.deepEqual([...DIAGRAM_STATE_KINDS].sort(), [...everyKind, 'page-failed'].sort());
+});
+
+test('every renderBundle names the diagram by its document, and a later update of the same diagram keeps that id', async () => {
+  const first = harness(() => ({ kind: 'ok', value: { flowGraph: { n: 1 }, serviceGraph: {} } }));
+  const second = harness(() => ({ kind: 'ok', value: { flowGraph: {}, serviceGraph: {} } }), undefined, 'file:///workspace/checkout.zfl');
+  for (const { session } of [first, second]) session.receive(READY);
+  await first.session.refresh();
+  await first.session.refresh();
+  await second.session.refresh();
+  assert.deepEqual(first.ofType('renderBundle').map((message) => message.payload.diagramId), [URI, URI]);
+  assert.equal(second.ofType('renderBundle')[0]?.payload.diagramId, 'file:///workspace/checkout.zfl');
 });
 
 test('view and label choices are kept per diagram and survive a re-render', async () => {
