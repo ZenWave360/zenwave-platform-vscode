@@ -25,12 +25,35 @@ function lineOf(fragment: string): number | undefined {
 }
 
 /**
+ * VS Code decodes URI path escapes before it opens a document. Reject escapes
+ * that could alter path boundaries or create a dot segment before URL resolves
+ * the link, so the containment check sees the same path that can be opened.
+ */
+function hasEncodedPathEscape(href: string): boolean {
+  if (/%2f|%5c/i.test(href)) return true;
+  const end = href.search(/[?#]/);
+  const path = end === -1 ? href : href.slice(0, end);
+  return path.split(/[\\/]/).some(isEncodedDotSegment);
+}
+
+function isEncodedDotSegment(segment: string): boolean {
+  if (!/%2e/i.test(segment)) return false;
+  try {
+    const decoded = decodeURIComponent(segment);
+    return decoded === '.' || decoded === '..';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Relative links resolve beside the previewed document and must stay in a
  * workspace folder. Explicit file and command URLs are never trusted merely
  * because the page sent them; an explicit file URL is accepted only when it is
  * within a supplied workspace folder.
  */
 export function decidePreviewLink(source: string, href: string, workspaceFolders: readonly string[]): PreviewLinkDecision {
+  if (hasEncodedPathEscape(href)) return { kind: 'refused' };
   let target: URL;
   try {
     target = new URL(href, source);

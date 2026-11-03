@@ -297,6 +297,21 @@ test('preview links open only workspace documents or http(s) through the host', 
   }
 });
 
+test('preview links reject encoded path separators and dot segments before containment', () => {
+  const workspaces = [
+    { source: 'file:///workspace/models/orders.zdl', folder: 'file:///workspace', encodedFile: 'file:///workspace/%2f../outside.yml' },
+    { source: 'file:///c%3A/workspace/models/orders.zdl', folder: 'file:///c%3A/workspace', encodedFile: 'file:///c%3A/workspace/%2f../outside.yml' },
+    { source: 'file://server/share/workspace/models/orders.zdl', folder: 'file://server/share/workspace', encodedFile: 'file://server/share/workspace/%2f../outside.yml' },
+    { source: 'vscode-vfs://github.example/org/repo/models/orders.zdl', folder: 'vscode-vfs://github.example/org/repo', encodedFile: 'vscode-vfs://github.example/org/repo/%2f../outside.yml' },
+  ];
+
+  for (const { source, folder, encodedFile } of workspaces) {
+    for (const href of ['..%2f..%2foutside.yml', '..%2F..%2Foutside.yml', '..%5c..%5Coutside.yml', '%2e/outside.yml', '%2e%2e/outside.yml', encodedFile]) {
+      assert.deepEqual(decidePreviewLink(source, href, [folder]), { kind: 'refused' }, `${source}: ${href}`);
+    }
+  }
+});
+
 test('the page has a CSP with no remote, inline-script or eval allowance, only inline styles, and only its own assets', () => {
   const resources = {
     cspSource: 'https://*.vscode-cdn.net', nonce: 'abc123',
