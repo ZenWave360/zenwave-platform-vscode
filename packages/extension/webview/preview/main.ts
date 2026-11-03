@@ -46,6 +46,9 @@ const element = <T extends HTMLElement>(id: string): T => document.getElementByI
 const controls = element<HTMLElement>('controls');
 const renderModeField = element<HTMLElement>('render-mode-field');
 const renderModeSelect = element<HTMLSelectElement>('render-mode');
+const groupField = element<HTMLElement>('group-field');
+const groupSelect = element<HTMLSelectElement>('group');
+const diagramLabel = element<HTMLElement>('diagram-label');
 const diagramField = element<HTMLElement>('diagram-field');
 const diagramSelect = element<HTMLSelectElement>('diagram');
 const stateBox = element<HTMLElement>('state');
@@ -335,10 +338,16 @@ function fill(select: HTMLSelectElement, options: readonly { readonly value: str
 
 function syncControls(current: RenderPayload): void {
   renderModeField.hidden = !current.showRenderMode;
-  diagramField.hidden = current.representations.length <= 1;
-  controls.hidden = renderModeField.hidden && diagramField.hidden;
+  // A grouped set (ZDL Diagrams): Show picks the kind, Element one of that kind. A selector with no real choice is hidden (MP-R25).
+  const grouped = current.groups.length > 0 && current.selectedGroup !== undefined;
+  const elements = grouped ? current.representations.filter((item) => item.group === current.selectedGroup) : current.representations;
+  groupField.hidden = current.groups.length <= 1;
+  diagramField.hidden = elements.length <= 1;
+  diagramLabel.textContent = grouped ? 'Element' : 'Diagram';
+  controls.hidden = renderModeField.hidden && groupField.hidden && diagramField.hidden;
   fill(renderModeSelect, RENDER_MODES, current.renderMode);
-  fill(diagramSelect, current.representations.map((item: PageRepresentation) => ({ value: item.id, label: item.title })), current.selectedId);
+  fill(groupSelect, current.groups.map((group) => ({ value: group, label: group })), current.selectedGroup ?? '');
+  fill(diagramSelect, elements.map((item: PageRepresentation) => ({ value: item.id, label: item.title })), current.selectedId);
 }
 
 function showState(state: StatePresentation | null): void {
@@ -442,6 +451,11 @@ function probe(requestId: number, followLink?: string, copyMermaid?: number): vo
         value: renderModeSelect.value,
         options: [...renderModeSelect.options].map((option) => option.textContent ?? ''),
       },
+      groupSelector: {
+        visible: !groupField.hidden && !controls.hidden,
+        value: groupSelect.value,
+        options: [...groupSelect.options].map((option) => option.textContent ?? ''),
+      },
       diagramSelector: {
         visible: !diagramField.hidden && !controls.hidden,
         value: diagramSelect.value,
@@ -483,6 +497,7 @@ window.addEventListener('message', (event: MessageEvent<OutboundMessage>) => {
   }
 });
 
+groupSelect.addEventListener('change', () => post({ type: 'zenwave.preview.selectGroup', payload: { group: groupSelect.value } }));
 diagramSelect.addEventListener('change', () => post({ type: 'zenwave.preview.selectRepresentation', payload: { id: diagramSelect.value } }));
 renderModeSelect.addEventListener('change', () => post({ type: 'zenwave.preview.selectRenderMode', payload: { mode: renderModeSelect.value as RenderMode } }));
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import type { Preview, SequenceRenderMode } from '../../src/lsp/requests.js';
+import type { Preview, PreviewMode, SequenceRenderMode } from '../../src/lsp/requests.js';
 import type { RequestResult } from '../../src/lsp/supervisor.js';
 import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from '../../src/preview/page.js';
 import { decidePreviewLink } from '../../src/preview/links.js';
@@ -398,7 +398,7 @@ test('the manifest registers an optional preview editor and names each supported
   assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === PREVIEW_VIEW_TYPE),
     { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zw' }, { filenamePattern: '*.zfl' }], priority: 'option' });
   const commands = (contributes.commands as { command: string; title: string }[]).map((entry) => entry.command);
-  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
+  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
     assert.ok(commands.includes(command), `${command} is not contributed`);
   }
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
@@ -417,6 +417,7 @@ test('the manifest registers an optional preview editor and names each supported
   const palette = Object.fromEntries((contributes.menus.commandPalette as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
   assert.match(palette['zenwave.preview.openSequenceDiagrams'] ?? '', /zfl/);
   assert.match(palette['zenwave.preview.openModelDocs'] ?? '', /zdl/);
+  assert.match(palette['zenwave.preview.openZdlDiagrams'] ?? '', /zdl/);
   assert.match(palette['zenwave.preview.openScriptsDocs'] ?? '', /zw/);
   assert.match(palette['zenwave.preview.openToSide'] ?? '', /!isInDiffEditor/);
   assert.match(palette['zenwave.preview.selectRenderMode'] ?? '', /resourceExtname == \.zfl/);
@@ -458,4 +459,114 @@ test('the preview page and the Mermaid bundle are runtime files, and Mermaid is 
     assert.ok(runtimeFiles.files.includes(file), `${file} is not listed in runtime-files.json`);
   }
   assert.match(manifest.dependencies.mermaid, /^\d+\.\d+\.\d+$/, 'Mermaid is pinned to an exact version');
+});
+
+const ZDL = 'file:///workspace/orders.zdl';
+const diagram = (id: string, title: string, group: string): Preview['representations'][number] =>
+  ({ id, title, format: 'MERMAID', content: `classDiagram\n  class ${title.replace(/\W/g, '_')}`, group });
+
+/** What `zenwave/preview` answers with `mode: "diagrams"` (LVR-R17): groups in the server's order, an empty kind absent. */
+const DIAGRAMS: Preview = {
+  representations: [
+    diagram('service:Orders', 'Orders', 'Services'),
+    diagram('aggregate:Order', 'Order', 'Aggregates'),
+    diagram('aggregate:Invoice', 'Invoice', 'Aggregates'),
+    diagram('command:Orders:placeOrder', 'Orders.placeOrder', 'Commands'),
+    diagram('command:Orders:cancelOrder', 'Orders.cancelOrder', 'Commands'),
+  ],
+  defaultRepresentationId: 'service:Orders',
+};
+
+function diagramsHarness(answer: (mode: PreviewMode | undefined) => Preview, options: { available?: boolean } = {}) {
+  const posted: OutboundMessage[] = [];
+  const asked: (PreviewMode | undefined)[] = [];
+  const session = new PreviewSession({
+    documentUri: ZDL,
+    fileName: 'orders.zdl',
+    hasRenderMode: false,
+    preview: async (_uri, _renderMode, mode) => { asked.push(mode); return ok(answer(mode)); },
+    diagramsAvailable: () => options.available ?? true,
+    post: async (message) => { posted.push(message); return true; },
+    runCommand: () => undefined,
+    setContext: () => undefined,
+    log: { info: () => undefined, warn: () => undefined, debug: () => undefined },
+  });
+  const renders = () => posted.flatMap((message) => message.type === 'zenwave.preview.render' ? [message.payload] : []);
+  return { session, asked, renders };
+}
+
+const elementsOf = (render: { representations: Preview['representations']; selectedGroup?: string } | undefined) =>
+  (render?.representations ?? []).filter((item) => item.group === render?.selectedGroup);
+
+test('ZDL Diagrams groups the set in the server order: Show lists the kinds, Element the kind chosen (MP-R25)', async () => {
+  const { session, renders, asked } = diagramsHarness(() => DIAGRAMS);
+  session.receive(READY);
+  assert.equal(await session.setPreviewMode('diagrams'), true);
+  assert.deepEqual(asked, ['diagrams']);
+  const first = renders().at(-1);
+  assert.deepEqual(first?.groups, ['Services', 'Aggregates', 'Commands'], 'a kind with no element is not offered');
+  assert.equal(first?.selectedGroup, 'Services');
+  assert.equal(first?.selectedId, 'service:Orders');
+
+  session.receive({ type: 'zenwave.preview.selectGroup', payload: { group: 'Commands' } });
+  const commands = renders().at(-1);
+  assert.equal(commands?.selectedGroup, 'Commands');
+  assert.equal(commands?.selectedId, 'command:Orders:placeOrder', 'changing Show picks the first element of that kind');
+  assert.deepEqual(elementsOf(commands).map((item) => item.title), ['Orders.placeOrder', 'Orders.cancelOrder']);
+
+  session.receive({ type: 'zenwave.preview.selectGroup', payload: { group: 'Events' } });
+  assert.equal(renders().at(-1)?.selectedId, 'command:Orders:placeOrder', 'a kind the set does not hold changes nothing');
+  assert.equal(inboundMessage({ type: 'zenwave.preview.selectGroup', payload: {} }), undefined);
+});
+
+test('one kind hides Show, and one element hides Element: the page decides from these counts (MP-R25, MP-R10)', async () => {
+  const single: Preview = { representations: [diagram('other:entities', 'Other entities', 'Other entities')], defaultRepresentationId: 'other:entities' };
+  const one = diagramsHarness(() => single);
+  one.session.receive(READY);
+  await one.session.setPreviewMode('diagrams');
+  assert.deepEqual(one.renders().at(-1)?.groups, ['Other entities'], 'one kind: Show is hidden');
+  assert.equal(elementsOf(one.renders().at(-1)).length, 1, 'one element: Element is hidden');
+
+  const many = diagramsHarness(() => DIAGRAMS);
+  many.session.receive(READY);
+  await many.session.setPreviewMode('diagrams');
+  assert.equal(many.renders().at(-1)?.groups.length, 3);
+  assert.equal(elementsOf(many.renders().at(-1)).length, 1, 'Services holds one element: Element is hidden while Show has three kinds');
+});
+
+test('the choice survives a refresh of the same document while the element exists, and falls to the default when it does not (MP-R25, MP-R12)', async () => {
+  let answer = DIAGRAMS;
+  const { session, renders } = diagramsHarness(() => answer);
+  session.receive(READY);
+  await session.setPreviewMode('diagrams');
+  session.selectRepresentation('command:Orders:cancelOrder');
+  await session.refresh();
+  assert.equal(renders().at(-1)?.selectedId, 'command:Orders:cancelOrder');
+  assert.equal(renders().at(-1)?.selectedGroup, 'Commands');
+
+  // Another command of the same service must not be taken for the same element.
+  answer = { ...DIAGRAMS, representations: DIAGRAMS.representations.filter((item) => item.id !== 'command:Orders:cancelOrder') };
+  await session.refresh();
+  assert.equal(session.selectedId, 'service:Orders');
+});
+
+test('without the capability the preview asks as before and offers no groups (MP-R25)', async () => {
+  const { session, renders, asked } = diagramsHarness(() => ({ representations: [mermaid('classes', 'Classes')], defaultRepresentationId: 'classes' }), { available: false });
+  session.receive(READY);
+  assert.equal(await session.setPreviewMode('diagrams'), false);
+  await session.refresh();
+  assert.deepEqual(asked, [undefined], 'the request carries no mode');
+  assert.equal(session.mode, 'docs');
+  assert.deepEqual(renders().at(-1)?.groups, []);
+  assert.equal(renders().at(-1)?.selectedGroup, undefined);
+});
+
+test('going back to Model Docs asks without a mode and drops the groups', async () => {
+  const { session, renders, asked } = diagramsHarness((mode) => mode === 'diagrams' ? DIAGRAMS : zdlAnswer);
+  session.receive(READY);
+  await session.setPreviewMode('diagrams');
+  await session.setPreviewMode('docs');
+  assert.deepEqual(asked, ['diagrams', undefined]);
+  assert.deepEqual(renders().at(-1)?.groups, []);
+  assert.equal(renders().at(-1)?.selectedId, zdlAnswer.defaultRepresentationId);
 });

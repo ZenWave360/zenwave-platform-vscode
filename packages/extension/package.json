@@ -410,6 +410,11 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.preview.openZdlDiagrams",
+        "title": "ZDL Diagrams",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.preview.openScriptsDocs",
         "title": "Scripts Docs",
         "category": "ZenWave"
@@ -537,6 +542,10 @@
         },
         {
           "command": "zenwave.preview.openModelDocs",
+          "when": "(editorLangId == zdl || resourceExtname == .zdl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+        },
+        {
+          "command": "zenwave.preview.openZdlDiagrams",
           "when": "(editorLangId == zdl || resourceExtname == .zdl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
         },
         {

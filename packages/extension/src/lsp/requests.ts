@@ -70,7 +70,12 @@ export interface PreviewRepresentation {
   readonly title: string;
   readonly format: 'MARKDOWN' | 'MERMAID' | 'HTML';
   readonly content: string;
+  /** The kind of element, in `diagrams` mode only (LVR-R17). */
+  readonly group?: string;
 }
+
+/** What `zenwave/preview` is asked for: the page (`docs`, the default) or one diagram per element (`diagrams`). */
+export type PreviewMode = 'docs' | 'diagrams';
 
 export interface Preview {
   readonly representations: readonly PreviewRepresentation[];
@@ -162,10 +167,12 @@ export class ZenwaveRequests {
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));
   }
 
-  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode): Promise<RequestResult<Preview>> {
-    const params = sequenceRenderMode === undefined
-      ? { textDocument: { uri } }
-      : { textDocument: { uri }, sequenceRenderMode };
+  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode): Promise<RequestResult<Preview>> {
+    const params = {
+      textDocument: { uri },
+      ...(sequenceRenderMode === undefined ? {} : { sequenceRenderMode }),
+      ...(mode === undefined ? {} : { mode }),
+    };
     return expect(ZENWAVE_REQUESTS.preview, await this.issuer.request(ZENWAVE_REQUESTS.preview, params),
       (value) => isObject(value) && Array.isArray(value.representations) && typeof value.defaultRepresentationId === 'string');
   }

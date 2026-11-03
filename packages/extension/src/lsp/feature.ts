@@ -56,6 +56,8 @@ export interface LanguageServerApi {
   readonly manifest: ResolvedManifest;
   /** `zenwave/*` requests the connected server advertised; empty when none is connected. */
   readonly advertisedRequests: readonly string[];
+  /** Whether the connected server advertised `previewModes`: `zenwave/preview` takes `mode` (LVR-R17). */
+  readonly previewModes: boolean;
   readonly serverInfo: { readonly name: string; readonly version?: string } | undefined;
   readonly requests: ZenwaveRequests;
   /** Issue any `zenwave/*` request; answers with the four-way result, never throws. */
@@ -302,6 +304,7 @@ export function registerLanguageServer(
     get state() { return supervisor.state; },
     get manifest() { return manifest; },
     get advertisedRequests() { return [...supervisor.advertisedRequests]; },
+    get previewModes() { return supervisor.previewModes; },
     get serverInfo() { return serverInfo(); },
     requests,
     request,

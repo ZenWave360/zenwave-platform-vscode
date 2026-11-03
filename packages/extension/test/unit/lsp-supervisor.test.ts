@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advertisedRequests, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
+import { advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
 
 const INITIALIZE = { capabilities: { experimental: { customRequests: ['zenwave/workspaceStatus'] } } };
 
@@ -43,6 +43,13 @@ test('initialize capability discovery ignores malformed and non-ZenWave entries'
   assert.deepEqual([...advertisedRequests({ capabilities: { experimental: {
     customRequests: ['zenwave/workspaceStatus', 42, null, 'textDocument/hover', 'zenwave/workspaceStatus'],
   } } })], ['zenwave/workspaceStatus']);
+});
+
+test('previewModes is advertised only by an explicit true under capabilities.experimental (LVR-R17)', () => {
+  assert.equal(previewModesAdvertised({ capabilities: { experimental: { previewModes: true } } }), true);
+  for (const other of [undefined, {}, { capabilities: { experimental: {} } }, { capabilities: { experimental: { previewModes: 'true' } } }, { capabilities: { previewModes: true } }]) {
+    assert.equal(previewModesAdvertised(other), false);
+  }
 });
 
 test('concurrent starts share one session and unsupported requests never reach the wire', async () => {

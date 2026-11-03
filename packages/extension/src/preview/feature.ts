@@ -2,11 +2,12 @@ import * as vscode from 'vscode';
 import { CoalescedRefresh } from '../explorer/coalesce.js';
 import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
-import { commandDocument, isPreviewableDocument, isZflDocument } from '../model/active-document.js';
+import { commandDocument, isPreviewableDocument, isZdlDocument, isZflDocument } from '../model/active-document.js';
 import { fileName, findTab, replaceInPlace } from '../model/editor-tabs.js';
 import { createNonce } from '../eventflow/page.js';
 import { buildFailedHtml, buildPreviewHtml } from './page.js';
 import { decidePreviewLink } from './links.js';
+import type { PreviewMode } from '../lsp/requests.js';
 import { PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
 import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession } from './session.js';
 
@@ -15,6 +16,7 @@ export const PREVIEW_COMMANDS = {
   openToSide: 'zenwave.preview.openToSide',
   openSequenceDiagrams: 'zenwave.preview.openSequenceDiagrams',
   openModelDocs: 'zenwave.preview.openModelDocs',
+  openZdlDiagrams: 'zenwave.preview.openZdlDiagrams',
   openScriptsDocs: 'zenwave.preview.openScriptsDocs',
   showText: 'zenwave.preview.showText',
   selectDiagram: 'zenwave.preview.selectDiagram',
@@ -60,6 +62,11 @@ function hasRenderMode(uri: vscode.Uri): boolean {
   return isZflDocument(uri, languageId);
 }
 
+function hasDiagrams(uri: vscode.Uri): boolean {
+  const languageId = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.languageId;
+  return isZdlDocument(uri, languageId);
+}
+
 class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
   readonly documentUri: string;
   readonly session: PreviewSession;
@@ -74,7 +81,7 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
   constructor(
     private readonly uri: vscode.Uri,
     readonly panel: vscode.WebviewPanel,
-    private readonly deps: { readonly context: vscode.ExtensionContext; readonly server: LanguageServerApi; readonly logger: Logger; readonly onDispose: (editor: PreviewEditor) => void; readonly onFocus: (editor: PreviewEditor) => void },
+    private readonly deps: { readonly context: vscode.ExtensionContext; readonly server: LanguageServerApi; readonly logger: Logger; readonly onDispose: (editor: PreviewEditor) => void; readonly onFocus: (editor: PreviewEditor) => void; readonly initialMode: (documentUri: string) => PreviewMode },
   ) {
     this.documentUri = uri.toString();
     const webview = panel.webview;
@@ -84,12 +91,14 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
       documentUri: this.documentUri,
       fileName: fileName(uri),
       hasRenderMode: hasRenderMode(uri),
-      preview: (target, mode) => deps.server.requests.preview(target, mode),
+      preview: (target, renderMode, mode) => deps.server.requests.preview(target, renderMode, mode),
+      diagramsAvailable: () => hasDiagrams(uri) && deps.server.previewModes,
       post: (message) => webview.postMessage(message),
       runCommand: (command) => { void vscode.commands.executeCommand(command); },
       setContext: (key, value) => this.publishContext(key, value),
       log: deps.logger,
     });
+    this.session.requestedMode = deps.initialMode(this.documentUri);
     this.refresher = new CoalescedRefresh(() => this.session.refresh(), EDIT_DELAY_MS);
 
     this.subscriptions.push(
@@ -245,6 +254,8 @@ export function registerPreviewEditor(
   logger: Logger,
 ): PreviewApi {
   const editors = new Set<PreviewEditor>();
+  /** The mode a command asked for a preview that is still opening; read once when its editor is created. */
+  const pendingModes = new Map<string, PreviewMode>();
   let active: PreviewEditor | undefined;
 
   const provider: vscode.CustomReadonlyEditorProvider = {
@@ -259,6 +270,7 @@ export function registerPreviewEditor(
             void vscode.commands.executeCommand('setContext', PREVIEW_MARKDOWN_CONTEXT_KEY, false);
           }
         },
+        initialMode: (documentUri) => { const mode = pendingModes.get(documentUri) ?? 'docs'; pendingModes.delete(documentUri); return mode; },
         onFocus: (focused) => { active = focused; focused.session.publishActiveMarkdown(); },
       });
       editors.add(editor);
@@ -321,6 +333,27 @@ export function registerPreviewEditor(
       }
     }
     return { kind: 'opened', documentUri: uri.toString() };
+  }
+
+  /** Opens the preview and chooses what it shows: the page (Model Docs) or one diagram at a time (ZDL Diagrams, MP-R25). */
+  async function openInMode(argument: unknown, mode: PreviewMode): Promise<PreviewOpenOutcome> {
+    const uri = commandDocument(argument, isPreviewableDocument);
+    if (mode === 'diagrams') {
+      if (uri && !server.previewModes) {
+        void vscode.window.showInformationMessage('The language server does not offer ZDL Diagrams.');
+        logger.info(`Preview of ${fileName(uri)}: ZDL Diagrams needs a server that advertises previewModes`);
+        return open(argument);
+      }
+      if (uri) pendingModes.set(uri.toString(), mode);
+    }
+    const outcome = await open(argument);
+    if (outcome.kind === 'opened') {
+      pendingModes.delete(outcome.documentUri);
+      for (const editor of editors) {
+        if (editor.documentUri === outcome.documentUri) await editor.session.setPreviewMode(mode);
+      }
+    }
+    return outcome;
   }
 
   async function showText(argument: unknown): Promise<PreviewOpenOutcome> {
@@ -398,7 +431,8 @@ export function registerPreviewEditor(
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openToSide, openToSide),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.open, open),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openSequenceDiagrams, open),
-    vscode.commands.registerCommand(PREVIEW_COMMANDS.openModelDocs, open),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openModelDocs, (argument: unknown) => openInMode(argument, 'docs')),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openZdlDiagrams, (argument: unknown) => openInMode(argument, 'diagrams')),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openScriptsDocs, open),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.showText, showText),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectDiagram, selectDiagram),

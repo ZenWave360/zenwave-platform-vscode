@@ -30,6 +30,8 @@ export interface PageRepresentation {
   readonly title: string;
   readonly format: string;
   readonly content: string;
+  /** The kind of element, when the server grouped the set (`diagrams` mode); absent otherwise. */
+  readonly group?: string;
 }
 
 /** A short fingerprint of a representation's content, so the page and a test can say which content is drawn without carrying it. */
@@ -47,6 +49,10 @@ export interface RenderPayload {
   readonly renderMode: RenderMode;
   /** Whether the render mode selector is offered: only a document that has sequence variants. */
   readonly showRenderMode: boolean;
+  /** The kinds the set holds (Services, Aggregates, ...) in the server's order; empty when it is not grouped. */
+  readonly groups: readonly string[];
+  /** The kind shown now; the Element selector lists that kind's representations. Absent when not grouped. */
+  readonly selectedGroup?: string;
 }
 
 /** Host to page. */
@@ -98,6 +104,7 @@ export interface PreviewProbe {
   /** The `src` of every script the page loaded. */
   readonly scripts: readonly string[];
   readonly renderModeSelector: { readonly visible: boolean; readonly value: string; readonly options: readonly string[] };
+  readonly groupSelector: { readonly visible: boolean; readonly value: string; readonly options: readonly string[] };
   readonly diagramSelector: { readonly visible: boolean; readonly value: string; readonly options: readonly { readonly value: string; readonly label: string }[] };
   /** The id of the representation drawn now, if any. */
   readonly renderedId: string | undefined;
@@ -129,6 +136,7 @@ export type InboundMessage =
   | { readonly type: 'zenwave.preview.ready' }
   | { readonly type: 'zenwave.preview.selectRepresentation'; readonly payload: { readonly id: string } }
   | { readonly type: 'zenwave.preview.selectRenderMode'; readonly payload: { readonly mode: RenderMode } }
+  | { readonly type: 'zenwave.preview.selectGroup'; readonly payload: { readonly group: string } }
   | { readonly type: 'zenwave.preview.diagramFailed'; readonly payload: { readonly id: string; readonly message: string } }
   | { readonly type: 'zenwave.preview.copyMermaid'; readonly payload: { readonly content: string } }
   | { readonly type: 'zenwave.preview.followLink'; readonly payload: { readonly href: string } }
@@ -147,6 +155,8 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
       return typeof object?.id === 'string' ? { type, payload: { id: object.id } } : undefined;
     case 'zenwave.preview.selectRenderMode':
       return isRenderMode(object?.mode) ? { type, payload: { mode: object.mode } } : undefined;
+    case 'zenwave.preview.selectGroup':
+      return typeof object?.group === 'string' ? { type, payload: { group: object.group } } : undefined;
     case 'zenwave.preview.diagramFailed':
       return typeof object?.id === 'string' ? { type, payload: { id: object.id, message: typeof object.message === 'string' ? object.message : 'unknown error' } } : undefined;
     case 'zenwave.preview.copyMermaid':

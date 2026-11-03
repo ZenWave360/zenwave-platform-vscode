@@ -60,6 +60,11 @@ export function advertisedRequests(initializeResult: unknown): ReadonlySet<strin
     : []);
 }
 
+/** Whether the server advertised `capabilities.experimental.previewModes`, so `zenwave/preview` takes `mode` (LVR-R17). */
+export function previewModesAdvertised(initializeResult: unknown): boolean {
+  return object(object(object(initializeResult)?.capabilities)?.experimental)?.previewModes === true;
+}
+
 /** Reads a JSON-RPC error's code and data without depending on a transport's error class. */
 export function responseError(error: unknown): { code?: number; data?: unknown } {
   const value = object(error);
@@ -134,6 +139,11 @@ export class LspSupervisor {
   /** The connected server's initialize result, unchanged. */
   get initializeResult(): unknown {
     return this.state.kind === 'connected' ? this.current?.initializeResult : undefined;
+  }
+
+  /** Whether the connected server answers `zenwave/preview` with `mode`; false when none is connected. */
+  get previewModes(): boolean {
+    return previewModesAdvertised(this.initializeResult);
   }
 
   supports(method: string): boolean {

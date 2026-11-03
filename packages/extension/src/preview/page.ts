@@ -59,7 +59,8 @@ export function buildPreviewHtml(resources: PreviewPageResources): string {
 <body data-mermaid-src="${attribute(resources.mermaidUri)}" data-content-src="${attribute(resources.contentUri)}">
 <header id="controls" hidden>
 <label id="render-mode-field" hidden>Render mode <select id="render-mode"></select></label>
-<label id="diagram-field" hidden>Diagram <select id="diagram"></select></label>
+<label id="group-field" hidden>Show <select id="group"></select></label>
+<label id="diagram-field" hidden><span id="diagram-label">Diagram</span> <select id="diagram"></select></label>
 </header>
 <div id="state" role="status" hidden></div>
 <main id="view" tabindex="-1"></main>

@@ -1,4 +1,4 @@
-import type { Preview, SequenceRenderMode } from '../lsp/requests.js';
+import type { Preview, PreviewMode, SequenceRenderMode } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import type { StatePresentation } from '../eventflow/protocol.js';
 import type { SessionLog } from '../eventflow/session.js';
@@ -20,7 +20,9 @@ export interface PreviewSessionPorts {
   /** Whether the document has sequence variants, so the render mode means something for it (ZFL). */
   readonly hasRenderMode: boolean;
   /** `languageServer.requests.preview`. */
-  preview(uri: string, sequenceRenderMode?: SequenceRenderMode): Promise<RequestResult<Preview>>;
+  preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode): Promise<RequestResult<Preview>>;
+  /** Whether this document can show ZDL Diagrams: a ZDL, and a server that advertised `previewModes` (MP-R25). Asked each time, as the server can reconnect. */
+  diagramsAvailable?(): boolean;
   /** `webview.postMessage`. */
   post(message: OutboundMessage): PromiseLike<boolean>;
   /** Runs a command the user chose from a state the editor is showing. */
@@ -49,6 +51,8 @@ export class PreviewSession {
   page: PreviewPageState = { kind: 'loading' };
   data: PreviewDataState = { kind: 'loading' };
   renderMode: RenderMode = DEFAULT_RENDER_MODE;
+  /** What the preview was asked to show (MP-R25). `diagrams` only takes effect while `diagramsAvailable`. */
+  requestedMode: PreviewMode = 'docs';
   /** The id shown now: the last the user chose, or what `reselect` kept. */
   selectedId: string | undefined;
   /** The last good set, in the server's order. */
@@ -75,6 +79,25 @@ export class PreviewSession {
 
   constructor(private readonly ports: PreviewSessionPorts) {
     this.present(true);
+  }
+
+  /** The mode the server is asked for: `diagrams` only when it was chosen and the server can answer it, else today's behaviour. */
+  get mode(): PreviewMode {
+    return this.requestedMode === 'diagrams' && this.ports.diagramsAvailable?.() === true ? 'diagrams' : 'docs';
+  }
+
+  /** The kinds of the set in the server's order, when it is grouped (MP-R25). Empty otherwise. */
+  get groups(): readonly string[] {
+    const groups: string[] = [];
+    for (const item of this.representations) {
+      if (item.group !== undefined && !groups.includes(item.group)) groups.push(item.group);
+    }
+    return groups;
+  }
+
+  /** The kind of the representation shown now. */
+  get selectedGroup(): string | undefined {
+    return this.representations.find((item) => item.id === this.selectedId)?.group;
   }
 
   get hasPreview(): boolean {
@@ -119,15 +142,23 @@ export class PreviewSession {
   private async request(): Promise<void> {
     const generation = ++this.generation;
     this.requests++;
-    const result = await this.ports.preview(this.ports.documentUri, this.ports.hasRenderMode ? this.renderMode : undefined);
+    const mode = this.mode;
+    const renderMode = this.ports.hasRenderMode ? this.renderMode : undefined;
+    const result = await (mode === 'diagrams'
+      ? this.ports.preview(this.ports.documentUri, renderMode, mode)
+      : this.ports.preview(this.ports.documentUri, renderMode));
     if (this.disposed || this.again || generation !== this.generation) return;
     const data = previewStateFromResult(result);
     this.record(data);
     this.data = data;
     if (result.kind === 'ok' && result.value.representations.length > 0) {
       const { representations, defaultRepresentationId } = result.value;
-      const choice = reselect(this.selectedId, representations, defaultRepresentationId);
-      this.representations = representations.map((item) => ({ id: item.id, title: item.title, format: item.format, content: item.content }));
+      // A grouped set keeps the element only by its exact id: its ids do not name an outcome (MP-R25, MP-R12).
+      const choice = reselect(this.selectedId, representations, defaultRepresentationId, mode !== 'diagrams');
+      this.representations = representations.map((item) => ({
+        id: item.id, title: item.title, format: item.format, content: item.content,
+        ...(mode === 'diagrams' && item.group !== undefined ? { group: item.group } : {}),
+      }));
       this.defaultRepresentationId = defaultRepresentationId;
       if (choice) {
         if (this.selectedId !== undefined && choice.id !== this.selectedId) {
@@ -148,6 +179,28 @@ export class PreviewSession {
     this.selectedId = id;
     this.renderIfReady();
     this.updateMarkdownContext();
+    return true;
+  }
+
+  /** Shows the first element of a kind (MP-R25). Answers whether the set has that kind. */
+  selectGroup(group: string): boolean {
+    const first = this.representations.find((item) => item.group === group);
+    if (!first) return false;
+    if (this.selectedGroup === group) return true;
+    return this.selectRepresentation(first.id);
+  }
+
+  /** Chooses between the page and the diagrams (MP-R25) and asks the server again. Answers false when diagrams cannot be offered. */
+  async setPreviewMode(mode: PreviewMode): Promise<boolean> {
+    if (mode === 'diagrams' && this.ports.diagramsAvailable?.() !== true) {
+      this.ports.log.info(`Preview of ${this.ports.fileName}: ZDL Diagrams needs a server that advertises previewModes`);
+      return false;
+    }
+    if (this.requestedMode === mode) return true;
+    this.requestedMode = mode;
+    this.selectedId = undefined;
+    this.representations = [];
+    await this.refresh();
     return true;
   }
 
@@ -188,6 +241,9 @@ export class PreviewSession {
         return;
       case 'zenwave.preview.selectRepresentation':
         this.selectRepresentation(message.payload.id);
+        return;
+      case 'zenwave.preview.selectGroup':
+        this.selectGroup(message.payload.group);
         return;
       case 'zenwave.preview.selectRenderMode':
         void this.setRenderMode(message.payload.mode);
@@ -258,6 +314,8 @@ export class PreviewSession {
       selectedId: this.selectedId,
       renderMode: this.renderMode,
       showRenderMode: this.ports.hasRenderMode,
+      groups: this.groups,
+      ...(this.selectedGroup === undefined ? {} : { selectedGroup: this.selectedGroup }),
     };
     this.lastRender = payload;
     this.post({ type: 'zenwave.preview.render', payload });
