@@ -278,9 +278,13 @@ test('the manifest registers an optional diagram editor for .zfl and offers it f
   assert.deepEqual(contributes.customEditors.filter((editor: { viewType: string }) => editor.viewType === EVENTFLOW_VIEW_TYPE), [{ viewType: EVENTFLOW_VIEW_TYPE, displayName: 'ZenWave EventFlow Diagram', selector: [{ filenamePattern: '*.zfl' }], priority: 'option' }]);
   assert.deepEqual(manifest.zenwaveEventFlowWebview, { package: '@zenwave360/vistas-eventflow-webview', version: manifest.devDependencies['@zenwave360/vistas-eventflow-webview'], protocol: EVENTFLOW_PROTOCOL, protocolVersion: EVENTFLOW_PROTOCOL_VERSION });
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
-  assert.deepEqual(title.filter((item) => item.submenu).map((item) => [item.submenu, item.when]), [['zenwave.modelViews', '(resourceExtname == .zfl || resourceExtname == .zdl || resourceExtname == .zw) && !isInDiffEditor']]);
+  assert.deepEqual(title.filter((item) => item.submenu).map((item) => [item.submenu, item.when]), [
+    ['zenwave.zflViews', 'resourceExtname == .zfl && !isInDiffEditor'],
+    ['zenwave.zdlViews', 'resourceExtname == .zdl && !isInDiffEditor'],
+    ['zenwave.zwViews', 'resourceExtname == .zw && !isInDiffEditor'],
+  ]);
   assert.ok(!title.some((item) => item.command === 'zenwave.eventflow.open' || item.command === 'zenwave.eventflow.openToSide'), 'no title-bar icon of its own');
-  const submenu = contributes.menus['zenwave.modelViews'] as { command: string; when: string }[];
+  const submenu = contributes.menus['zenwave.zflViews'] as { command: string; when: string }[];
   assert.deepEqual(submenu.map((item) => item.command).filter((command) => command.startsWith('zenwave.eventflow.')).sort(), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.eventflow.showText']);
   for (const item of submenu.filter((entry) => entry.command === 'zenwave.eventflow.open' || entry.command === 'zenwave.eventflow.openToSide')) assert.match(item.when, /^resourceExtname == .zfl /, `${item.command} stays on ZFL only`);
   for (const item of title.filter((entry) => entry.command)) {

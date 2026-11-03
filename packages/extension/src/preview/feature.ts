@@ -12,6 +12,9 @@ import { PreviewSession } from './session.js';
 export const PREVIEW_COMMANDS = {
   open: 'zenwave.preview.open',
   openToSide: 'zenwave.preview.openToSide',
+  openSequenceDiagrams: 'zenwave.preview.openSequenceDiagrams',
+  openModelDocs: 'zenwave.preview.openModelDocs',
+  openScriptsDocs: 'zenwave.preview.openScriptsDocs',
   showText: 'zenwave.preview.showText',
   selectDiagram: 'zenwave.preview.selectDiagram',
   selectRenderMode: 'zenwave.preview.selectRenderMode',
@@ -40,7 +43,7 @@ export interface PreviewEditorApi {
   readonly session: PreviewSession;
   /** Resolves when no request is scheduled or running. */
   settled(): Promise<void>;
-  probe(followLink?: string): Promise<PreviewProbe>;
+  probe(followLink?: string, copyMermaid?: number): Promise<PreviewProbe>;
 }
 
 export interface PreviewApi {
@@ -154,6 +157,12 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
   }
 
   private receive(message: unknown): void {
+    if (typeof message === 'object' && message !== null && (message as { type?: unknown }).type === 'zenwave.preview.copyMermaid') {
+      const content = (message as { payload?: { content?: unknown } }).payload?.content;
+      if (typeof content === 'string') void Promise.resolve(vscode.env.clipboard.writeText(content)).catch((error: unknown) => {
+        this.deps.logger.warn(`Preview of ${fileName(this.uri)}: could not copy Mermaid source: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
     const wasLoading = this.session.page.kind === 'loading';
     this.session.receive(message);
     if (wasLoading && this.session.page.kind !== 'loading' && this.loadTimer !== undefined) {
@@ -172,8 +181,8 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
     return this.refresher.idle();
   }
 
-  probe(followLink?: string): Promise<PreviewProbe> {
-    return this.session.probe(followLink);
+  probe(followLink?: string, copyMermaid?: number): Promise<PreviewProbe> {
+    return this.session.probe(followLink, copyMermaid);
   }
 
   dispose(): void {
@@ -340,6 +349,9 @@ export function registerPreviewEditor(
     }),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openToSide, openToSide),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.open, open),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openSequenceDiagrams, open),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openModelDocs, open),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openScriptsDocs, open),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.showText, showText),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectDiagram, selectDiagram),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectRenderMode, selectRenderMode),

@@ -17,6 +17,8 @@ export const EXPLORER_VIEWS = {
 export const EXPLORER_COMMANDS = {
   refresh: 'zenwave.explorer.refresh',
   openNode: 'zenwave.explorer.openNode',
+  goToDefinition: 'zenwave.explorer.goToDefinition',
+  goToReferences: 'zenwave.explorer.goToReferences',
   openRelated: 'zenwave.explorer.openRelated',
   openManifest: 'zenwave.explorer.openManifest',
 } as const;
@@ -358,6 +360,13 @@ export function registerModelExplorer(
     }),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.refresh, () => refreshAll()),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openNode, openNode),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToDefinition, openNode),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, (element: unknown) => {
+      const item = (element as ExplorerNode | undefined)?.node;
+      // The hierarchy id is the semantic id. A position in the declaration is not: symbolAt there is null or a neighbour.
+      if (!item?.sourceUri || !item.id.includes('#')) return undefined;
+      return vscode.commands.executeCommand('zenwave.model.reverseReferences', vscode.Uri.parse(item.sourceUri, true), item.sourceRange?.start, item.id);
+    }),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openRelated, openRelated),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openManifest, openManifest),
   );

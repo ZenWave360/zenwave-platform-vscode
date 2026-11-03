@@ -53,7 +53,7 @@ export interface RenderPayload {
 export type OutboundMessage =
   | { readonly type: 'zenwave.preview.render'; readonly payload: RenderPayload }
   | { readonly type: 'zenwave.host.state'; readonly payload: StatePresentation | null }
-  | { readonly type: 'zenwave.host.probe'; readonly payload: { readonly requestId: number; readonly followLink?: string } };
+  | { readonly type: 'zenwave.host.probe'; readonly payload: { readonly requestId: number; readonly followLink?: string; readonly copyMermaid?: number } };
 
 /** What a Markdown or HTML representation turned into on the page. */
 export interface PreviewContentProbe {
@@ -66,6 +66,8 @@ export interface PreviewContentProbe {
   /** Elements that must never survive sanitising: script, frame, form, style, link, event handler attributes. */
   readonly hostile: number;
   readonly diagrams: { readonly drawn: number; readonly failed: number };
+  /** One source per Copy as Mermaid button, in page order. */
+  readonly copyMermaidSources: readonly string[];
   /** Links inside the page, and those with no element carrying their anchor. */
   readonly fragments: readonly string[];
   readonly unresolved: readonly string[];
@@ -128,6 +130,7 @@ export type InboundMessage =
   | { readonly type: 'zenwave.preview.selectRepresentation'; readonly payload: { readonly id: string } }
   | { readonly type: 'zenwave.preview.selectRenderMode'; readonly payload: { readonly mode: RenderMode } }
   | { readonly type: 'zenwave.preview.diagramFailed'; readonly payload: { readonly id: string; readonly message: string } }
+  | { readonly type: 'zenwave.preview.copyMermaid'; readonly payload: { readonly content: string } }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
   | { readonly type: 'zenwave.host.action'; readonly payload: { readonly command: string } }
   | { readonly type: 'zenwave.host.probeResult'; readonly payload: PreviewProbe & { readonly requestId: number } };
@@ -145,6 +148,8 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
       return isRenderMode(object?.mode) ? { type, payload: { mode: object.mode } } : undefined;
     case 'zenwave.preview.diagramFailed':
       return typeof object?.id === 'string' ? { type, payload: { id: object.id, message: typeof object.message === 'string' ? object.message : 'unknown error' } } : undefined;
+    case 'zenwave.preview.copyMermaid':
+      return typeof object?.content === 'string' ? { type, payload: { content: object.content } } : undefined;
     case 'zenwave.host.loadError':
       return { type, payload: { message: typeof object?.message === 'string' ? object.message : 'unknown error' } };
     case 'zenwave.host.action':
