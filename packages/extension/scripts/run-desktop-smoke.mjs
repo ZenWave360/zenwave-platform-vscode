@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { downloadAndUnzipVSCode, runTests, runVSCodeCommand } from '@vscode/test-electron';
-import { SmokeTimeoutError, captureEditorProcess, editorPid, killProcessTree, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
+import { captureEditorProcess, finishDesktopSmoke, killProcessTree, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
 
 // test-electron calls require('child_process'). The ESM namespace is read-only, so the capture wraps this object.
 const childProcess = createRequire(import.meta.url)('node:child_process');
@@ -49,84 +49,74 @@ function logContents(directory) {
   }).join('\n');
 }
 
-let timedOut = false;
-try {
-  // The download, the install and runTests all wait with no deadline of their own. A hung editor never settles.
-  await withDeadline((async () => {
-    const vscodeExecutablePath = packagedVsix
-      ? await downloadAndUnzipVSCode('stable')
-      : undefined;
-    if (packagedVsix) {
-      await runVSCodeCommand(['--install-extension', path.resolve(packagedVsix), '--force',
-        '--user-data-dir', userData, '--extensions-dir', extensions], {
-        version: 'stable',
+// A rejected deadline does not stop the editor. finishDesktopSmoke kills its tree, waits, then exits.
+await finishDesktopSmoke(() => editorCapture.editor(), killProcessTree, (code) => process.exit(code), {
+  async run() {
+    // The download, the install and runTests all wait with no deadline of their own. A hung editor never settles.
+    await withDeadline((async () => {
+      const vscodeExecutablePath = packagedVsix
+        ? await downloadAndUnzipVSCode('stable')
+        : undefined;
+      if (packagedVsix) {
+        await runVSCodeCommand(['--install-extension', path.resolve(packagedVsix), '--force',
+          '--user-data-dir', userData, '--extensions-dir', extensions], {
+          version: 'stable',
+        });
+      }
+      await runTests({
+        ...(vscodeExecutablePath ? { vscodeExecutablePath } : {}),
+        extensionDevelopmentPath: packagedVsix
+          ? path.join(projectDir, 'test/smoke-harness')
+          : projectDir,
+        extensionTestsPath: path.join(projectDir, '.test-dist/node/index.js'),
+        launchArgs: [
+          workspace,
+          '--user-data-dir', userData,
+          '--extensions-dir', extensions,
+          ...(packagedVsix ? [] : ['--disable-extensions']),
+        ],
       });
+    })(), timeoutMs, timeoutMessage);
+    const logs = logContents(path.join(userData, 'logs'));
+    if (!logs.includes('ZenWave SDK runs only through a POSIX shell') ||
+        !logs.includes('Could not find "definitely-not-a-zenwave-smoke-executable"') ||
+        !logs.includes('Searched PATH=')) {
+      throw new Error(`Expected unsupported-shell and missing-executable diagnostics in ${userData}/logs`);
     }
-    await runTests({
-      ...(vscodeExecutablePath ? { vscodeExecutablePath } : {}),
-      extensionDevelopmentPath: packagedVsix
-        ? path.join(projectDir, 'test/smoke-harness')
-        : projectDir,
-      extensionTestsPath: path.join(projectDir, '.test-dist/node/index.js'),
-      launchArgs: [
-        workspace,
-        '--user-data-dir', userData,
-        '--extensions-dir', extensions,
-        ...(packagedVsix ? [] : ['--disable-extensions']),
-      ],
-    });
-  })(), timeoutMs, timeoutMessage);
-  const logs = logContents(path.join(userData, 'logs'));
-  if (!logs.includes('ZenWave SDK runs only through a POSIX shell') ||
-      !logs.includes('Could not find "definitely-not-a-zenwave-smoke-executable"') ||
-      !logs.includes('Searched PATH=')) {
-    throw new Error(`Expected unsupported-shell and missing-executable diagnostics in ${userData}/logs`);
-  }
-  console.log('PASS: refusals report shell guidance and executable/PATH diagnostics');
-  for (const [expected, what] of [
-    ['language server: ipc (Node child process)', 'the chosen transport at activation'],
-    ['Architecture manifest: ', 'which manifest was resolved'],
-    ['from the zenwave.workspace.manifest setting', 'the setting route'],
-    ['Language server connected: zenwave-lsp', 'that the server started'],
-    ['zenwave.lsp.serverPath names', 'why a configured server could not start'],
-    ["Sending request 'textDocument/hover", 'the protocol trace with zenwave.lsp.trace.server'],
-    ["Sending notification 'workspace/didChangeWatchedFiles'", 'the manifest change notified to the server'],
-    ['Credential request for https://github.com.attacker.example/x refused', 'the credential refusal'],
-    ['Architecture tree: ', 'what the architecture tree shows'],
-    ['Architecture tree is empty: no architecture manifest was resolved', 'why the architecture tree is empty without a manifest'],
-    ['Model tree is empty: it needs the ZenWave language server', 'why the model tree is empty without a server'],
-    ['EventFlow diagram for place-order-flow.zfl: page loaded (protocol version 1)', 'that the diagram page loaded and its protocol version'],
-    ['EventFlow diagram for place-order-flow.zfl: rendered', 'a diagram request outcome'],
-    ['EventFlow diagram for place-order-flow.zfl: the language server could not read the document', 'why a diagram could not be produced'],
-    ['EventFlow diagram for checkout.zfl: needs the ZenWave language server', 'that a diagram needs the server'],
-    ['Preview of checkout.zfl: page loaded', 'that the preview page loaded'],
-    ['Preview of checkout.zfl: received', 'a preview request outcome'],
-    ['Preview of smoke-unreadable.zfl: the language server could not read the document', 'why a preview could not be produced'],
-    ['Preview of orders.zdl: needs the ZenWave language server', 'that a preview needs the server'],
-  ]) {
-    if (!logs.includes(expected)) throw new Error(`The ZenWave output channel does not record ${what} ("${expected}")`);
-  }
-  console.log('PASS: output channel records transport, manifest route, server lifecycle, protocol trace and refusals');
-  // Check the absolute deletion target is a child of this runner's test root.
-  const relative = path.relative(path.resolve(testRoot), path.resolve(isolated));
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unsafe cleanup path');
-  fs.rmSync(isolated, { recursive: true, force: true });
-} catch (error) {
-  console.error(`Desktop extension-host smoke test failed; retained evidence in ${isolated}`, error);
-  process.exitCode = 1;
-  timedOut = error instanceof SmokeTimeoutError;
-} finally {
-  editorCapture.restore();
-}
-// A rejected deadline does not stop the editor. Kill its tree, then exit, or the process keeps Node alive.
-if (timedOut) {
-  const pid = editorPid(editorCapture.editor());
-  if (pid !== undefined) {
-    try {
-      await killProcessTree(pid);
-    } catch (error) {
-      console.error('Could not stop the desktop smoke editor', error);
+    console.log('PASS: refusals report shell guidance and executable/PATH diagnostics');
+    for (const [expected, what] of [
+      ['language server: ipc (Node child process)', 'the chosen transport at activation'],
+      ['Architecture manifest: ', 'which manifest was resolved'],
+      ['from the zenwave.workspace.manifest setting', 'the setting route'],
+      ['Language server connected: zenwave-lsp', 'that the server started'],
+      ['zenwave.lsp.serverPath names', 'why a configured server could not start'],
+      ["Sending request 'textDocument/hover", 'the protocol trace with zenwave.lsp.trace.server'],
+      ["Sending notification 'workspace/didChangeWatchedFiles'", 'the manifest change notified to the server'],
+      ['Credential request for https://github.com.attacker.example/x refused', 'the credential refusal'],
+      ['Architecture tree: ', 'what the architecture tree shows'],
+      ['Architecture tree is empty: no architecture manifest was resolved', 'why the architecture tree is empty without a manifest'],
+      ['Model tree is empty: it needs the ZenWave language server', 'why the model tree is empty without a server'],
+      ['EventFlow diagram for place-order-flow.zfl: page loaded (protocol version 1)', 'that the diagram page loaded and its protocol version'],
+      ['EventFlow diagram for place-order-flow.zfl: rendered', 'a diagram request outcome'],
+      ['EventFlow diagram for place-order-flow.zfl: the language server could not read the document', 'why a diagram could not be produced'],
+      ['EventFlow diagram for checkout.zfl: needs the ZenWave language server', 'that a diagram needs the server'],
+      ['Preview of checkout.zfl: page loaded', 'that the preview page loaded'],
+      ['Preview of checkout.zfl: received', 'a preview request outcome'],
+      ['Preview of smoke-unreadable.zfl: the language server could not read the document', 'why a preview could not be produced'],
+      ['Preview of orders.zdl: needs the ZenWave language server', 'that a preview needs the server'],
+    ]) {
+      if (!logs.includes(expected)) throw new Error(`The ZenWave output channel does not record ${what} ("${expected}")`);
     }
-  }
-  process.exit(process.exitCode || 1);
-}
+    console.log('PASS: output channel records transport, manifest route, server lifecycle, protocol trace and refusals');
+  },
+  evidenceDir: isolated,
+  restore() {
+    editorCapture.restore();
+  },
+  removeEvidence() {
+    // Check the absolute deletion target is a child of this runner's test root.
+    const relative = path.relative(path.resolve(testRoot), path.resolve(isolated));
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unsafe cleanup path');
+    fs.rmSync(isolated, { recursive: true, force: true });
+  },
+});

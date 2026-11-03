@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { runTests } from '@vscode/test-web';
-import { SmokeTimeoutError, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
+import { finishBrowserSmoke, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
 
 const timeoutMs = smokeTimeoutMs();
 const timeoutMessage = `Browser extension-host smoke test timed out after ${timeoutMs}ms. The test page did not finish. A page that answers 500 leaves the test-web server and browser running, so this process is stopping.`;
@@ -27,29 +27,24 @@ if (packagedExtension) {
   extensionTestsPath = path.join(testDirectory, 'index.js');
 }
 
-let timedOut = false;
-try {
+// The rejected deadline does not stop the server or the browser. There is no handle to close them.
+// finishBrowserSmoke removes a staged copy and, on a timeout, exits, which stops this process.
+await finishBrowserSmoke(undefined, undefined, (code) => process.exit(code), {
   // The shared suite exercises shipped authoring and absence of SDK Run lenses
   // in the actual Web Worker host, including when CI supplies a packaged build.
   // test-web's promise stays pending when the page answers 500, so the deadline has to reject it.
-  await withDeadline(runTests({
+  run: () => withDeadline(runTests({
     browserType: 'chromium',
     quality: 'stable',
     extensionDevelopmentPath,
     extensionTestsPath,
     folderPath: path.join(projectDir, 'fixtures'),
     headless: true,
-  }), timeoutMs, timeoutMessage);
-} catch (error) {
-  console.error('Browser extension-host smoke test failed', error);
-  process.exitCode = 1;
-  timedOut = error instanceof SmokeTimeoutError;
-} finally {
-  if (staged) {
+  }), timeoutMs, timeoutMessage),
+  cleanup() {
+    if (!staged) return;
     const relative = path.relative(path.resolve(testRoot), path.resolve(staged));
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unsafe cleanup path');
     fs.rmSync(staged, { recursive: true, force: true });
-  }
-}
-// The rejected deadline does not stop the server or the browser. Exit after the staged copy is removed.
-if (timedOut) process.exit(process.exitCode || 1);
+  },
+});

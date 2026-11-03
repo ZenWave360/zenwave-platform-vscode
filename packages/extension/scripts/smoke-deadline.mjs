@@ -2,6 +2,8 @@
 // test-electron never settles when the editor does not exit. The deadline rejects; the caller still runs its
 // cleanup and then exits, because the server, browser or editor can keep the process alive after the rejection.
 // test-electron kills the editor only when this process receives SIGINT, so a timeout has to kill that tree first.
+// finishSmoke is that order. A cleanup failure after a timeout is reported and does not skip that kill or that exit.
+// A normal failure only sets a failure code, so the process can end on its own. A cleanup failure then may propagate.
 
 import { spawn } from 'node:child_process';
 
@@ -115,4 +117,126 @@ export function editorPid(child) {
   if (!Number.isInteger(pid) || pid <= 0) return undefined;
   if (child.exitCode != null || child.signalCode != null) return undefined;
   return pid;
+}
+
+function isThenable(value) {
+  return value != null && typeof value.then === 'function';
+}
+
+/**
+ * Settle one smoke run.
+ * `run` is the deadline-bounded work. `cleanup` runs before a kill or an exit, and a promise it
+ * returns is awaited. Success runs `onSuccess` and does not kill or exit.
+ * Any other failure is reported and does not kill or exit; the caller sets the failure code.
+ * On those paths a cleanup error propagates.
+ * A {@link SmokeTimeoutError} is reported, cleaned up, then `kill(child)` is awaited when `kill`
+ * is set, and only then `exit` runs with a failure code. A cleanup error on that path is passed to
+ * `onCleanupError` when set, otherwise to `console.error`, and the kill and the exit still run.
+ * `child` is read at kill time, so it may be a function that returns the editor the run spawned.
+ * Exit stays in the same turn as a finished kill. `process.exit` ends the process, and a turn in
+ * between would let the hung server or browser keep running.
+ */
+export async function finishSmoke(child, kill, exit, { run, onSuccess, onFailure, onKillError, onCleanupError, cleanup, failureCode }) {
+  let timedOut = false;
+  try {
+    await run();
+    if (onSuccess) {
+      const pending = onSuccess();
+      if (isThenable(pending)) await pending;
+    }
+  } catch (error) {
+    onFailure(error);
+    timedOut = error instanceof SmokeTimeoutError;
+  } finally {
+    if (cleanup) {
+      try {
+        const pending = cleanup();
+        if (isThenable(pending)) await pending;
+      } catch (error) {
+        // A timeout still has to kill and exit. Any other cleanup error leaves the function, as before.
+        if (!timedOut) throw error;
+        if (onCleanupError) onCleanupError(error);
+        else console.error(error);
+      }
+    }
+  }
+  if (!timedOut) return;
+  if (kill) {
+    try {
+      const pending = kill(child);
+      if (isThenable(pending)) await pending;
+    } catch (error) {
+      if (!onKillError) throw error;
+      onKillError(error);
+    }
+  }
+  exit(failureCode() || 1);
+}
+
+const defaultFailureCode = () => process.exitCode || 1;
+const defaultSetExitCode = (code) => {
+  process.exitCode = code;
+};
+
+/**
+ * Desktop settlement. The evidence directory is removed only after `run` succeeds.
+ * On a timeout the editor still running under `child` is killed, that kill is awaited, and only then
+ * this process exits. `kill` is {@link killProcessTree} for a real run.
+ */
+export function finishDesktopSmoke(child, kill, exit, {
+  run,
+  evidenceDir,
+  restore,
+  removeEvidence,
+  logError = console.error,
+  setExitCode = defaultSetExitCode,
+  exitCode = defaultFailureCode,
+}) {
+  return finishSmoke(child, (current) => {
+    const editor = typeof current === 'function' ? current() : current;
+    const pid = editorPid(editor);
+    if (pid === undefined) return undefined;
+    return kill(pid);
+  }, exit, {
+    run,
+    onSuccess: removeEvidence,
+    onFailure(error) {
+      logError(`Desktop extension-host smoke test failed; retained evidence in ${evidenceDir}`, error);
+      setExitCode(1);
+    },
+    onKillError(error) {
+      logError('Could not stop the desktop smoke editor', error);
+    },
+    onCleanupError(error) {
+      logError('Could not restore the desktop smoke process capture', error);
+    },
+    cleanup: restore,
+    failureCode: exitCode,
+  });
+}
+
+/**
+ * Browser settlement. test-web keeps the server and the browser when the page never finishes, and it
+ * does not return either of them. Cleanup removes a staged copy. On a timeout, `kill(child)` runs
+ * when a kill was given, and only then `exit` stops this process, which is what stops the server.
+ */
+export function finishBrowserSmoke(child, kill, exit, {
+  run,
+  cleanup,
+  logError = console.error,
+  setExitCode = defaultSetExitCode,
+  exitCode = defaultFailureCode,
+}) {
+  return finishSmoke(child, kill, exit, {
+    run,
+    onFailure(error) {
+      logError('Browser extension-host smoke test failed', error);
+      setExitCode(1);
+    },
+    onCleanupError(error) {
+      logError('Could not remove the staged browser smoke copy', error);
+    },
+    cleanup,
+    failureCode: exitCode,
+  });
 }
