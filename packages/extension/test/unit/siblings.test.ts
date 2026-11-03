@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 // @ts-expect-error A build script without type declarations.
 import { linkedSiblings, linkSiblings } from '../../scripts/siblings.mjs';
+// @ts-expect-error A build script without type declarations.
+import { SIBLING_BUILDS, siblingBuildCommand } from '../../scripts/build-siblings.mjs';
 
 const DSL = '@zenwave360/dsl';
 let workspace: string;
@@ -63,6 +65,45 @@ test('a directory holding another package is not linked', () => {
   buildDslSibling('@zenwave360/other');
   linkSiblings(root, {});
   assert.equal(installedVersion(), '1.10.0');
+});
+
+test('each sibling build uses an absolute Gradle wrapper, and vistas keeps pnpm', () => {
+  const expected = [
+    {
+      directory: 'dsl-kotlin',
+      args: [':dsl-kotlin:jsProductionExecutableCompileSync', ':dsl-kotlin:jsPackageJson', '--console=plain'],
+    },
+    {
+      directory: 'zenwave-lsp',
+      args: [':lsp-js:lspJsNpmPack', '--console=plain'],
+    },
+    {
+      directory: 'zenwave-architectural-vistas',
+      args: ['--filter', '@zenwave360/vistas-eventflow-webview...', 'build'],
+    },
+  ];
+  assert.deepEqual(
+    SIBLING_BUILDS.map((build: { directory: string; args: string[] }) => ({ directory: build.directory, args: build.args })),
+    expected,
+  );
+
+  for (const build of SIBLING_BUILDS) {
+    const windows = siblingBuildCommand(root, build, 'win32');
+    const posix = siblingBuildCommand(root, build, 'linux');
+    assert.equal(windows.directory, join(workspace, build.directory));
+    assert.equal(posix.directory, join(workspace, build.directory));
+    assert.deepEqual(windows.args, build.args);
+    assert.deepEqual(posix.args, build.args);
+    assert.equal(windows.shell, true);
+    assert.equal(posix.shell, false);
+    if (build.tool === 'pnpm') {
+      assert.equal(windows.command, 'pnpm');
+      assert.equal(posix.command, 'pnpm');
+      continue;
+    }
+    assert.equal(windows.command, join(workspace, build.directory, 'gradlew.bat'));
+    assert.equal(posix.command, join(workspace, build.directory, 'gradlew'));
+  }
 });
 
 test('opting out leaves the registry package, and removes a link but not what it points at', () => {
