@@ -71,6 +71,8 @@ const VERSION_JOBS = [
   ['pre-release.yml', 'trace'],
   ['release.yml', 'publish'],
 ] as const;
+const VALID_VERSION = '1.2.3';
+const INVALID_VERSION = '01.2.3';
 // Cases the workflow regex and parseExtensionVersion have to agree on, including leading zeros and a trailing command.
 const VERSION_CASES = ['0.0.0', '0.1.0', '0.1.58', '10.20.30', '01.2.3', '1.02.3', '1.2.03', '1.2.3-pre', 'v1.2.3', '', '1.2', '1.2.3 ', '1.2.3;id'] as const;
 
@@ -176,28 +178,32 @@ function shellCode(run: string): string {
   return run.split('\n').map((line) => line.replace(/#.*/, '')).join('\n');
 }
 
-/** `set +e` or `set +euo pipefail` turns off errexit, so a failing check does not fail the step. */
-function setDisablesErrexit(code: string): boolean {
-  for (const line of code.split('\n')) {
-    const args = /^set\s+(\S.*)$/.exec(line.trim())?.[1]?.split(/\s+/) ?? [];
-    for (const arg of args) {
-      if (arg.startsWith('+') && !arg.startsWith('+o') && arg.includes('e')) return true;
-    }
-  }
-  return false;
+/** The parsed `run` block, with `VERSION` set. An early `exit 0` is status 0. */
+function runVersionGuard(run: string, version: string): { status: number | null; output: string } {
+  const result = spawnSync('bash', ['--noprofile', '--norc', '-s'], {
+    input: run.endsWith('\n') ? run : `${run}\n`,
+    encoding: 'utf8',
+    windowsHide: true,
+    env: { ...process.env, VERSION: version },
+  });
+  if (isEnoent(result.error)) assert.fail('bash is not on PATH');
+  if (result.error) assert.fail(`bash failed to start: ${result.error.message}`);
+  return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
-function swallowsFailure(run: string): string[] {
+/** Names the bypass when an invalid version exits 0. */
+function guardBypass(run: string): string | undefined {
+  if (runVersionGuard(run, INVALID_VERSION).status !== 0) return undefined;
   const code = shellCode(run);
-  const problems: string[] = [];
-  if (/\|\|\s*true\b/.test(code)) problems.push('|| true swallows the version check failure');
-  if (/\|\|\s*:/.test(code)) problems.push('|| : swallows the version check failure');
-  if (setDisablesErrexit(code)) problems.push('set +e swallows the version check failure');
+  if (/\|\|\s*true\b/.test(code)) return '|| true swallows the version check failure';
+  if (/\|\|\s*:/.test(code)) return '|| : swallows the version check failure';
   const checkAt = code.indexOf(VERSION_CHECK);
-  if (checkAt !== -1 && /\bexit\s+0\b/.test(code.slice(checkAt + VERSION_CHECK.length))) {
-    problems.push('exit 0 after the version check swallows the failure');
+  if (checkAt === -1) return 'the version check never runs';
+  if (/\bexit\s+0\b/.test(code.slice(0, checkAt))) return 'exit 0 before the version check skips it';
+  if (/\bexit\s+0\b/.test(code.slice(checkAt + VERSION_CHECK.length))) {
+    return 'exit 0 after the version check swallows the failure';
   }
-  return problems;
+  return 'an invalid version passes the version check';
 }
 
 function versionCheckProblems(step: WorkflowStep): string[] {
@@ -210,7 +216,10 @@ function versionCheckProblems(step: WorkflowStep): string[] {
     problems.push('the version check has no run script');
     return problems;
   }
-  problems.push(...swallowsFailure(step.run));
+  if (!bashOnPath()) return problems;
+  const bypass = guardBypass(step.run);
+  if (bypass) problems.push(bypass);
+  if (runVersionGuard(step.run, VALID_VERSION).status !== 0) problems.push('a valid version fails the version check');
   return problems;
 }
 
@@ -233,6 +242,14 @@ function replaceVersionStep(text: string, jobName: string, edit: (step: string) 
     assert.notEqual(edited, step, `${jobName} version step was not changed`);
     return jobText.slice(0, at) + edited + jobText.slice(next);
   });
+}
+
+/** Replaces the version `if` with one command, so the fixture is the guard the job would run. */
+function replaceVersionGuard(step: string, replacement: string): string {
+  const start = step.indexOf('if [[ ! "$VERSION" =~ $version_re ]]; then\n');
+  const end = step.indexOf('          fi\n', start);
+  if (start === -1 || end === -1) return step;
+  return `${step.slice(0, start)}${replacement}\n${step.slice(end + '          fi\n'.length)}`;
 }
 
 function versionRegex(run: string): string {
@@ -312,7 +329,7 @@ test('publish and trace check the version format before they use it', () => {
   }
 });
 
-test('a mutated version check that is skipped or swallows its failure is reported', () => {
+test('a mutated version check that is skipped is reported', () => {
   const header = `      - name: ${VERSION_STEP_NAME}\n`;
   const mutations: { label: string; reported: string; edit: (step: string) => string }[] = [
     {
@@ -325,32 +342,103 @@ test('a mutated version check that is skipped or swallows its failure is reporte
       reported: 'if can skip',
       edit: (step) => step.replace(header, `${header}        if: false\n`),
     },
-    {
-      label: '|| true',
-      reported: '|| true',
-      edit: (step) => step.replace('\n            exit 1\n', '\n            exit 1 || true\n'),
-    },
-    {
-      label: '|| :',
-      reported: '|| :',
-      edit: (step) => step.replace('\n            exit 1\n', '\n            exit 1 || :\n'),
-    },
-    {
-      label: 'set +e',
-      reported: 'set +e',
-      edit: (step) => step.replace('\n          set -euo pipefail\n', '\n          set +e\n          set -euo pipefail\n'),
-    },
-    {
-      label: 'exit 0 after the check',
-      reported: 'exit 0',
-      edit: (step) => step.replace('\n            exit 1\n', '\n            exit 0\n'),
-    },
   ];
   for (const [file, name] of VERSION_JOBS) {
     const text = read('../../../../.github/workflows', file);
     for (const mutation of mutations) {
       const mutated = replaceVersionStep(text, name, mutation.edit);
       const problems = versionCheckProblems(versionStep(mutated, file, name));
+      assert.ok(
+        problems.some((problem) => problem.includes(mutation.reported)),
+        `${file} ${name} ${mutation.label} should report ${mutation.reported}, got ${problems.join(', ') || 'nothing'}`,
+      );
+    }
+  }
+});
+
+test('each version-check run block accepts a valid version and rejects an invalid one', (t) => {
+  if (!bashOnPath()) {
+    t.skip('bash is not on PATH, so the version-check run blocks were not executed');
+    return;
+  }
+  for (const [file, name] of VERSION_JOBS) {
+    const label = `${file} ${name}`;
+    const run = stepRun(versionStep(read('../../../../.github/workflows', file), file, name));
+    const valid = runVersionGuard(run, VALID_VERSION);
+    const invalid = runVersionGuard(run, INVALID_VERSION);
+    assert.equal(valid.status, 0, `${label} must accept ${VALID_VERSION}: ${valid.output}`);
+    assert.notEqual(invalid.status, 0, `${label} must reject ${INVALID_VERSION}: ${invalid.output}`);
+  }
+});
+
+test('an exit 0 before the version check lets an invalid version pass and is reported', (t) => {
+  if (!bashOnPath()) {
+    t.skip('bash is not on PATH, so the version-check run blocks were not executed');
+    return;
+  }
+  for (const [file, name] of VERSION_JOBS) {
+    const text = read('../../../../.github/workflows', file);
+    const original = runVersionGuard(stepRun(versionStep(text, file, name)), INVALID_VERSION);
+    assert.notEqual(original.status, 0, `${file} ${name} must reject ${INVALID_VERSION} before it is mutated`);
+    const mutated = replaceVersionStep(text, name, (step) =>
+      step.replace('\n          set -euo pipefail\n', '\n          exit 0\n          set -euo pipefail\n'),
+    );
+    const step = versionStep(mutated, file, name);
+    const after = runVersionGuard(stepRun(step), INVALID_VERSION);
+    assert.equal(
+      after.status,
+      0,
+      `${file} ${name} prepended exit 0 must let ${INVALID_VERSION} pass, got ${after.status}: ${after.output}`,
+    );
+    const problems = versionCheckProblems(step);
+    assert.ok(
+      problems.some((problem) => problem.includes('exit 0 before the version check')),
+      `${file} ${name} should report an exit 0 before the version check, got ${problems.join(', ') || 'nothing'}`,
+    );
+  }
+});
+
+test('a guard mutation that lets an invalid version pass is reported', (t) => {
+  if (!bashOnPath()) {
+    t.skip('bash is not on PATH, so the version-check run blocks were not executed');
+    return;
+  }
+  const mutations: { label: string; reported: string; edit: (step: string) => string }[] = [
+    {
+      label: 'a check that never runs',
+      reported: 'never runs',
+      edit: (step) => step.replace('if [[ ! "$VERSION" =~ $version_re ]]; then', 'if false; then'),
+    },
+    {
+      label: '|| true',
+      reported: '|| true',
+      edit: (step) => replaceVersionGuard(step, '[[ "$VERSION" =~ $version_re ]] || true'),
+    },
+    {
+      label: '|| :',
+      reported: '|| :',
+      edit: (step) => replaceVersionGuard(step, '[[ "$VERSION" =~ $version_re ]] || :'),
+    },
+    {
+      label: 'exit 0 after the check',
+      reported: 'exit 0 after the version check',
+      edit: (step) => step.replace('\n            exit 1\n', '\n            exit 0\n'),
+    },
+  ];
+  for (const [file, name] of VERSION_JOBS) {
+    const text = read('../../../../.github/workflows', file);
+    const original = runVersionGuard(stepRun(versionStep(text, file, name)), INVALID_VERSION);
+    assert.notEqual(original.status, 0, `${file} ${name} must reject ${INVALID_VERSION} before it is mutated`);
+    for (const mutation of mutations) {
+      const mutated = replaceVersionStep(text, name, mutation.edit);
+      const step = versionStep(mutated, file, name);
+      const after = runVersionGuard(stepRun(step), INVALID_VERSION);
+      assert.equal(
+        after.status,
+        0,
+        `${file} ${name} ${mutation.label} must let ${INVALID_VERSION} pass, got ${after.status}: ${after.output}`,
+      );
+      const problems = versionCheckProblems(step);
       assert.ok(
         problems.some((problem) => problem.includes(mutation.reported)),
         `${file} ${name} ${mutation.label} should report ${mutation.reported}, got ${problems.join(', ') || 'nothing'}`,
