@@ -317,6 +317,18 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.explorer.goToDefinition",
+        "title": "Go to Definition",
+        "category": "ZenWave",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "zenwave.explorer.goToReferences",
+        "title": "Go to References",
+        "category": "ZenWave",
+        "icon": "$(references)"
+      },
+      {
         "command": "zenwave.explorer.openRelated",
         "title": "Open Related Resource...",
         "category": "ZenWave",
@@ -335,7 +347,7 @@
       },
       {
         "command": "zenwave.eventflow.open",
-        "title": "Open EventFlow Diagram",
+        "title": "EventFlow Diagrams",
         "category": "ZenWave",
         "icon": "$(type-hierarchy-sub)"
       },
@@ -386,6 +398,21 @@
           "light": "./resources/zenwave-preview-light.svg",
           "dark": "./resources/zenwave-preview-dark.svg"
         }
+      },
+      {
+        "command": "zenwave.preview.openSequenceDiagrams",
+        "title": "Sequence Diagrams",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.preview.openModelDocs",
+        "title": "Model Docs",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.preview.openScriptsDocs",
+        "title": "Scripts Docs",
+        "category": "ZenWave"
       },
       {
         "command": "zenwave.preview.showText",
@@ -451,6 +478,14 @@
           "when": "false"
         },
         {
+          "command": "zenwave.explorer.goToDefinition",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.explorer.goToReferences",
+          "when": "false"
+        },
+        {
           "command": "zenwave.explorer.openManifest",
           "when": "zenwave.manifestAvailable"
         },
@@ -488,7 +523,19 @@
         },
         {
           "command": "zenwave.preview.open",
-          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "false"
+        },
+        {
+          "command": "zenwave.preview.openSequenceDiagrams",
+          "when": "(editorLangId == zfl || resourceExtname == .zfl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+        },
+        {
+          "command": "zenwave.preview.openModelDocs",
+          "when": "(editorLangId == zdl || resourceExtname == .zdl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+        },
+        {
+          "command": "zenwave.preview.openScriptsDocs",
+          "when": "(editorLangId == zw || resourceExtname == .zw) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.showText",
@@ -529,15 +576,35 @@
       ],
       "view/item/context": [
         {
+          "command": "zenwave.explorer.goToDefinition",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "zenwave.explorer.goToReferences",
+          "when": "view == zenwave.model && viewItem =~ /\\.references(\\.|$)/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
+          "group": "inline@2"
+        },
+        {
           "command": "zenwave.explorer.openRelated",
-          "when": "(view == zenwave.architecture || view == zenwave.model) && viewItem =~ /\\.related$/",
+          "when": "(view == zenwave.architecture || view == zenwave.model) && viewItem =~ /\\.related(\\.|$)/",
           "group": "navigation"
         }
       ],
       "editor/title": [
         {
-          "submenu": "zenwave.modelViews",
-          "when": "(resourceExtname == .zfl || resourceExtname == .zdl || resourceExtname == .zw) && !isInDiffEditor",
+          "submenu": "zenwave.zflViews",
+          "when": "resourceExtname == .zfl && !isInDiffEditor",
+          "group": "navigation@90"
+        },
+        {
+          "submenu": "zenwave.zdlViews",
+          "when": "resourceExtname == .zdl && !isInDiffEditor",
+          "group": "navigation@90"
+        },
+        {
+          "submenu": "zenwave.zwViews",
+          "when": "resourceExtname == .zw && !isInDiffEditor",
           "group": "navigation@90"
         },
         {
@@ -561,14 +628,14 @@
           "group": "navigation@81"
         }
       ],
-      "zenwave.modelViews": [
+      "zenwave.zflViews": [
         {
-          "command": "zenwave.eventflow.openToSide",
+          "command": "zenwave.eventflow.open",
           "when": "resourceExtname == .zfl && activeCustomEditorId != zenwave.eventflow",
           "group": "1_eventflow@1"
         },
         {
-          "command": "zenwave.eventflow.open",
+          "command": "zenwave.eventflow.openToSide",
           "when": "resourceExtname == .zfl && activeCustomEditorId != zenwave.eventflow",
           "group": "1_eventflow@2"
         },
@@ -583,13 +650,47 @@
           "group": "0_text@2"
         },
         {
-          "command": "zenwave.preview.openToSide",
-          "when": "resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && activeCustomEditorId != zenwave.preview",
+          "command": "zenwave.preview.openSequenceDiagrams",
+          "when": "activeCustomEditorId != zenwave.preview",
           "group": "2_preview@1"
         },
         {
-          "command": "zenwave.preview.open",
-          "when": "resourceExtname =~ /^\\.(zdl|zw|zfl)$/ && activeCustomEditorId != zenwave.preview",
+          "command": "zenwave.preview.openToSide",
+          "when": "activeCustomEditorId != zenwave.preview",
+          "group": "2_preview@2"
+        }
+      ],
+      "zenwave.zdlViews": [
+        {
+          "command": "zenwave.preview.showText",
+          "when": "activeCustomEditorId == zenwave.preview",
+          "group": "0_text@2"
+        },
+        {
+          "command": "zenwave.preview.openModelDocs",
+          "when": "activeCustomEditorId != zenwave.preview",
+          "group": "2_preview@1"
+        },
+        {
+          "command": "zenwave.preview.openToSide",
+          "when": "activeCustomEditorId != zenwave.preview",
+          "group": "2_preview@2"
+        }
+      ],
+      "zenwave.zwViews": [
+        {
+          "command": "zenwave.preview.showText",
+          "when": "activeCustomEditorId == zenwave.preview",
+          "group": "0_text@2"
+        },
+        {
+          "command": "zenwave.preview.openScriptsDocs",
+          "when": "activeCustomEditorId != zenwave.preview",
+          "group": "2_preview@1"
+        },
+        {
+          "command": "zenwave.preview.openToSide",
+          "when": "activeCustomEditorId != zenwave.preview",
           "group": "2_preview@2"
         }
       ]
@@ -802,11 +903,27 @@
     ],
     "submenus": [
       {
-        "id": "zenwave.modelViews",
+        "id": "zenwave.zflViews",
         "label": "ZenWave: View Model",
         "icon": {
-          "light": "./resources/zenwave-preview-light.svg",
-          "dark": "./resources/zenwave-preview-dark.svg"
+          "light": "./resources/zenwave-brand/zenwave-logo.svg",
+          "dark": "./resources/zenwave-brand/zenwave-logo.svg"
+        }
+      },
+      {
+        "id": "zenwave.zdlViews",
+        "label": "ZenWave: View Model",
+        "icon": {
+          "light": "./resources/zenwave-brand/zdl-file-icon.png",
+          "dark": "./resources/zenwave-brand/zdl-file-icon.png"
+        }
+      },
+      {
+        "id": "zenwave.zwViews",
+        "label": "ZenWave: View Model",
+        "icon": {
+          "light": "./resources/zenwave-brand/zenwave-sdk-icon.png",
+          "dark": "./resources/zenwave-brand/zenwave-sdk-icon.png"
         }
       }
     ],

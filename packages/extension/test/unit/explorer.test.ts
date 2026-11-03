@@ -49,7 +49,10 @@ test('nodes present in this client vocabulary, and a kind released later still r
   const orders = presentNode(findNode(tree, byLabel('Orders', 'system'))!, FLOW);
   assert.equal(orders.label, 'Orders');
   assert.equal(orders.description, 'model.zdl', 'a node declared elsewhere names that document');
-  assert.equal(orders.contextValue, 'zenwave.hierarchy.system.related');
+  assert.equal(orders.contextValue, 'zenwave.hierarchy.system.related.declaration.references');
+  assert.match(orders.contextValue, /\.declaration(\.|$)/, 'a declaration can offer navigation actions');
+  assert.match(orders.contextValue, /\.references(\.|$)/, 'a system name resolves, so Go to References is offered');
+  assert.ok(!/\.declaration(\.|$)/.test(presentNode(tree.roots[0]!, FLOW).contextValue), 'a structural section does not offer declaration actions');
   const policy = presentNode(findNode(tree, byLabel('OrderCreated', 'policy'))!, FLOW);
   assert.equal(policy.description, 'do notifyCustomer');
   const kinds = new Set([...walk(tree.roots)].map((node) => presentNode(node, FLOW).icon));
@@ -208,6 +211,94 @@ test('the container, both views, activation and an explanation for every empty s
   }
   const noManifest = contributes.viewsWelcome.find((entry) => entry.when === 'zenwave.architectureTreeState == no-manifest');
   assert.match(noManifest?.contents ?? '', /command:workbench\.action\.openSettings\?%5B%22zenwave\.workspace\.manifest%22%5D/, 'no manifest links to the setting');
-  const related = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.openRelated');
-  assert.ok((related?.when ?? '').includes('viewItem =~ /\\.related$/'), `related resources menu: ${related?.when}`);
+  const definition = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToDefinition');
+  assert.equal(definition?.group, 'inline@1');
+  const references = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToReferences');
+  assert.ok((references?.when ?? '').includes("'zenwave/symbolAt' in zenwave.languageServerRequests"));
+  assert.ok((references?.when ?? '').includes("'zenwave/reverseReferences' in zenwave.languageServerRequests"));
+  assert.equal(references?.group, 'inline@2');
+  const palette = Object.fromEntries((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
+  for (const command of ['zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences']) {
+    assert.equal(palette[command], 'false', `${command} is reachable from the Command Palette`);
+  }
+  assertMenuMarkers(contributes.menus);
 });
+
+/** A context value the presenter builds, plus every order of its markers. An end-anchored regex fails one of them. */
+function contextValues(): string[] {
+  const range = { start: { line: 2, character: 0 }, end: { line: 3, character: 0 } };
+  const related = [{ targetKind: 'document', label: 'model.zdl', uri: ZDL }];
+  const leaf = (kind: string, label: string, options: { source?: boolean; related?: boolean; parentKind?: string } = {}): ExplorerNode => {
+    const node: HierarchyNode = {
+      id: `${options.parentKind ?? 'root'}/${kind}:${label}`, label, kind,
+      sourceUri: options.source === false ? '' : FLOW,
+      sourceRange: range,
+      children: [], relatedResources: options.related ? related : [], uiHints: {}, viewNodeIds: [],
+    };
+    const parent = options.parentKind ? leaf(options.parentKind, 'parent') : undefined;
+    return { key: node.id, node, parent, children: [], depth: parent ? 1 : 0 };
+  };
+  const produced = [
+    presentNode(leaf('section', 'systems'), FLOW).contextValue,
+    presentNode(leaf('entity', 'Order', { source: false, related: true }), FLOW).contextValue,
+    presentNode(leaf('entity', 'Order'), FLOW).contextValue,
+    presentNode(leaf('field', 'status'), FLOW).contextValue,
+    presentNode(leaf('method', 'createOrder'), FLOW).contextValue,
+    presentNode(leaf('service', 'OrderService'), FLOW).contextValue,
+    presentNode(leaf('event', 'OrderEvent'), FLOW).contextValue,
+    presentNode(leaf('relationship', 'ManyToOne'), FLOW).contextValue,
+    presentNode(leaf('event', 'PaymentAuthorized', { parentKind: 'policy' }), FLOW).contextValue,
+    presentNode(leaf('service', 'Orders.OrderService', { parentKind: 'policy' }), FLOW).contextValue,
+    presentNode(leaf('event', 'OrderConfirmationSent', { parentKind: 'outcome' }), FLOW).contextValue,
+    presentNode(leaf('flow', 'CheckoutFlow'), FLOW).contextValue,
+    presentNode(leaf('api', 'RestaurantsAsyncAPI'), FLOW).contextValue,
+    presentNode(leaf('system', 'Orders', { related: true }), FLOW).contextValue,
+    presentNode(leaf('saga-step', 'Saga'), FLOW).contextValue,
+  ];
+  const values = new Set<string>();
+  for (const value of produced) {
+    const body = value.slice('zenwave.hierarchy.'.length);
+    const [kind, ...markers] = body.split('.');
+    for (const order of permutations(markers)) values.add(['zenwave.hierarchy.' + kind, ...order].filter((part) => part.length > 0).join('.'));
+  }
+  return [...values];
+}
+
+function permutations(items: string[]): string[][] {
+  if (items.length <= 1) return [items];
+  return items.flatMap((item, index) => permutations(items.filter((_, candidate) => candidate !== index)).map((rest) => [item, ...rest]));
+}
+
+function marker(value: string, name: string): boolean {
+  return new RegExp(`\\.${name}(?:\\.|$)`).test(value);
+}
+
+/** Every `viewItem` regex in the manifest, evaluated against the context values the presenter produces. */
+function assertMenuMarkers(menus: Record<string, { command: string; when?: string }[]>): void {
+  const pattern = /viewItem =~ \/((?:\\\/|[^/])*)\//g;
+  const values = contextValues();
+  let checked = 0;
+  for (const entries of Object.values(menus)) {
+    for (const entry of entries) {
+      for (const match of (entry.when ?? '').matchAll(pattern)) {
+        const expression = new RegExp(match[1]!.replace(/\\\//g, '/'));
+        for (const value of values) {
+          let expected = true;
+          if (expression.source.includes('related')) expected = expected && marker(value, 'related');
+          if (expression.source.includes('declaration')) expected = expected && marker(value, 'declaration');
+          if (expression.source.includes('references')) expected = expected && marker(value, 'references');
+          assert.equal(expression.test(value), expected, `${entry.command} ${expression} against ${value}`);
+          checked++;
+        }
+      }
+    }
+  }
+  assert.ok(checked > 0, 'no viewItem clause was evaluated');
+  const orders = values.find((value) => value.startsWith('zenwave.hierarchy.system'));
+  assert.equal(orders, 'zenwave.hierarchy.system.related.declaration.references');
+  assert.ok(values.includes('zenwave.hierarchy.event'), 'a policy event is not a declaration');
+  assert.ok(values.includes('zenwave.hierarchy.relationship'), 'a relationship bucket is not a declaration');
+  assert.ok(values.includes('zenwave.hierarchy.field.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.field') && marker(value, 'references')));
+  assert.ok(values.includes('zenwave.hierarchy.method.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.method') && marker(value, 'references')));
+  assert.ok(values.includes('zenwave.hierarchy.entity.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.entity') && marker(value, 'references')));
+}

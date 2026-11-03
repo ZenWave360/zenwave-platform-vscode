@@ -415,8 +415,48 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
     `Commands under their service: ${labels(service?.children)}`);
   const ordersItem = await model.provider.getTreeItem(orders);
   assert(ordersItem.description === 'model.zdl' && (ordersItem.iconPath as vscode.ThemeIcon).id === 'server-environment' &&
-    ordersItem.contextValue === 'zenwave.hierarchy.system.related', `Orders item: ${String(ordersItem.description)} ${(ordersItem.iconPath as vscode.ThemeIcon).id} ${ordersItem.contextValue}`);
+    ordersItem.contextValue === 'zenwave.hierarchy.system.related.declaration.references', `Orders item: ${String(ordersItem.description)} ${(ordersItem.iconPath as vscode.ThemeIcon).id} ${ordersItem.contextValue}`);
+  const context = async (item: ExplorerNode): Promise<string> => String((await model.provider.getTreeItem(item)).contextValue ?? '');
+  const has = (value: string, name: string): boolean => new RegExp(`\\.${name}(?:\\.|$)`).test(value);
+  const checkoutFlow = node(model, 'CheckoutFlow', 'flow');
+  assert(checkoutFlow, 'CheckoutFlow is not in the tree');
+  const flowContext = await context(checkoutFlow);
+  assert(has(flowContext, 'declaration') && has(flowContext, 'references'), `CheckoutFlow: ${flowContext}`);
+  assert(service, 'OrderService is not in the tree');
+  const serviceContext = await context(service);
+  assert(has(serviceContext, 'declaration') && !has(serviceContext, 'references'), `OrderService: ${serviceContext}`);
+  const createOrder = service.children.find((child) => child.node.kind === 'command' && child.node.label === 'createOrder');
+  assert(createOrder, `createOrder is not a command under OrderService: ${labels(service.children)}`);
+  const commandContext = await context(createOrder);
+  assert(has(commandContext, 'declaration') && !has(commandContext, 'references'), `createOrder: ${commandContext}`);
+  const policyEvent = model.tree && findNode(model.tree, (candidate) => candidate.parent?.node.kind === 'policy' && candidate.node.kind === 'event');
+  assert(policyEvent, 'No event under a policy');
+  const policyEventContext = await context(policyEvent);
+  assert(!has(policyEventContext, 'declaration') && !has(policyEventContext, 'references'), `A policy event is not a declaration: ${policyEventContext}`);
   console.log('PASS: model tree names checkout.zfl, shows the system declared in its @zdl model and each command under its service');
+
+  // Go to References follows the hierarchy id. A cursor on the name `Orders` in the flow resolves to that id;
+  // the same command at the ZDL position the node stores (the start of `entity Order`) does not.
+  const ordersEditor = vscode.window.activeTextEditor;
+  assert(ordersEditor !== undefined && ordersEditor.document.uri.toString() === checkout, 'checkout.zfl is not the active editor');
+  const ordersNameLine = checkoutDocument.getText().split(/\r?\n/).findIndex((row) => /^\s*Orders\s*\{/.test(row));
+  const ordersNameCharacter = ordersNameLine >= 0 ? checkoutDocument.lineAt(ordersNameLine).text.indexOf('Orders') : -1;
+  assert(ordersNameLine >= 0 && ordersNameCharacter >= 0, 'The Orders name is not in checkout.zfl');
+  ordersEditor.selection = new vscode.Selection(ordersNameLine, ordersNameCharacter, ordersNameLine, ordersNameCharacter);
+  const ordersSymbol = await api.requests.symbolAt(checkout, { line: ordersNameLine, character: ordersNameCharacter });
+  assert(ordersSymbol.kind === 'ok' && ordersSymbol.value?.semanticId === orders.node.id,
+    `symbolAt on the Orders name: ${JSON.stringify(ordersSymbol)} vs ${orders.node.id}`);
+  const fromEditor = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences');
+  const fromTree = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.explorer.goToReferences', orders);
+  assert(fromTree !== undefined && fromEditor !== undefined && fromTree.kind === fromEditor.kind && fromTree.kind !== 'no-symbol',
+    `Go to References from the tree: ${JSON.stringify(fromTree)}; from the name: ${JSON.stringify(fromEditor)}`);
+  const treeTargets = 'targets' in fromTree ? fromTree.targets : undefined;
+  const editorTargets = 'targets' in fromEditor ? fromEditor.targets : undefined;
+  assert(treeTargets !== undefined && JSON.stringify(treeTargets) === JSON.stringify(editorTargets),
+    `Go to References targets differ: tree ${JSON.stringify(treeTargets)} editor ${JSON.stringify(editorTargets)}`);
+  const atDeclaration = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences', vscode.Uri.parse(orders.node.sourceUri), orders.node.sourceRange.start);
+  assert(atDeclaration.kind === 'no-symbol', `The position stored on Orders is not its name: ${JSON.stringify(atDeclaration)}`);
+  console.log('PASS: Go to References on the Orders system matches a cursor on its name, and the stored position does not');
 
   const placeOrderUri = await fixture('place-order-flow.zfl');
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(placeOrderUri));
@@ -457,9 +497,11 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   assert(model.documentUri === checkout && node(model, 'Orders', 'system'), `Drilling into the ZDL retargeted the tree: ${model.documentUri}`);
   const declared = node(model, 'OrderService', 'service')!;
   assert(await vscode.commands.executeCommand<string>('zenwave.explorer.openNode', declared) === zdl, 'Selecting a service did not open its ZDL');
+  const defined = await vscode.commands.executeCommand<string>('zenwave.explorer.goToDefinition', declared);
+  assert(defined === zdl, `Go to Definition opened ${defined}`);
   const zdlEditor = vscode.window.visibleTextEditors.find((editor) => editor.document.uri.toString() === zdl);
   assert(zdlEditor?.selection.active.line === declared.node.sourceRange.start.line,
-    `Not at the declaration: ${JSON.stringify(zdlEditor?.selection.active)} vs ${JSON.stringify(declared.node.sourceRange)}`);
+    `Go to Definition is not at the declaration: ${JSON.stringify(zdlEditor?.selection.active)} vs ${JSON.stringify(declared.node.sourceRange)}`);
   await delay(500);
   await model.settled();
   assert(model.documentUri === checkout, `Navigating inside the ZDL retargeted the tree: ${model.documentUri}`);
@@ -1202,6 +1244,11 @@ async function previewModels(api: LanguageServerApi, preview: PreviewApi, deskto
     assert(drawn.text.trim().length > 0 && drawn.renderedTheme !== undefined, `${item.title} drew no text`);
   }
   await vscode.commands.executeCommand('zenwave.preview.selectDiagram', { documentUri: checkout, representationId: alt.defaultRepresentationId });
+  const selectedMermaid = alt.representations.find((item) => item.id === alt.defaultRepresentationId)!;
+  const copied = await flow.probe(undefined, 0);
+  assert(copied.content.copyMermaidSources.join('\u0000') === [selectedMermaid.content].join('\u0000'), 'The sequence diagram copy button does not retain the server source');
+  await waitFor(async () => await vscode.env.clipboard.readText() === selectedMermaid.content ? true : undefined,
+    'Copy as Mermaid did not write the selected server source to the host clipboard', 10000);
   console.log(`PASS: the ZFL preview offers the server's ${alt.representations.length} representations in its order and titles, starts on its default, and draws each one with the bundled Mermaid`);
 
   // A ZDL model: the server's Markdown page, rendered, its diagrams drawn, and no selector for a single representation (MP-R10, MP-R15).
@@ -1219,6 +1266,8 @@ async function previewModels(api: LanguageServerApi, preview: PreviewApi, deskto
   assert(!probe.diagramSelector.visible && !probe.renderModeSelector.visible, `A selector with no choice is shown: ${JSON.stringify([probe.diagramSelector.visible, probe.renderModeSelector.visible])}`);
   assert(probe.text.includes('Customer') && probe.content.headings > 0 && probe.notice === undefined, `The Markdown page does not read as a page: ${probe.text.slice(0, 200)}`);
   assert(probe.content.diagrams.failed === 0 && probe.svgCount === fences, `Diagrams: ${JSON.stringify(probe.content.diagrams)} svg=${probe.svgCount} of ${fences}`);
+  const fencedSources = [...page.content.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((match) => match[1]!);
+  assert(probe.content.copyMermaidSources.join('\u0000') === fencedSources.join('\u0000'), 'Every fenced Mermaid diagram retains its server source for copying');
   assert(probe.content.fragments.length > 0 && probe.content.unresolved.length === 0, `Anchors of the page that do not resolve: ${probe.content.unresolved.join()}`);
   assert(probe.content.hostile === 0 && probe.content.remoteImages === 0 && probe.cspViolations.length === 0, `Unsafe content or policy violations: ${JSON.stringify(probe.content)} ${probe.cspViolations.join()}`);
   assert(probe.scripts.map(baseName).sort().join() === 'content.js,mermaid.min.js,preview.js', `Scripts the ZDL page loaded: ${probe.scripts.join()}`);
@@ -1407,7 +1456,9 @@ async function rendersWhateverItIsGiven(flow: PreviewEditorApi): Promise<void> {
     try {
       return await waitFor(async () => {
         const probe = last = await flow.probe();
-        const shown = selectedId === 'broken' || selectedId === 'other' ? probe.notice !== undefined : probe.renderedId === selectedId;
+        const shown = selectedId === 'broken' ? probe.content.diagrams.failed === 1
+          : selectedId === 'other' ? probe.notice !== undefined
+            : probe.renderedId === selectedId;
         return probe.diagramSelector.value === selectedId && shown ? probe : undefined;
       }, `${selectedId} was not shown`, 30000);
     } catch (error) {
@@ -1415,7 +1466,10 @@ async function rendersWhateverItIsGiven(flow: PreviewEditorApi): Promise<void> {
     }
   };
   const broken = await show('broken');
-  assert(/could not be drawn/.test(broken.notice ?? '') && broken.text.includes('this is not a diagram') && broken.svgCount === 0, `A malformed diagram: ${broken.notice}`);
+  assert(broken.notice === undefined && broken.content.diagrams.failed === 1 && /could not be drawn/.test(broken.text) && broken.text.includes('this is not a diagram') && broken.svgCount === 0,
+    `A malformed diagram: ${broken.notice} ${broken.text.slice(0, 200)}`);
+  assert(broken.content.copyMermaidSources.join('\u0000') === 'this is not a diagram\n  ???',
+    `A malformed diagram has no Copy as Mermaid button: ${JSON.stringify(broken.content.copyMermaidSources)}`);
   assert(broken.diagramSelector.options.length === items.length && broken.diagramSelector.visible, 'The rest is not readable: the selector is gone');
   assert(broken.strayElements === 0, `A malformed diagram left ${broken.strayElements} elements in the page`);
 

@@ -259,7 +259,7 @@ test('an asset that fails to load before the page is ready, or a page that never
 
 test('a probe is relayed to the page and answered', async () => {
   const { session, posted } = harness(() => ok(ALT));
-  const answer = session.probe(1000);
+  const answer = session.probe(undefined, undefined, 1000);
   const asked = posted.find((message) => message.type === 'zenwave.host.probe');
   assert.ok(asked && asked.type === 'zenwave.host.probe');
   session.receive({ type: 'zenwave.host.probeResult', payload: { requestId: asked.payload.requestId, svgCount: 1 } });
@@ -269,6 +269,8 @@ test('a probe is relayed to the page and answered', async () => {
 
 test('messages from the page are read by shape, and anything else is ignored', () => {
   assert.deepEqual(inboundMessage({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } }), { type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } });
+  assert.deepEqual(inboundMessage({ type: 'zenwave.preview.copyMermaid', payload: { content: 'sequenceDiagram\nA->>B: hi\n' } }), { type: 'zenwave.preview.copyMermaid', payload: { content: 'sequenceDiagram\nA->>B: hi\n' } });
+  assert.equal(inboundMessage({ type: 'zenwave.preview.copyMermaid', payload: {} }), undefined);
   assert.equal(inboundMessage({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'AUTO' } }), undefined, 'AUTO is not offered');
   assert.equal(inboundMessage({ type: 'zenwave.preview.selectRepresentation', payload: {} }), undefined);
   assert.equal(inboundMessage({ type: 'something.else' }), undefined);
@@ -306,34 +308,31 @@ test('the page has a CSP with no remote, inline-script or eval allowance, only i
   assert.ok(html.includes('id="render-mode"') && html.includes('id="diagram"'));
 });
 
-test('the manifest registers an optional preview editor for .zdl, .zw and .zfl, offered from the one submenu', () => {
+test('the manifest registers an optional preview editor and names each supported file mode', () => {
   const contributes = manifest.contributes;
   assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === PREVIEW_VIEW_TYPE),
     { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zw' }, { filenamePattern: '*.zfl' }], priority: 'option' });
   const commands = (contributes.commands as { command: string; title: string }[]).map((entry) => entry.command);
-  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode']) {
+  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode']) {
     assert.ok(commands.includes(command), `${command} is not contributed`);
   }
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
-  const [submenu] = title.filter((item) => item.submenu);
-  assert.equal(submenu?.submenu, 'zenwave.modelViews');
-  assert.match(submenu?.when ?? '', /resourceExtname == \.zdl/);
-  assert.match(submenu?.when ?? '', /resourceExtname == \.zw/);
-  assert.match(submenu?.when ?? '', /resourceExtname == \.zfl/);
-  assert.match(submenu?.when ?? '', /!isInDiffEditor/, 'no preview is offered in a diff (MP-Q4)');
+  const submenus = title.filter((item) => item.submenu);
+  assert.deepEqual(submenus.map((item) => item.submenu).sort(), ['zenwave.zdlViews', 'zenwave.zflViews', 'zenwave.zwViews']);
+  for (const submenu of submenus) assert.match(submenu.when, /!isInDiffEditor/, 'no preview is offered in a diff (MP-Q4)');
   assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.')), 'the preview has no title-bar icon of its own');
-  const entries = contributes.menus['zenwave.modelViews'] as { command: string; when: string }[];
-  const eventflow = entries.filter((entry) => entry.command.startsWith('zenwave.eventflow.'));
-  const preview = entries.filter((entry) => entry.command.startsWith('zenwave.preview.'));
-  assert.deepEqual(preview.map((entry) => entry.command).sort(), ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.showText']);
-  for (const entry of eventflow.filter((item) => item.command !== 'zenwave.eventflow.showText')) {
-    assert.match(entry.when, /^resourceExtname == \.zfl /, `${entry.command} stays on ZFL`);
-  }
-  for (const entry of preview.filter((item) => item.command !== 'zenwave.preview.showText')) {
-    assert.ok(entry.when.includes('resourceExtname =~ /^\\.(zdl|zw|zfl)$/'), `${entry.command} covers ZDL, ZW and ZFL`);
+  const menus = contributes.menus as Record<string, { command: string; when: string }[]>;
+  const opens = (submenu: string) => menus[submenu]!.map((entry) => entry.command).filter((command) => !command.endsWith('.showText'));
+  assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openToSide']);
+  assert.deepEqual(opens('zenwave.zdlViews'), ['zenwave.preview.openModelDocs', 'zenwave.preview.openToSide']);
+  assert.deepEqual(opens('zenwave.zwViews'), ['zenwave.preview.openScriptsDocs', 'zenwave.preview.openToSide']);
+  for (const submenu of ['zenwave.zflViews', 'zenwave.zdlViews', 'zenwave.zwViews']) {
+    assert.ok(menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.showText' && entry.when === 'activeCustomEditorId == zenwave.preview'), `${submenu} keeps the way back to text (MP-Q9)`);
   }
   const palette = Object.fromEntries((contributes.menus.commandPalette as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
-  assert.match(palette['zenwave.preview.open'] ?? '', /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, 'an untitled model sees the command, which tells it to save first');
+  assert.match(palette['zenwave.preview.openSequenceDiagrams'] ?? '', /zfl/);
+  assert.match(palette['zenwave.preview.openModelDocs'] ?? '', /zdl/);
+  assert.match(palette['zenwave.preview.openScriptsDocs'] ?? '', /zw/);
   assert.match(palette['zenwave.preview.openToSide'] ?? '', /!isInDiffEditor/);
   assert.match(palette['zenwave.preview.selectRenderMode'] ?? '', /resourceExtname == \.zfl/);
 });

@@ -195,7 +195,7 @@ async function show(): Promise<void> {
     failed(current, error);
     return;
   }
-  swapIn(svg, current.id, hash, theme, sameDiagram);
+  swapIn(diagramBox(current.content, svg), current.id, hash, theme, sameDiagram);
 }
 
 /** One diagram, drawn off the page: Mermaid renders into a scratch element it removes again, and the result is returned. */
@@ -211,8 +211,35 @@ async function drawDiagram(mermaid: Mermaid, text: string): Promise<SVGElement> 
 function failed(current: PageRepresentation, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   drawn = undefined;
-  showNotice(`${current.title} could not be drawn: ${message}`, current.content);
+  if (current.format === 'MERMAID') {
+    // The same error box a fenced diagram uses, so the source that failed can be copied.
+    swapIn(diagramBox(current.content, undefined, message), current.id, contentHash(current.content), currentTheme(), false);
+  } else {
+    showNotice(`${current.title} could not be drawn: ${message}`, current.content);
+  }
   post({ type: 'zenwave.preview.diagramFailed', payload: { id: current.id, message } });
+}
+
+/** The host owns the clipboard; the page sends exactly the server-provided source to it. */
+function diagramBox(source: string, diagram?: SVGElement, error?: string): HTMLElement {
+  const box = document.createElement('div');
+  box.className = error ? 'zw-diagram-error' : 'zw-diagram';
+  const button = document.createElement('button');
+  button.className = 'zw-copy-mermaid';
+  button.type = 'button';
+  button.textContent = 'Copy as Mermaid';
+  (button as HTMLButtonElement & { mermaidSource?: string }).mermaidSource = source;
+  button.addEventListener('click', () => post({ type: 'zenwave.preview.copyMermaid', payload: { content: source } }));
+  box.appendChild(button);
+  if (diagram) box.appendChild(diagram);
+  if (error) {
+    const text = document.createElement('p');
+    text.textContent = `This diagram could not be drawn: ${error}`;
+    const pre = document.createElement('pre');
+    pre.textContent = source;
+    box.append(text, pre);
+  }
+  return box;
 }
 
 /** Puts what was built in place of what was shown. The same representation redrawn after an edit keeps its place; another one starts at the top. */
@@ -251,22 +278,14 @@ async function showDocument(current: PageRepresentation, token: number, theme: T
         configure(mermaid, theme);
         for (const block of blocks) {
           const source = block.textContent ?? '';
-          const box = document.createElement('div');
           try {
-            box.className = 'zw-diagram';
-            box.appendChild(await drawDiagram(mermaid, source));
+            block.replaceWith(diagramBox(source, await drawDiagram(mermaid, source)));
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            box.className = 'zw-diagram-error';
-            const text = document.createElement('p');
-            text.textContent = `This diagram could not be drawn: ${message}`;
-            const pre = document.createElement('pre');
-            pre.textContent = source;
-            box.replaceChildren(text, pre);
+            block.replaceWith(diagramBox(source, undefined, message));
             post({ type: 'zenwave.preview.diagramFailed', payload: { id: current.id, message } });
           }
           if (token !== renderToken) return;
-          block.replaceWith(box);
         }
       }
     }
@@ -373,6 +392,7 @@ function contentProbe(): PreviewContentProbe {
     // The diagrams are Mermaid's own SVG, which carries styles of its own; the content around them must carry none of these.
     hostile: all('script, iframe, frame, object, embed, form, style, link, meta, base, [onclick], [onerror], [onload], [onmouseover], [style]').filter((element) => !element.closest('svg')).length,
     diagrams: { drawn: all('.zw-diagram svg').length, failed: all('.zw-diagram-error').length },
+    copyMermaidSources: all('.zw-copy-mermaid').map((button) => (button as HTMLButtonElement & { mermaidSource?: string }).mermaidSource ?? ''),
     fragments,
     unresolved: fragments.filter((href) => anchorTarget(anchorName(href)) === undefined),
     otherLinks: links.length - fragments.length,
@@ -399,13 +419,14 @@ function contentProbe(): PreviewContentProbe {
   };
 }
 
-function probe(requestId: number, followLink?: string): void {
+function probe(requestId: number, followLink?: string, copyMermaid?: number): void {
   if (followLink !== undefined) [...view.querySelectorAll<HTMLElement>('a[href]')].find((link) => link.getAttribute('href') === followLink)?.click();
   const target = followLink === undefined ? undefined : anchorTarget(anchorName(followLink));
   const followed = target && /^H[1-6]$/.test(target.tagName)
     ? { tag: target.tagName, text: target.textContent ?? '', headingIndex: [...view.querySelectorAll('h1, h2, h3, h4, h5, h6')].indexOf(target) }
     : undefined;
   const strays = [...document.body.children].filter((child) => /^d?zw-\d+$/.test(child.id)).length;
+  if (copyMermaid !== undefined) [...view.querySelectorAll<HTMLButtonElement>('.zw-copy-mermaid')][copyMermaid]?.click();
   post({
     type: 'zenwave.host.probeResult',
     payload: {
@@ -453,7 +474,7 @@ window.addEventListener('message', (event: MessageEvent<OutboundMessage>) => {
       showState(message.payload);
       return;
     case 'zenwave.host.probe':
-      probe(message.payload.requestId, message.payload.followLink);
+      probe(message.payload.requestId, message.payload.followLink, message.payload.copyMermaid);
       return;
   }
 });

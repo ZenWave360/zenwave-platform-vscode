@@ -139,6 +139,23 @@ const hint = (node: HierarchyNode, key: string): string | undefined => {
 };
 
 /**
+ * Kinds that stand for a declaration in the hierarchies of `complete.zdl`,
+ * `orders-checkout-api/domain-model.zdl` and `place-order-flow.zfl`.
+ * A kind not listed is structural (`section`, `manifest`, `document`, `end`, `outcome`, `relationship`)
+ * or not yet known, and gets no navigation button.
+ */
+const DECLARATION_KINDS = new Set([
+  'aggregate', 'api', 'command', 'entity', 'enum', 'event', 'field',
+  'flow', 'method', 'policy', 'service', 'start', 'system',
+]);
+
+/**
+ * Kinds where a cursor on the name resolves to the hierarchy id (`@zenwave360/lsp-js` 0.1.0-next.13.1).
+ * Entity, enum, aggregate, service and event names resolve to nothing; field and method names resolve to a neighbour.
+ */
+const REFERENCES_KINDS = new Set(['api', 'flow', 'system']);
+
+/**
  * How a node reads in a VS Code tree. The server's label is the default; this
  * client adapts it only for kinds whose server wording is structural rather
  * than a name (`section`, the `manifest` root), adds where a node is declared
@@ -164,12 +181,24 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
   if (events) tooltipLines.push(`Emits ${events.split(',').join(', ')}`);
   if (related) tooltipLines.push(`${item.relatedResources.length} related resource${item.relatedResources.length === 1 ? '' : 's'}`);
 
+  // Named concepts a user can open. `service` and `event` also occur under a `policy` or an `outcome`,
+  // where they repeat the parent's range and name a reference, not a declaration. `relationship` is a bucket.
+  const parentKind = node.parent?.node.kind;
+  const located = Boolean(item.sourceUri && item.sourceRange);
+  const declaration = located && DECLARATION_KINDS.has(kind) && parentKind !== 'policy' && parentKind !== 'outcome';
+  // Only these names resolve to the node's own id under a text cursor, so Go to References can ask for that id.
+  const references = declaration && REFERENCES_KINDS.has(kind);
   return {
     label,
     ...(details.length > 0 ? { description: details.join(' · ') } : {}),
     tooltip: tooltipLines.join('\n'),
     icon: KIND_ICONS[kind] ?? NEUTRAL_ICON,
-    contextValue: `zenwave.hierarchy.${kind.replace(/[^A-Za-z0-9-]/g, '_')}${related ? '.related' : ''}`,
+    contextValue: [
+      `zenwave.hierarchy.${kind.replace(/[^A-Za-z0-9-]/g, '_')}`,
+      related ? 'related' : '',
+      declaration ? 'declaration' : '',
+      references ? 'references' : '',
+    ].filter((part) => part.length > 0).join('.'),
     collapsible: node.children.length > 0,
   };
 }

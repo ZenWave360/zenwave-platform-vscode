@@ -95,6 +95,8 @@ body > #state button:hover { background: var(--vscode-button-hoverBackground); }
 .document th { font-weight: 600; background: var(--vscode-editorWidget-background, transparent); }
 .document img { max-width: 100%; }
 .zw-diagram { margin: 0 0 1em; overflow-x: auto; }
+.zw-copy-mermaid { float: right; margin: 0 0 6px 8px; padding: 3px 8px; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; cursor: pointer; font: inherit; }
+.zw-copy-mermaid:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .zw-diagram-error { margin: 0 0 1em; padding: 8px 12px; border-left: 3px solid var(--vscode-errorForeground, currentColor); }
 .zw-diagram-error p { margin: 0 0 8px; color: var(--vscode-errorForeground, inherit); }
 .zw-diagram-error pre { margin: 0; }
