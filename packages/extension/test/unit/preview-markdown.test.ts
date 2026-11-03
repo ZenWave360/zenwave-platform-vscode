@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { Preview } from '../../src/lsp/requests.js';
 import { DIAGRAM_SELECTOR, anchorSlugs, renderMarkdown } from '../../webview/preview/markdown.js';
-import { LINK_URI_REGEXP } from '../../webview/preview/sanitise.js';
+import { FORBIDDEN_TAGS, LINK_URI_REGEXP } from '../../webview/preview/sanitise.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const page = (JSON.parse(readFileSync(join(here, '../fixtures/lsp-samples/preview-zdl.json'), 'utf8')) as { result: Preview }).result.representations[0]!.content;
@@ -53,6 +53,11 @@ test('workspace and http(s) links remain for the host, while unsafe schemes stay
   assert.match(html, /href="https:\/\/example\.test\/docs"/);
   for (const href of ['../apis/asyncapi.yml#L8', 'https://example.test/docs']) assert.ok(LINK_URI_REGEXP.test(href), href);
   for (const href of ['command:workbench.action.quit', 'file:///outside.yml', 'javascript:alert(1)']) assert.ok(!LINK_URI_REGEXP.test(href), href);
+});
+
+test('links may use http(s) for the host, but images including embedded data are forbidden', () => {
+  assert.ok(LINK_URI_REGEXP.test('https://example.test/docs'));
+  assert.ok(FORBIDDEN_TAGS.includes('img'));
 });
 
 test('a collapsible section is the exact details and summary lines, and the body stays Markdown', () => {
