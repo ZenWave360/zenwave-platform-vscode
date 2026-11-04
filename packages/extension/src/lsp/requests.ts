@@ -61,6 +61,13 @@ export type ViewModel = { readonly schema: string } & Readonly<Record<string, un
 export interface EventFlowViews {
   readonly flowGraph: ViewModel;
   readonly serviceGraph: ViewModel;
+  /** The flow's variants, in the server's order; absent from a server that does not list them. */
+  readonly variants?: readonly FlowVariant[];
+}
+
+export interface FlowVariant {
+  readonly id: string;
+  readonly title: string;
 }
 
 /** `mode` of `zenwave/organizeZflServices`. Absent on the wire means `full`. */
@@ -169,9 +176,11 @@ export class ZenwaveRequests {
       (value) => value === null || typeof value === 'string');
   }
 
-  async eventFlowViews(uri: string): Promise<RequestResult<EventFlowViews>> {
+  /** `variant` is sent only when given, and only to a server that advertised `flowVariants`; then `flowGraph` is that variant's view. */
+  async eventFlowViews(uri: string, variant?: string): Promise<RequestResult<EventFlowViews>> {
+    const params = { textDocument: { uri }, ...(variant === undefined ? {} : { variant }) };
     return expect(ZENWAVE_REQUESTS.eventFlowViews,
-      await this.issuer.request(ZENWAVE_REQUESTS.eventFlowViews, { textDocument: { uri } }),
+      await this.issuer.request(ZENWAVE_REQUESTS.eventFlowViews, params),
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));
   }
 

@@ -71,6 +71,11 @@ export function advertisedOrganizeModes(initializeResult: unknown): boolean {
   return experimentalOf(initializeResult)?.organizeModes === true;
 }
 
+/** The server accepts `variant` on `zenwave/eventFlowViews` and lists `variants` (LVR-R18). */
+export function advertisedFlowVariants(initializeResult: unknown): boolean {
+  return experimentalOf(initializeResult)?.flowVariants === true;
+}
+
 function experimentalOf(initializeResult: unknown): Record<string, unknown> | undefined {
   return object(object(object(initializeResult)?.capabilities)?.experimental);
 }

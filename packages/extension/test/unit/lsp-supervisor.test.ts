@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advertisedOrganizeModes, advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
+import { advertisedFlowVariants, advertisedOrganizeModes, advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
 
 const INITIALIZE = { capabilities: { experimental: { customRequests: ['zenwave/workspaceStatus'] } } };
 
@@ -193,4 +193,11 @@ test('stalled startup and requests return explicit failures by their deadline', 
     kind: 'failed', reason: 'Language server request zenwave/workspaceStatus timed out',
   });
   await supervisor.stop();
+});
+
+test('flowVariants is advertised only by the boolean capability', () => {
+  for (const result of [{}, { capabilities: { experimental: { flowVariants: 'true' } } }, { capabilities: { experimental: { flowVariants: false } } }]) {
+    assert.equal(advertisedFlowVariants(result), false);
+  }
+  assert.equal(advertisedFlowVariants({ capabilities: { experimental: { flowVariants: true } } }), true);
 });

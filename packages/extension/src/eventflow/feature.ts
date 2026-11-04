@@ -98,7 +98,8 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
     this.session = new DiagramSession({
       documentUri: this.documentUri,
       fileName: fileName(uri),
-      eventFlowViews: (target) => deps.server.requests.eventFlowViews(target),
+      eventFlowViews: (target, variant) => deps.server.requests.eventFlowViews(target, variant),
+      flowVariants: () => deps.server.flowVariants,
       post: (message) => webview.postMessage(message),
       runCommand: (command) => { void vscode.commands.executeCommand(command); },
       log: deps.logger,

@@ -19,21 +19,23 @@ const URI = 'file:///workspace/place-order-flow.zfl';
 const READY = { type: 'webviewReady', payload: { protocol: EVENTFLOW_PROTOCOL, protocolVersion: 1 } };
 const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI) {
+function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI, flowVariants = false) {
   const posted: OutboundMessage[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
-  const requests = new ZenwaveRequests({ request: async () => answer() });
+  const asked: unknown[] = [];
+  const requests = new ZenwaveRequests({ request: async (_method, params) => { asked.push(params); return answer(); } });
   const session = new DiagramSession({
     documentUri,
     fileName: 'place-order-flow.zfl',
-    eventFlowViews: (uri) => requests.eventFlowViews(uri),
+    eventFlowViews: (uri, variant) => requests.eventFlowViews(uri, variant),
+    flowVariants: () => flowVariants,
     post: async (message) => { posted.push(message); return true; },
     runCommand: (command) => { commands.push(command); },
     log: { info: (line) => logs.push(line), warn: (line) => logs.push(line), debug: (line) => logs.push(line) },
   }, initial);
   const ofType = <T extends OutboundMessage['type']>(type: T) => posted.filter((message): message is Extract<OutboundMessage, { type: T }> => message.type === type);
-  return { session, posted, logs, commands, ofType };
+  return { session, posted, logs, commands, ofType, asked };
 }
 
 const failure = (kind: string, extra: Record<string, unknown> = {}): RequestResult =>
@@ -312,4 +314,65 @@ test('the manifest registers an optional diagram editor for .zfl and offers it f
   assert.match(palette['zenwave.eventflow.openToSide'] ?? '', /resourceExtname == \.zfl/);
   assert.deepEqual(contributes.configuration.properties['zenwave.eventflow.defaultView'].enum, ['flow', 'services']);
   assert.equal(contributes.configuration.properties['zenwave.eventflow.humanizeLabels'].default, true);
+});
+
+const VARIANTS = [{ id: 'happy', title: 'Happy path' }, { id: 'out-of-stock', title: 'Out of stock' }];
+const withVariants = (flowGraph: object = { schema: 'full' }): RequestResult =>
+  ({ kind: 'ok', value: { flowGraph: { schema: 'g', ...flowGraph }, serviceGraph: { schema: 's' }, variants: VARIANTS } });
+const invalidVariant: RequestResult = { kind: 'failed', reason: 'unknown variant', code: -32602 };
+
+test('renderBundle carries variants and the full diagram as variant null only when the server advertised flowVariants', async () => {
+  const on = harness(() => withVariants(), undefined, URI, true);
+  on.session.receive(READY);
+  await on.session.refresh();
+  assert.deepEqual(on.session.lastRenderBundle?.variants, VARIANTS);
+  assert.equal(on.session.lastRenderBundle?.variant, null);
+
+  const off = harness(() => withVariants());
+  off.session.receive(READY);
+  await off.session.refresh();
+  assert.equal('variants' in (off.session.lastRenderBundle ?? {}), false);
+  assert.equal('variant' in (off.session.lastRenderBundle ?? {}), false);
+  off.session.receive({ type: 'variantChanged', payload: { variant: 'happy' } });
+  await settle();
+  assert.equal(off.asked.length, 1, 'a server without the capability is never asked for a variant');
+});
+
+test('variantChanged requests that variant, omits it for null, and the choice survives a document change', async () => {
+  const h = harness(() => withVariants(), undefined, URI, true);
+  h.session.receive(READY);
+  await h.session.refresh();
+  h.session.receive({ type: 'variantChanged', payload: { variant: 'happy' } });
+  await settle();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI }, variant: 'happy' });
+  assert.equal(h.session.lastRenderBundle?.variant, 'happy');
+  assert.equal(h.session.lastRenderBundle?.diagramId, URI);
+  await h.session.refresh();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI }, variant: 'happy' });
+  h.session.receive({ type: 'variantChanged', payload: { variant: null } });
+  await settle();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI } });
+  assert.equal(h.session.lastRenderBundle?.variant, null);
+});
+
+test('a variant the server no longer knows (-32602) falls back to the full diagram and renders it', async () => {
+  let gone = false;
+  const h = harness(() => gone && (h.asked.at(-1) as { variant?: string }).variant ? invalidVariant : withVariants(), undefined, URI, true);
+  h.session.receive(READY);
+  await h.session.refresh();
+  h.session.receive({ type: 'variantChanged', payload: { variant: 'happy' } });
+  await settle();
+  assert.equal(h.session.lastRenderBundle?.variant, 'happy');
+  gone = true;
+  const before = h.asked.length;
+  await h.session.refresh();
+  assert.equal(h.asked.length - before, 2);
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI } });
+  assert.equal(h.session.lastRenderBundle?.variant, null);
+  assert.equal(h.session.data.kind, 'rendered');
+});
+
+test('variantChanged with an unknown payload is ignored', () => {
+  assert.equal(inboundMessage({ type: 'variantChanged', payload: { variant: 3 } }), undefined);
+  assert.deepEqual(inboundMessage({ type: 'variantChanged', payload: { variant: null } }), { type: 'variantChanged', payload: { variant: null } });
 });

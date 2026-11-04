@@ -1,4 +1,4 @@
-import type { EventFlowViews } from '../lsp/requests.js';
+import { INVALID_PARAMS, type EventFlowViews } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import { dataStateFromResult, describeOutcome, presentState, type DataState, type PageState } from './diagram-state.js';
 import {
@@ -22,7 +22,9 @@ export interface SessionPorts {
   readonly documentUri: string;
   readonly fileName: string;
   /** `languageServer.requests.eventFlowViews`. */
-  eventFlowViews(uri: string): Promise<RequestResult<EventFlowViews>>;
+  eventFlowViews(uri: string, variant?: string): Promise<RequestResult<EventFlowViews>>;
+  /** Whether the connected server advertised `flowVariants`. */
+  flowVariants(): boolean;
   /** `webview.postMessage`. */
   post(message: OutboundMessage): PromiseLike<boolean>;
   /** Runs a command the user chose from a state the editor is showing. */
@@ -56,6 +58,8 @@ export class DiagramSession {
   /** `eventFlowViews` requests issued. */
   requests = 0;
   private lastGood: EventFlowViews | undefined;
+  /** The variant the user chose in this editor, or `null` for the full diagram. Not persisted (EF-R12). */
+  private variant: string | null = null;
   /** Whether the page has been sent the last good diagram. */
   private rendered = false;
   private highlight: string | null = null;
@@ -85,9 +89,16 @@ export class DiagramSession {
   async refresh(): Promise<void> {
     if (this.disposed) return;
     const generation = ++this.generation;
-    this.requests++;
-    const result = await this.ports.eventFlowViews(this.ports.documentUri);
+    const withVariants = this.ports.flowVariants();
+    let result = await this.askServer(withVariants);
     if (this.disposed || generation !== this.generation) return;
+    if (withVariants && this.variant !== null && result.kind === 'failed' && result.code === INVALID_PARAMS) {
+      // The variant is gone from the document: show the full diagram.
+      this.ports.log.info(`EventFlow diagram for ${this.ports.fileName}: variant "${this.variant}" no longer exists; showing the full diagram`);
+      this.variant = null;
+      result = await this.askServer(withVariants);
+      if (this.disposed || generation !== this.generation) return;
+    }
     const data = dataStateFromResult(result);
     this.record(data);
     this.data = data;
@@ -97,6 +108,13 @@ export class DiagramSession {
       this.renderIfReady();
     }
     this.present();
+  }
+
+  private askServer(withVariants: boolean): Promise<RequestResult<EventFlowViews>> {
+    this.requests++;
+    return withVariants && this.variant !== null
+      ? this.ports.eventFlowViews(this.ports.documentUri, this.variant)
+      : this.ports.eventFlowViews(this.ports.documentUri);
   }
 
   /** Something the webview posted. */
@@ -117,6 +135,12 @@ export class DiagramSession {
         this.present(true);
         return;
       }
+      case 'variantChanged':
+        if (this.ports.flowVariants() && message.payload.variant !== this.variant) {
+          this.variant = message.payload.variant;
+          void this.refresh();
+        }
+        return;
       case 'viewModeChanged':
         // The page already shows this view: record it without telling the page (EF-R3).
         this.viewMode = message.payload.viewMode;
@@ -202,6 +226,7 @@ export class DiagramSession {
       viewMode: this.viewMode,
       displaySettings: this.displaySettings,
       diagramId: this.ports.documentUri,
+      ...(this.ports.flowVariants() ? { variants: this.lastGood.variants ?? [], variant: this.variant } : {}),
     };
     this.lastRenderBundle = payload;
     this.rendered = true;
