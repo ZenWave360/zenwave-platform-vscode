@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
+import { advertisedOrganizeModes, advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
 
 const INITIALIZE = { capabilities: { experimental: { customRequests: ['zenwave/workspaceStatus'] } } };
 
@@ -50,6 +50,16 @@ test('previewModes is advertised only by an explicit true under capabilities.exp
   for (const other of [undefined, {}, { capabilities: { experimental: {} } }, { capabilities: { experimental: { previewModes: 'true' } } }, { capabilities: { previewModes: true } }]) {
     assert.equal(previewModesAdvertised(other), false);
   }
+});
+
+test('organizeModes is advertised only by the boolean capability', () => {
+  for (const missing of [undefined, null, {}, { capabilities: {} }, { capabilities: { experimental: {} } },
+    { capabilities: { experimental: { organizeModes: 'true' } } },
+    { capabilities: { experimental: { organizeModes: false } } },
+    { capabilities: { experimental: { customRequests: ['zenwave/organizeZflServices'] } } }]) {
+    assert.equal(advertisedOrganizeModes(missing), false);
+  }
+  assert.equal(advertisedOrganizeModes({ capabilities: { experimental: { organizeModes: true, customRequests: ['zenwave/organizeZflServices'] } } }), true);
 });
 
 test('concurrent starts share one session and unsupported requests never reach the wire', async () => {

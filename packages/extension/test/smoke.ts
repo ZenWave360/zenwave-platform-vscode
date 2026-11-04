@@ -7,6 +7,7 @@ import type { ZenwaveExtensionApi } from '../src/activate.js';
 import type { LanguageServerApi } from '../src/lsp/feature.js';
 import { documentFailure } from '../src/lsp/requests.js';
 import type { OrganizeOutcome, ReferencesOutcome } from '../src/model/actions.js';
+import { FULL_ORGANIZE_ACCEPT, FULL_ORGANIZE_CONFIRMATION } from '../src/model/organize.js';
 import type { HierarchyTreeApi, ModelExplorerApi, OpenRelatedOutcome } from '../src/explorer/feature.js';
 import { findNode, type ExplorerNode } from '../src/explorer/hierarchy-model.js';
 import type { EventFlowApi, EventFlowEditorApi, EventFlowOpenOutcome } from '../src/eventflow/feature.js';
@@ -26,6 +27,34 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Full organise confirms in a modal. The smoke host has nobody to click it, so the
+ * stand-in answers Organize in Full and leaves every other warning alone.
+ */
+function acceptingFullOrganize<T>(body: () => Promise<T>): Promise<T> {
+  const original = vscode.window.showWarningMessage.bind(vscode.window);
+  function patched(message: string, optionsOrItem?: string | vscode.MessageOptions, ...items: string[]) {
+    if (message === FULL_ORGANIZE_CONFIRMATION) return Promise.resolve(FULL_ORGANIZE_ACCEPT);
+    if (optionsOrItem === undefined) return original(message);
+    if (typeof optionsOrItem === 'string') return original(message, optionsOrItem, ...items);
+    return original(message, optionsOrItem, ...items);
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(vscode.window, 'showWarningMessage');
+  Object.defineProperty(vscode.window, 'showWarningMessage', { configurable: true, writable: true, value: patched });
+  return body().finally(() => {
+    if (descriptor) Object.defineProperty(vscode.window, 'showWarningMessage', descriptor);
+    else Object.defineProperty(vscode.window, 'showWarningMessage', { configurable: true, writable: true, value: original });
+  });
+}
+
+function organizeCommand(uri?: vscode.Uri): Promise<OrganizeOutcome> {
+  return acceptingFullOrganize(async () => {
+    const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', uri);
+    assert(outcome !== undefined, 'zenwave.zfl.organizeServices returned nothing');
+    return outcome;
+  });
+}
 
 async function sharedLspFoundation(): Promise<void> {
   let requests = 0;
@@ -199,7 +228,7 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
 async function modelActions(api: LanguageServerApi): Promise<void> {
   await connected(api, 'Model actions');
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['zenwave.model.forwardReferences', 'zenwave.model.reverseReferences', 'zenwave.zfl.organizeServices']) {
+  for (const command of ['zenwave.model.forwardReferences', 'zenwave.model.reverseReferences', 'zenwave.zfl.organizeServices', 'zenwave.zfl.addMissingServices']) {
     assert(commands.includes(command), `${command} was not registered`);
   }
   assert(!commands.includes('zenwave.model.conceptsAt'), 'conceptsAt must not exist while no server answers it');
@@ -237,7 +266,7 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   const flowEditor = await vscode.window.showTextDocument(flow);
   await waitFor(async () => (await api.requests.preview(flow.uri.toString())).kind === 'ok', 'The server did not receive the untitled flow', 30000);
   flowEditor.selection = new vscode.Selection(27, 8, 27, 8);
-  const organized = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices');
+  const organized = await organizeCommand();
   assert(organized.kind === 'organized', `organize: ${JSON.stringify(organized)}`);
   assert(flow.getText().includes('commands: createOrder, notifyCustomer') && flow.getText() !== checkoutText,
     `The server's arrangement was not applied: ${flow.getText()}`);
@@ -245,7 +274,7 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
     `A cursor after the change moved: ${JSON.stringify(flowEditor.selection.active)}`);
   const organizedText = flow.getText();
   const versionBefore = flow.version;
-  const again = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', flow.uri);
+  const again = await organizeCommand(flow.uri);
   assert(again.kind === 'unchanged' && flow.version === versionBefore && flow.getText() === organizedText,
     `Organizing an organized flow must change nothing: ${JSON.stringify(again)} v${versionBefore}→${flow.version}`);
   await vscode.window.showTextDocument(flow);
@@ -268,14 +297,14 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   await vscode.window.showTextDocument(broken);
   const brokenVersion = broken.version;
   const refused = await waitFor(async () => {
-    const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', broken.uri);
+    const outcome = await organizeCommand(broken.uri);
     return outcome.kind === 'failed' && outcome.message.includes('is not open') ? undefined : outcome;
   }, 'Organize never reached the broken flow', 30000);
   assert(refused.kind === 'not-organizable' && refused.message.includes('left unchanged'), `organize a broken flow: ${JSON.stringify(refused)}`);
   assert(broken.version === brokenVersion && broken.getText() === 'flow Broken {\n    when {{ do\n', 'A broken flow was modified');
   const model = await vscode.workspace.openTextDocument({ language: 'zdl', content: 'entity A {}\n' });
   await vscode.window.showTextDocument(model);
-  const notZfl = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices');
+  const notZfl = await organizeCommand();
   assert(notZfl.kind === 'no-document' && model.getText() === 'entity A {}\n', `organize on a ZDL: ${JSON.stringify(notZfl)}`);
   for (const document of [flow, broken, model]) {
     await vscode.window.showTextDocument(document);
@@ -291,7 +320,7 @@ async function modelActionsOnDisk(api: LanguageServerApi): Promise<void> {
   const original = placeOrder.getText();
   assert(!placeOrder.isDirty, 'place-order-flow.zfl starts dirty');
   const organized = await waitFor(async () => {
-    const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', placeOrder.uri);
+    const outcome = await organizeCommand(placeOrder.uri);
     return outcome.kind === 'failed' ? undefined : outcome;
   }, 'Organize never reached place-order-flow.zfl', 30000);
   assert(organized.kind === 'organized' && placeOrder.isDirty && placeOrder.getText() !== original, `organize place-order-flow.zfl: ${JSON.stringify(organized)}`);
@@ -306,7 +335,7 @@ async function modelActionsOnDisk(api: LanguageServerApi): Promise<void> {
     await vscode.window.showTextDocument(document);
     const version = document.version;
     const unchanged = await waitFor(async () => {
-      const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', copy);
+      const outcome = await organizeCommand(copy);
       return outcome.kind === 'failed' ? undefined : outcome;
     }, 'Organize never reached the organized copy', 30000);
     assert(unchanged.kind === 'unchanged' && !document.isDirty && document.version === version,
@@ -315,7 +344,7 @@ async function modelActionsOnDisk(api: LanguageServerApi): Promise<void> {
 
     await vscode.workspace.getConfiguration('zenwave').update('lsp.enabled', false, vscode.ConfigurationTarget.Workspace);
     await waitFor(() => api.status.kind === 'disabled', 'zenwave.lsp.enabled=false did not stop the server');
-    const noServer = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', placeOrder.uri);
+    const noServer = await organizeCommand(placeOrder.uri);
     assert(noServer.kind === 'no-server' && noServer.message.includes('needs the ZenWave language server') && placeOrder.getText() === original,
       `organize without a server: ${JSON.stringify(noServer)}`);
     const noServerReferences = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences', placeOrder.uri, { line: 3, character: 6 });

@@ -25,7 +25,7 @@ import {
 import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource } from './plugin-catalogue.js';
 import { ZenwaveRequests } from './requests.js';
 import { languageServerStatus, presentStatus, type LanguageServerStatus } from './status.js';
-import { LspSupervisor, type LspState, type RequestResult } from './supervisor.js';
+import { advertisedOrganizeModes, LspSupervisor, type LspState, type RequestResult } from './supervisor.js';
 
 /** Context keys for `when` clauses. */
 export const LSP_CONTEXT_KEYS = {
@@ -33,6 +33,8 @@ export const LSP_CONTEXT_KEYS = {
   languageServerAvailable: 'zenwave.languageServerAvailable',
   /** The `zenwave/*` requests the connected server advertised (`'zenwave/preview' in zenwave.languageServerRequests`). */
   languageServerRequests: 'zenwave.languageServerRequests',
+  /** The connected server accepts `mode` on `zenwave/organizeZflServices`. */
+  organizeModesAvailable: 'zenwave.organizeModesAvailable',
   /** An architecture manifest was resolved for the workspace. */
   manifestAvailable: 'zenwave.manifestAvailable',
 } as const;
@@ -58,6 +60,8 @@ export interface LanguageServerApi {
   readonly advertisedRequests: readonly string[];
   /** Whether the connected server advertised `previewModes`: `zenwave/preview` takes `mode` (LVR-R17). */
   readonly previewModes: boolean;
+  /** The connected server accepts `mode` on `zenwave/organizeZflServices`. False when none is connected. */
+  readonly organizeModes: boolean;
   readonly serverInfo: { readonly name: string; readonly version?: string } | undefined;
   readonly requests: ZenwaveRequests;
   /** Issue any `zenwave/*` request; answers with the four-way result, never throws. */
@@ -148,8 +152,10 @@ export function registerLanguageServer(
     item.backgroundColor = presentation.warning ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
     if (relevantEditor()) item.show(); else item.hide();
     const advertised = [...supervisor.advertisedRequests].sort();
+    const organizeModes = current.kind === 'connected' && advertisedOrganizeModes(supervisor.initializeResult);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.languageServerAvailable, current.kind === 'connected');
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.languageServerRequests, current.kind === 'connected' ? advertised : []);
+    void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.organizeModesAvailable, organizeModes);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.manifestAvailable, manifest.manifestUri !== undefined);
     changed.fire();
   }
@@ -165,7 +171,7 @@ export function registerLanguageServer(
     }
     if (state.kind === 'connected') {
       const info = serverInfo();
-      logger.info(`Language server connected${info ? `: ${info.name} ${info.version ?? ''}`.trimEnd() : ''}\n  custom requests: ${[...supervisor.advertisedRequests].join(', ') || 'none'}`);
+      logger.info(`Language server connected${info ? `: ${info.name} ${info.version ?? ''}`.trimEnd() : ''}\n  custom requests: ${[...supervisor.advertisedRequests].join(', ') || 'none'}\n  organize modes: ${advertisedOrganizeModes(supervisor.initializeResult) ? 'yes' : 'no'}`);
     }
     lastState = state.kind;
     refresh();
@@ -305,6 +311,7 @@ export function registerLanguageServer(
     get manifest() { return manifest; },
     get advertisedRequests() { return [...supervisor.advertisedRequests]; },
     get previewModes() { return supervisor.previewModes; },
+    get organizeModes() { return status().kind === 'connected' && advertisedOrganizeModes(supervisor.initializeResult); },
     get serverInfo() { return serverInfo(); },
     requests,
     request,

@@ -5,12 +5,16 @@ import { ZENWAVE_REQUESTS, type NavigationTarget } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import { commandAvailability } from './availability.js';
 import { presentLocations, toLocation, type PresentedLocations } from './navigation.js';
+import { decideOrganize, organizeLenses, type OrganizeAction } from './organize.js';
 import { minimalReplacement, withLineEnding } from './text-replacement.js';
 
 export const MODEL_ACTION_COMMANDS = {
   forwardReferences: 'zenwave.model.forwardReferences',
   reverseReferences: 'zenwave.model.reverseReferences',
+  /** Full organise. Confirms first; an older server is sent no mode. */
   organizeServices: 'zenwave.zfl.organizeServices',
+  /** Add missing. Offered only when the server advertises organize modes. */
+  addMissingServices: 'zenwave.zfl.addMissingServices',
 } as const;
 
 const MODEL_LANGUAGES = new Set(['zdl', 'zw', 'zfl']);
@@ -25,16 +29,46 @@ export type ReferencesOutcome =
   | { readonly kind: 'no-document' | 'no-server' | 'unsupported' | 'failed'; readonly message: string };
 
 export type OrganizeOutcome =
-  | { readonly kind: 'organized' | 'unchanged' }
+  | { readonly kind: 'organized' | 'unchanged' | 'cancelled' }
   | { readonly kind: 'not-organizable' | 'no-document' | 'no-server' | 'unsupported' | 'failed'; readonly message: string };
 
 type Direction = 'forwardReferences' | 'reverseReferences';
 
-const FEATURE: Record<Direction | 'organizeServices', string> = {
+const FEATURE: Record<Direction | OrganizeAction, string> = {
   forwardReferences: 'Go to what this references',
   reverseReferences: 'Go to what references this',
-  organizeServices: 'Organize ZFL services',
+  full: 'Organize ZFL services',
+  additive: 'Add missing ZFL services',
 };
+
+/** CodeLens above a ZFL `systems` block. Empty until a server that organises services is connected. */
+class OrganizeCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
+  private readonly emitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeCodeLenses = this.emitter.event;
+
+  constructor(private readonly server: LanguageServerApi) {}
+
+  provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+    if (this.server.status.kind !== 'connected') return [];
+    if (!this.server.advertisedRequests.includes(ZENWAVE_REQUESTS.organizeZflServices)) return [];
+    return organizeLenses(document.getText(), this.server.organizeModes).map((lens) => new vscode.CodeLens(
+      new vscode.Range(document.positionAt(lens.start), document.positionAt(lens.end)),
+      {
+        title: lens.title,
+        command: lens.action === 'additive' ? MODEL_ACTION_COMMANDS.addMissingServices : MODEL_ACTION_COMMANDS.organizeServices,
+        arguments: [document.uri],
+      },
+    ));
+  }
+
+  refresh(): void {
+    this.emitter.fire();
+  }
+
+  dispose(): void {
+    this.emitter.dispose();
+  }
+}
 
 export function registerModelActions(context: vscode.ExtensionContext, server: LanguageServerApi, logger: Logger): void {
   /** Re-checked on every execution: a `when` clause hides a command, it does not stop a programmatic call. */
@@ -135,8 +169,8 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     return { kind, targets: references.value };
   }
 
-  async function organizeServices(uriArgument?: unknown): Promise<OrganizeOutcome> {
-    const feature = FEATURE.organizeServices;
+  async function organizeServices(action: OrganizeAction, uriArgument?: unknown): Promise<OrganizeOutcome> {
+    const feature = FEATURE[action];
     const uri = uriArgument instanceof vscode.Uri ? uriArgument : undefined;
     const document = editorFor(uri)?.document ?? (uri ? await vscode.workspace.openTextDocument(uri) : undefined);
     if (!document || document.languageId !== 'zfl') {
@@ -145,18 +179,42 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     const problem = unavailable(feature, [ZENWAVE_REQUESTS.organizeZflServices]);
     if (problem) return problem;
 
+    let answer: 'accepted' | 'cancelled' | undefined;
+    let decision = decideOrganize(action, server.organizeModes, answer);
+    if (decision.kind === 'unsupported') return unsupportedMode(feature);
+    if (decision.kind === 'confirm') {
+      const choice = await vscode.window.showWarningMessage(decision.message, { modal: true }, decision.accept);
+      answer = choice === decision.accept ? 'accepted' : 'cancelled';
+      decision = decideOrganize(action, server.organizeModes, answer);
+    }
+    if (decision.kind === 'cancelled') {
+      logger.debug(`${feature}: cancelled, nothing changed`);
+      return { kind: 'cancelled' };
+    }
+    if (decision.kind === 'unsupported') return unsupportedMode(feature);
+    if (decision.kind !== 'send') {
+      return report('failed', `${feature} could not be started.`, 'error');
+    }
+    const mode = decision.mode;
+    const still = unavailable(feature, [ZENWAVE_REQUESTS.organizeZflServices]);
+    if (still) return still;
+
     const name = document.uri.path.slice(document.uri.path.lastIndexOf('/') + 1) || document.uri.toString();
     const version = document.version;
+    const progress = action === 'additive' ? `Adding missing services in ${name}` : `Organizing services in ${name}`;
     // The request runs in the server; nothing is applied until its answer is in.
     const result = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Window, title: `Organizing services in ${name}` },
-      () => server.requests.organizeZflServices(document.uri.toString()),
+      { location: vscode.ProgressLocation.Window, title: progress },
+      () => mode === undefined
+        ? server.requests.organizeZflServices(document.uri.toString())
+        : server.requests.organizeZflServices(document.uri.toString(), mode),
     );
     if (result.kind !== 'ok') return requestProblem(feature, result);
     if (result.value === null) {
       const errors = vscode.languages.getDiagnostics(document.uri)
         .filter((diagnostic) => diagnostic.severity === vscode.DiagnosticSeverity.Error).length;
-      const message = `Could not organize services in ${name}: the ZenWave language server could not process it` +
+      const attempt = action === 'additive' ? 'add missing services' : 'organize services';
+      const message = `Could not ${attempt} in ${name}: the ZenWave language server could not process it` +
         (errors > 0 ? ` (${errors} error${errors === 1 ? '' : 's'} reported in Problems).` : '.') +
         ' The document was left unchanged.';
       logger.warn(message);
@@ -172,8 +230,11 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     const organized = withLineEnding(result.value, document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n');
     const replacement = minimalReplacement(current, organized);
     if (!replacement) {
-      logger.info(`${feature}: ${name} is already organized; nothing changed`);
-      void vscode.window.setStatusBarMessage(`ZenWave: services in ${name} are already organized`, 4000);
+      const already = action === 'additive'
+        ? `${name} has nothing missing to add`
+        : `services in ${name} are already organized`;
+      logger.info(`${feature}: ${already}`);
+      void vscode.window.setStatusBarMessage(`ZenWave: ${already}`, 4000);
       return { kind: 'unchanged' };
     }
     const edit = new vscode.WorkspaceEdit();
@@ -186,13 +247,26 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     return { kind: 'organized' };
   }
 
+  function unsupportedMode(feature: string): { kind: 'unsupported'; message: string } {
+    const version = server.serverInfo?.version;
+    const connected = version ? `ZenWave language server (${version})` : 'ZenWave language server';
+    return report('unsupported',
+      `${feature} is not supported by the connected ${connected}: it does not advertise organize modes.`, 'warn');
+  }
+
+  const codeLenses = new OrganizeCodeLensProvider(server);
   context.subscriptions.push(
+    codeLenses,
+    vscode.languages.registerCodeLensProvider({ language: 'zfl' }, codeLenses),
+    server.onDidChange(() => codeLenses.refresh()),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.forwardReferences,
       (uri?: unknown, position?: unknown) => followReferences('forwardReferences', uri, position)),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.reverseReferences,
       (uri?: unknown, position?: unknown, semanticId?: unknown) => followReferences('reverseReferences', uri, position, semanticId)),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.organizeServices,
-      (uri?: unknown) => organizeServices(uri)),
+      (uri?: unknown) => organizeServices('full', uri)),
+    vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.addMissingServices,
+      (uri?: unknown) => organizeServices('additive', uri)),
   );
 }
 

@@ -63,6 +63,9 @@ export interface EventFlowViews {
   readonly serviceGraph: ViewModel;
 }
 
+/** `mode` of `zenwave/organizeZflServices`. Absent on the wire means `full`. */
+export type OrganizeServicesMode = 'full' | 'additive';
+
 export type SequenceRenderMode = 'SEPARATE_VARIANTS' | 'ALT_BLOCKS' | 'AUTO';
 
 export interface PreviewRepresentation {
@@ -154,10 +157,15 @@ export class ZenwaveRequests {
   /**
    * The whole ZFL text with its services organised (equal to the current text when nothing changes), or `null`
    * when the server could not process the document, e.g. a syntax error (observed with lsp-js d7156e7).
+   *
+   * `mode` is sent only when the server advertised `organizeModes`. `full` rebuilds the block; `additive`
+   * adds what the flows use and removes nothing. Omitting it is what an older server already does, and it
+   * is `full`.
    */
-  async organizeZflServices(uri: string): Promise<RequestResult<string | null>> {
+  async organizeZflServices(uri: string, mode?: OrganizeServicesMode): Promise<RequestResult<string | null>> {
+    const params = mode === undefined ? { uri } : { uri, mode };
     return expect(ZENWAVE_REQUESTS.organizeZflServices,
-      await this.issuer.request(ZENWAVE_REQUESTS.organizeZflServices, { uri }),
+      await this.issuer.request(ZENWAVE_REQUESTS.organizeZflServices, params),
       (value) => value === null || typeof value === 'string');
   }
 
