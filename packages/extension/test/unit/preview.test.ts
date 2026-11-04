@@ -454,6 +454,14 @@ test('copy as markdown is on the title bar and in the palette only while that pr
   }
 });
 
+test('every table of a Markdown page is as wide as the page, whatever its content (MP-R28)', () => {
+  const css = readFileSync(join(here, '../../webview/preview/preview.css'), 'utf8');
+  const rule = css.split(/\r?\n/).find((line) => /^\.document table\s*\{/.test(line));
+  assert.ok(rule, 'a rule for .document table');
+  assert.match(rule, /width:\s*100%\s*!important;/);
+  assert.match(rule, /display:\s*table;/, 'the table itself, not a block around it, is stretched');
+});
+
 test('the preview keybindings are scoped to model editors and cannot reach the built-in Markdown preview', () => {
   const bindings = manifest.contributes.keybindings as { command: string; key: string; mac?: string; when: string }[];
   assert.deepEqual(bindings.map((binding) => [binding.command, binding.key, binding.mac]), [
