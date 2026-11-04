@@ -396,6 +396,33 @@
         }
       },
       {
+        "command": "zenwave.preview.openSequenceDiagramsToSide",
+        "title": "Open Sequence Diagrams to the Side",
+        "category": "ZenWave",
+        "icon": {
+          "light": "./resources/zenwave-preview-light.svg",
+          "dark": "./resources/zenwave-preview-dark.svg"
+        }
+      },
+      {
+        "command": "zenwave.preview.openModelDocsToSide",
+        "title": "Open Model Docs to the Side",
+        "category": "ZenWave",
+        "icon": {
+          "light": "./resources/zenwave-preview-light.svg",
+          "dark": "./resources/zenwave-preview-dark.svg"
+        }
+      },
+      {
+        "command": "zenwave.preview.openScriptsDocsToSide",
+        "title": "Open Scripts Docs to the Side",
+        "category": "ZenWave",
+        "icon": {
+          "light": "./resources/zenwave-preview-light.svg",
+          "dark": "./resources/zenwave-preview-dark.svg"
+        }
+      },
+      {
         "command": "zenwave.preview.open",
         "title": "Open Preview",
         "category": "ZenWave",
@@ -546,6 +573,18 @@
           "when": "false"
         },
         {
+          "command": "zenwave.preview.openSequenceDiagramsToSide",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.preview.openModelDocsToSide",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.preview.openScriptsDocsToSide",
+          "when": "false"
+        },
+        {
           "command": "zenwave.preview.openSequenceDiagrams",
           "when": "(editorLangId == zfl || resourceExtname == .zfl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
         },
@@ -693,7 +732,7 @@
           "group": "2_preview@1"
         },
         {
-          "command": "zenwave.preview.openToSide",
+          "command": "zenwave.preview.openSequenceDiagramsToSide",
           "when": "activeCustomEditorId != zenwave.preview",
           "group": "2_preview@2"
         }
@@ -714,7 +753,7 @@
           "group": "2_preview@2"
         },
         {
-          "command": "zenwave.preview.openToSide",
+          "command": "zenwave.preview.openModelDocsToSide",
           "when": "activeCustomEditorId != zenwave.preview",
           "group": "2_preview@3"
         }
@@ -731,7 +770,7 @@
           "group": "2_preview@1"
         },
         {
-          "command": "zenwave.preview.openToSide",
+          "command": "zenwave.preview.openScriptsDocsToSide",
           "when": "activeCustomEditorId != zenwave.preview",
           "group": "2_preview@2"
         }

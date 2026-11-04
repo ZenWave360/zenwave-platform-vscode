@@ -18,6 +18,9 @@ export const PREVIEW_COMMANDS = {
   openModelDocs: 'zenwave.preview.openModelDocs',
   openZdlDiagrams: 'zenwave.preview.openZdlDiagrams',
   openScriptsDocs: 'zenwave.preview.openScriptsDocs',
+  openSequenceDiagramsToSide: 'zenwave.preview.openSequenceDiagramsToSide',
+  openModelDocsToSide: 'zenwave.preview.openModelDocsToSide',
+  openScriptsDocsToSide: 'zenwave.preview.openScriptsDocsToSide',
   showText: 'zenwave.preview.showText',
   selectDiagram: 'zenwave.preview.selectDiagram',
   selectRenderMode: 'zenwave.preview.selectRenderMode',
@@ -319,6 +322,15 @@ export function registerPreviewEditor(
     return { kind: 'opened', documentUri: uri.toString() };
   }
 
+  /** Model Docs beside the text (MP-R27): the preview opens as `openToSide` does, then shows the page, as `openModelDocs` does. */
+  async function openModelDocsToSide(argument: unknown): Promise<PreviewOpenOutcome> {
+    const outcome = await openToSide(argument);
+    if (outcome.kind === 'opened') {
+      for (const editor of [...editors].filter((candidate) => candidate.documentUri === outcome.documentUri)) await editor.session.setPreviewMode('docs');
+    }
+    return outcome;
+  }
+
   async function open(argument: unknown): Promise<PreviewOpenOutcome> {
     const uri = commandDocument(argument, isPreviewableDocument);
     if (!uri) return noDocument(argument);
@@ -451,6 +463,10 @@ export function registerPreviewEditor(
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openModelDocs, (argument: unknown) => openInMode(argument, 'docs')),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openZdlDiagrams, (argument: unknown) => openInMode(argument, 'diagrams')),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openScriptsDocs, open),
+    // VS Code shows one title per command, so each view has its own "to the side" entry (MP-R27).
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openSequenceDiagramsToSide, openToSide),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openModelDocsToSide, openModelDocsToSide),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openScriptsDocsToSide, openToSide),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.showText, showText),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectDiagram, selectDiagram),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectRenderMode, selectRenderMode),

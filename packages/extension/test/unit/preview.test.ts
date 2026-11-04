@@ -398,7 +398,7 @@ test('the manifest registers an optional preview editor and names each supported
   assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === PREVIEW_VIEW_TYPE),
     { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zw' }, { filenamePattern: '*.zfl' }], priority: 'option' });
   const commands = (contributes.commands as { command: string; title: string }[]).map((entry) => entry.command);
-  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
+  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.openSequenceDiagramsToSide', 'zenwave.preview.openModelDocsToSide', 'zenwave.preview.openScriptsDocsToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
     assert.ok(commands.includes(command), `${command} is not contributed`);
   }
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
@@ -408,12 +408,18 @@ test('the manifest registers an optional preview editor and names each supported
   assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.') && item.command !== 'zenwave.preview.copyMarkdown'), 'the preview has no title-bar icon of its own besides Copy as Markdown');
   const menus = contributes.menus as Record<string, { command: string; when: string }[]>;
   const opens = (submenu: string) => menus[submenu]!.map((entry) => entry.command).filter((command) => !command.endsWith('.showText'));
-  assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openToSide']);
-  assert.deepEqual(opens('zenwave.zdlViews'), ['zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openToSide']);
+  assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openSequenceDiagramsToSide']);
+  assert.deepEqual(opens('zenwave.zdlViews'), ['zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openModelDocsToSide']);
   const zdlMenu = Object.fromEntries((menus['zenwave.zdlViews'] as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
   assert.equal(zdlMenu['zenwave.preview.openZdlDiagrams'], 'zenwave.previewModesAvailable', 'ZDL Diagrams is offered only to a server that advertises previewModes (MP-R25)');
   assert.equal(zdlMenu['zenwave.preview.openModelDocs'], undefined, 'Model Docs is reachable from inside a preview too (MP-R17)');
-  assert.deepEqual(opens('zenwave.zwViews'), ['zenwave.preview.openScriptsDocs', 'zenwave.preview.openToSide']);
+  assert.deepEqual(opens('zenwave.zwViews'), ['zenwave.preview.openScriptsDocs', 'zenwave.preview.openScriptsDocsToSide']);
+  const titles = Object.fromEntries((contributes.commands as { command: string; title: string }[]).map((entry) => [entry.command, entry.title]));
+  assert.deepEqual([titles['zenwave.preview.openSequenceDiagramsToSide'], titles['zenwave.preview.openModelDocsToSide'], titles['zenwave.preview.openScriptsDocsToSide']],
+    ['Open Sequence Diagrams to the Side', 'Open Model Docs to the Side', 'Open Scripts Docs to the Side'], 'each "to the side" entry names its view (MP-R27)');
+  for (const command of ['openSequenceDiagramsToSide', 'openModelDocsToSide', 'openScriptsDocsToSide']) {
+    assert.equal((contributes.menus.commandPalette as { command: string; when?: string }[]).find((entry) => entry.command === `zenwave.preview.${command}`)?.when, 'false', `${command} is a menu entry; Open Preview to the Side keeps the palette`);
+  }
   for (const submenu of ['zenwave.zflViews', 'zenwave.zdlViews', 'zenwave.zwViews']) {
     assert.ok(menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.showText' && entry.when === 'activeCustomEditorId == zenwave.preview'), `${submenu} keeps the way back to text (MP-Q9)`);
   }
