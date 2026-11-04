@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { Preview } from '../../src/lsp/requests.js';
 import type { RequestResult } from '../../src/lsp/supervisor.js';
-import { FollowingMemory, followTarget, followingTitle, isFollowingViewType } from '../../src/preview/following.js';
+import { FollowingMemory, followTarget, followingTitle, followsLanguage, isFollowingViewType } from '../../src/preview/following.js';
 import { FOLLOWING_VIEW_TYPE, inboundMessage, type OutboundMessage, type RenderPayload } from '../../src/preview/protocol.js';
 import { PreviewSession } from '../../src/preview/session.js';
 
@@ -150,4 +150,12 @@ test('a lock turns the following preview into an ordinary one: the manifest puts
   assert.ok(palette.some((entry) => entry.command === 'zenwave.preview.openFollowing' && /!isInDiffEditor/.test(entry.when ?? '')), 'offered for a model, not in a diff');
   const title = manifest.contributes.menus['editor/title'] as { command?: string; when?: string }[];
   assert.deepEqual(title.filter((entry) => entry.command === 'zenwave.preview.lockFollowing').map((entry) => entry.when), [`activeWebviewPanelId == ${FOLLOWING_VIEW_TYPE}`]);
+});
+
+test('the following preview follows ZDL and ZFL, not ZW (MP-R31)', () => {
+  assert.equal(followsLanguage('zdl', '/workspace/orders.zdl'), true);
+  assert.equal(followsLanguage('zfl', '/workspace/checkout.zfl'), true);
+  assert.equal(followsLanguage('zw', '/workspace/scripts.zw'), false, 'a .zw is not followed');
+  assert.equal(followsLanguage(undefined, '/workspace/orders.ZDL'), true, 'by extension when the language is unknown');
+  assert.equal(followsLanguage(undefined, '/workspace/scripts.zw'), false);
 });

@@ -3,7 +3,7 @@ import { FOLLOWING_VIEW_TYPE } from './protocol.js';
 /** What the following preview is told about the editor that just took focus (MP-R31). */
 export interface FollowCandidate {
   readonly uri: string;
-  /** A ZDL, ZW or ZFL that is not untitled: what `isPreviewableDocument` decides. */
+  /** A ZDL or ZFL that is not untitled: `isPreviewableDocument` and `followsLanguage`. A ZW is not followed. */
   readonly previewable: boolean;
   /** One side of a diff is not a model the user is working on. */
   readonly inDiff: boolean;
@@ -17,6 +17,12 @@ export interface FollowCandidate {
 export function followTarget(candidate: FollowCandidate | undefined, shown: string | undefined): string | undefined {
   if (!candidate || !candidate.previewable || candidate.inDiff) return undefined;
   return candidate.uri === shown ? undefined : candidate.uri;
+}
+
+/** Whether the following preview follows a document of this language: ZDL and ZFL, not ZW (MP-R31). */
+export function followsLanguage(languageId: string | undefined, path: string): boolean {
+  if (languageId !== undefined) return languageId === 'zdl' || languageId === 'zfl';
+  return /\.(zdl|zfl)$/i.test(path);
 }
 
 /** The tab title: it names the file shown (MP-R31). */

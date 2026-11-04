@@ -10,7 +10,7 @@ import { decidePreviewLink } from './links.js';
 import type { PreviewMode } from '../lsp/requests.js';
 import { FOLLOWING_VIEW_TYPE, PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
 import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from './session.js';
-import { FollowingMemory, followTarget, followingTitle, isFollowingViewType } from './following.js';
+import { FollowingMemory, followTarget, followingTitle, followsLanguage, isFollowingViewType } from './following.js';
 
 export const PREVIEW_COMMANDS = {
   open: 'zenwave.preview.open',
@@ -528,7 +528,7 @@ export function registerPreviewEditor(
 
   /** One following preview per window, beside the text (MP-R31): the one that exists is revealed and shows the file the command was run on. */
   async function openFollowing(argument: unknown): Promise<PreviewOpenOutcome> {
-    const uri = commandDocument(argument, isPreviewableDocument);
+    const uri = commandDocument(argument, (candidate, languageId) => isPreviewableDocument(candidate, languageId) && followsLanguage(languageId, candidate.path));
     if (following) {
       following.panel.reveal(undefined, true);
       if (uri) following.showDocument(uri);
@@ -580,7 +580,7 @@ export function registerPreviewEditor(
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
     const document = editor?.document;
     const target = followTarget(
-      editor && document ? { uri: document.uri.toString(), previewable: isPreviewableDocument(document.uri, document.languageId), inDiff: tab?.input instanceof vscode.TabInputTextDiff } : undefined,
+      editor && document ? { uri: document.uri.toString(), previewable: isPreviewableDocument(document.uri, document.languageId) && followsLanguage(document.languageId, document.uri.path), inDiff: tab?.input instanceof vscode.TabInputTextDiff } : undefined,
       following.documentUri,
     );
     if (target !== undefined && document) following.showDocument(document.uri);

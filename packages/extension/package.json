@@ -629,7 +629,7 @@
         },
         {
           "command": "zenwave.preview.openFollowing",
-          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && !isInDiffEditor"
+          "when": "(editorLangId =~ /^(zdl|zfl)$/ || resourceExtname =~ /^\\.(zdl|zfl)$/) && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.lockFollowing",
