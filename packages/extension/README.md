@@ -66,7 +66,7 @@ Open it from the ZenWave icon in the editor title bar, with **ZenWave: Open Prev
 
 ZFL flows also open as an EventFlow diagram, drawn by the same renderer the IntelliJ plugin uses. Open it from the ZenWave icon in a flow's editor title bar, beside the text or in its place. **Reopen Editor With…** or **Show ZFL Text** takes you back to the text.
 
-The diagram follows your edits as you type. It opens zoomed as far out as fits, with the flow's first start in view. You can switch between the flow view and the service view, and turn humanized labels on or off. When there is nothing to draw, it tells you why.
+The diagram follows your edits as you type. It opens zoomed as far out as fits, with the flow's first start in view. You can switch between the flow view and the service view, and turn humanized labels on or off. When there is nothing to draw, it tells you why. With a language server that supports it, **Save positions** in the full diagram writes your arrangement beside the model (`checkout.zfl.positions.json`), and **Discard Saved Positions** in the title bar menu deletes it to go back to automatic layout.
 
 > 📸 **Screenshot:** the EventFlow diagram of a business flow across three bounded contexts, with commands, events and policies, and the view switcher in the title bar.
 

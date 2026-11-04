@@ -63,7 +63,13 @@ export interface EventFlowViews {
   readonly serviceGraph: ViewModel;
   /** The flow's variants, in the server's order; absent from a server that does not list them. */
   readonly variants?: readonly FlowVariant[];
+  /** Present when `positions` was sent to a server that advertised `savedPositions` (LVR-R18). */
+  readonly savedPositions?: SavedPositionsAnswer;
 }
+
+export type SavedPositionsAnswer =
+  | { readonly applied: true }
+  | { readonly applied: false; readonly reason?: 'missing-nodes' | 'invalid'; readonly missing?: readonly string[] };
 
 export interface FlowVariant {
   readonly id: string;
@@ -176,9 +182,12 @@ export class ZenwaveRequests {
       (value) => value === null || typeof value === 'string');
   }
 
-  /** `variant` is sent only when given, and only to a server that advertised `flowVariants`; then `flowGraph` is that variant's view. */
-  async eventFlowViews(uri: string, variant?: string): Promise<RequestResult<EventFlowViews>> {
-    const params = { textDocument: { uri }, ...(variant === undefined ? {} : { variant }) };
+  /**
+   * `variant` is sent only when given, and only to a server that advertised `flowVariants`; then `flowGraph` is that variant's view.
+   * `positions` (a saved file's `flow`) is sent only for the full diagram, and only to a server that advertised `savedPositions`.
+   */
+  async eventFlowViews(uri: string, variant?: string, positions?: Readonly<Record<string, unknown>>): Promise<RequestResult<EventFlowViews>> {
+    const params = { textDocument: { uri }, ...(variant === undefined ? {} : { variant }), ...(positions === undefined ? {} : { positions }) };
     return expect(ZENWAVE_REQUESTS.eventFlowViews,
       await this.issuer.request(ZENWAVE_REQUESTS.eventFlowViews, params),
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));

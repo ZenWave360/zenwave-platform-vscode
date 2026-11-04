@@ -11,6 +11,7 @@ import {
   type StatePresentation,
   type ViewMode,
 } from './protocol.js';
+import { serializePositions, type Positions, type PositionsFile } from './positions.js';
 
 export interface SessionLog {
   info(message: string): void;
@@ -22,19 +23,44 @@ export interface SessionPorts {
   readonly documentUri: string;
   readonly fileName: string;
   /** `languageServer.requests.eventFlowViews`. */
-  eventFlowViews(uri: string, variant?: string): Promise<RequestResult<EventFlowViews>>;
+  eventFlowViews(uri: string, variant?: string, positions?: Positions): Promise<RequestResult<EventFlowViews>>;
   /** Whether the connected server advertised `flowVariants`. */
   flowVariants(): boolean;
+  /** Whether the connected server advertised `savedPositions`. */
+  savedPositions(): boolean;
+  /** The positions file beside the model (EF-R14). */
+  readonly positionsFile: {
+    read(): Promise<PositionsFile>;
+    /** `read-only` when the workspace cannot be written; the user has been told. */
+    write(positions: Positions): Promise<'written' | 'read-only'>;
+    remove(): Promise<void>;
+  };
   /** `webview.postMessage`. */
   post(message: OutboundMessage): PromiseLike<boolean>;
   /** Runs a command the user chose from a state the editor is showing. */
   runCommand(command: string): void;
   readonly log: SessionLog;
+  /** Tells the user something went wrong with a thing they asked for. */
+  warn(message: string): void;
+  /** The answer to `savedPositionsExist` may have changed. */
+  positionsExistChanged(): void;
 }
 
 export type RenderBundlePayload = Extract<PageMessage, { type: 'renderBundle' }>['payload'];
 
 const POSTED_HISTORY = 200;
+
+function stateOf(file: PositionsFile): string {
+  if (!file.exists) return 'absent';
+  return file.positions ? serializePositions(file.positions) : `invalid ${file.why ?? ''}`;
+}
+
+/** `applied` and `missing` as the server answered; not applied when no file's positions were sent. */
+function savedAnswer(sent: boolean, views: EventFlowViews): { applied: boolean; missing?: readonly string[] } {
+  const answer = sent ? views.savedPositions : undefined;
+  if (answer?.applied === true) return { applied: true };
+  return { applied: false, ...(answer?.applied === false && answer.missing ? { missing: answer.missing } : {}) };
+}
 
 /**
  * One diagram editor's relay between the language server and the EventFlow page.
@@ -58,6 +84,12 @@ export class DiagramSession {
   /** `eventFlowViews` requests issued. */
   requests = 0;
   private lastGood: EventFlowViews | undefined;
+  /** What the page is told about the positions file, for the full diagram when the server applies saved positions. */
+  private lastSaved: RenderBundlePayload['savedPositions'];
+  private fileExists = false;
+  /** The state of the positions file as this session last read or wrote it, to tell its own writes from outside changes. */
+  private fileState: string | undefined;
+  private loggedFileProblem: string | undefined;
   /** The variant the user chose in this editor, or `null` for the full diagram. Not persisted (EF-R12). */
   private variant: string | null = null;
   /** Whether the page has been sent the last good diagram. */
@@ -85,18 +117,23 @@ export class DiagramSession {
     return this.presentation;
   }
 
+  /** Whether a positions file was beside the model at the last request. */
+  get savedPositionsExist(): boolean {
+    return this.fileExists;
+  }
+
   /** Asks the server for the view model and relays the answer. Answers overtaken by a newer request are dropped. */
   async refresh(): Promise<void> {
     if (this.disposed) return;
     const generation = ++this.generation;
     const withVariants = this.ports.flowVariants();
-    let result = await this.askServer(withVariants);
+    let { result, saved } = await this.askServer(withVariants);
     if (this.disposed || generation !== this.generation) return;
     if (withVariants && this.variant !== null && result.kind === 'failed' && result.code === INVALID_PARAMS) {
       // The variant is gone from the document: show the full diagram.
       this.ports.log.info(`EventFlow diagram for ${this.ports.fileName}: variant "${this.variant}" no longer exists; showing the full diagram`);
       this.variant = null;
-      result = await this.askServer(withVariants);
+      ({ result, saved } = await this.askServer(withVariants));
       if (this.disposed || generation !== this.generation) return;
     }
     const data = dataStateFromResult(result);
@@ -104,17 +141,48 @@ export class DiagramSession {
     this.data = data;
     if (result.kind === 'ok') {
       this.lastGood = result.value;
+      this.lastSaved = saved && { exists: saved.exists, ...savedAnswer(saved.sent, result.value) };
       this.rendered = false;
       this.renderIfReady();
     }
     this.present();
   }
 
-  private askServer(withVariants: boolean): Promise<RequestResult<EventFlowViews>> {
+  private async askServer(withVariants: boolean): Promise<{ result: RequestResult<EventFlowViews>; saved?: { exists: boolean; sent: boolean } }> {
+    if (withVariants && this.variant !== null) {
+      // No positions are sent for a variant, but the file may have gone, and Discard Saved Positions follows it.
+      if (this.ports.savedPositions()) await this.readPositionsFile();
+      this.requests++;
+      return { result: await this.ports.eventFlowViews(this.ports.documentUri, this.variant) };
+    }
+    if (!this.ports.savedPositions()) {
+      this.requests++;
+      return { result: await this.ports.eventFlowViews(this.ports.documentUri) };
+    }
+    const file = await this.readPositionsFile();
     this.requests++;
-    return withVariants && this.variant !== null
-      ? this.ports.eventFlowViews(this.ports.documentUri, this.variant)
-      : this.ports.eventFlowViews(this.ports.documentUri);
+    const result = await this.ports.eventFlowViews(this.ports.documentUri, undefined, file.positions);
+    return { result, saved: { exists: file.exists, sent: file.positions !== undefined } };
+  }
+
+  private async readPositionsFile(): Promise<PositionsFile> {
+    let file: PositionsFile;
+    try {
+      file = await this.ports.positionsFile.read();
+    } catch (error) {
+      this.ports.log.warn(`EventFlow diagram for ${this.ports.fileName}: could not read the positions file: ${error instanceof Error ? error.message : String(error)}`);
+      file = { exists: false };
+    }
+    const before = this.fileExists;
+    this.fileExists = file.exists;
+    this.fileState = stateOf(file);
+    if (before !== file.exists) this.ports.positionsExistChanged();
+    const problem = file.exists && file.positions === undefined ? file.why ?? 'it cannot be applied' : undefined;
+    if (problem !== undefined && problem !== this.loggedFileProblem) {
+      this.ports.log.warn(`EventFlow diagram for ${this.ports.fileName}: the saved positions file is ignored: ${problem}`);
+    }
+    this.loggedFileProblem = problem;
+    return file;
   }
 
   /** Something the webview posted. */
@@ -141,6 +209,13 @@ export class DiagramSession {
           void this.refresh();
         }
         return;
+      case 'savePositions':
+        if (!this.ports.savedPositions() || this.variant !== null) {
+          this.ports.log.info(`EventFlow diagram for ${this.ports.fileName}: positions are saved only from the full diagram of a server that applies them; ignored`);
+          return;
+        }
+        void this.savePositions(message.payload.positions);
+        return;
       case 'viewModeChanged':
         // The page already shows this view: record it without telling the page (EF-R3).
         this.viewMode = message.payload.viewMode;
@@ -165,6 +240,42 @@ export class DiagramSession {
         return;
       }
     }
+  }
+
+  private async savePositions(positions: Positions): Promise<void> {
+    try {
+      if (await this.ports.positionsFile.write(positions) === 'written') {
+        // The file watcher reports this write too; the refresh below already covers it.
+        this.fileState = serializePositions(positions);
+        await this.refresh();
+      }
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      this.ports.log.warn(`EventFlow diagram for ${this.ports.fileName}: could not save the positions: ${why}`);
+      this.ports.warn(`The positions of ${this.ports.fileName} were not saved: ${why}`);
+    }
+  }
+
+  /**
+   * The positions file changed on disk. True when the diagram should be asked for again: a change this session
+   * did not make itself (a branch switch, another editor). Its own writes and deletes are already refreshed.
+   */
+  async positionsFileChanged(): Promise<boolean> {
+    if (this.disposed || !this.ports.savedPositions()) return false;
+    let state: string;
+    try {
+      state = stateOf(await this.ports.positionsFile.read());
+    } catch {
+      return true;
+    }
+    return state !== this.fileState;
+  }
+
+  /** Deletes the positions file and asks again, so the diagram is laid out automatically (EF-Q9). */
+  async discardSavedPositions(): Promise<void> {
+    await this.ports.positionsFile.remove();
+    this.fileState = 'absent';
+    await this.refresh();
   }
 
   /** The page did not say it loaded in time. */
@@ -227,6 +338,7 @@ export class DiagramSession {
       displaySettings: this.displaySettings,
       diagramId: this.ports.documentUri,
       ...(this.ports.flowVariants() ? { variants: this.lastGood.variants ?? [], variant: this.variant } : {}),
+      ...(this.lastSaved ? { savedPositions: this.lastSaved } : {}),
     };
     this.lastRenderBundle = payload;
     this.rendered = true;
