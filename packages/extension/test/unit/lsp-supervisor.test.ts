@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advertisedRequests, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
+import { advertisedOrganizeModes, advertisedRequests, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
 
 const INITIALIZE = { capabilities: { experimental: { customRequests: ['zenwave/workspaceStatus'] } } };
 
@@ -43,6 +43,16 @@ test('initialize capability discovery ignores malformed and non-ZenWave entries'
   assert.deepEqual([...advertisedRequests({ capabilities: { experimental: {
     customRequests: ['zenwave/workspaceStatus', 42, null, 'textDocument/hover', 'zenwave/workspaceStatus'],
   } } })], ['zenwave/workspaceStatus']);
+});
+
+test('organizeModes is advertised only by the boolean capability', () => {
+  for (const missing of [undefined, null, {}, { capabilities: {} }, { capabilities: { experimental: {} } },
+    { capabilities: { experimental: { organizeModes: 'true' } } },
+    { capabilities: { experimental: { organizeModes: false } } },
+    { capabilities: { experimental: { customRequests: ['zenwave/organizeZflServices'] } } }]) {
+    assert.equal(advertisedOrganizeModes(missing), false);
+  }
+  assert.equal(advertisedOrganizeModes({ capabilities: { experimental: { organizeModes: true, customRequests: ['zenwave/organizeZflServices'] } } }), true);
 });
 
 test('concurrent starts share one session and unsupported requests never reach the wire', async () => {

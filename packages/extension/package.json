@@ -302,7 +302,12 @@
       },
       {
         "command": "zenwave.zfl.organizeServices",
-        "title": "Organize ZFL Services",
+        "title": "Organize ZFL Services in Full",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.zfl.addMissingServices",
+        "title": "Add Missing ZFL Services",
         "category": "ZenWave"
       },
       {
@@ -472,6 +477,10 @@
           "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests"
         },
         {
+          "command": "zenwave.zfl.addMissingServices",
+          "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests && zenwave.organizeModesAvailable"
+        },
+        {
           "command": "zenwave.explorer.refresh",
           "when": "false"
         },
@@ -570,6 +579,11 @@
           "command": "zenwave.model.reverseReferences",
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
           "group": "navigation@91"
+        },
+        {
+          "command": "zenwave.zfl.addMissingServices",
+          "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests && zenwave.organizeModesAvailable",
+          "group": "1_modification@89"
         },
         {
           "command": "zenwave.zfl.organizeServices",

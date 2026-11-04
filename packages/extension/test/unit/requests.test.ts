@@ -26,6 +26,8 @@ test('every request the server advertises today has a wrapper sending the wire p
   await requests.forwardReferences('file:///w/a.zfl', 'file:///w/a.zfl#x');
   await requests.reverseReferences('file:///w/a.zfl', 'file:///w/a.zfl#x');
   await requests.organizeZflServices('file:///w/a.zfl');
+  await requests.organizeZflServices('file:///w/a.zfl', 'full');
+  await requests.organizeZflServices('file:///w/a.zfl', 'additive');
   await requests.eventFlowViews('file:///w/a.zfl');
   await requests.preview('file:///w/a.zfl');
   await requests.preview('file:///w/a.zfl', 'SEPARATE_VARIANTS');
@@ -35,6 +37,8 @@ test('every request the server advertises today has a wrapper sending the wire p
     { method: 'zenwave/forwardReferences', params: { uri: 'file:///w/a.zfl', semanticId: 'file:///w/a.zfl#x' } },
     { method: 'zenwave/reverseReferences', params: { uri: 'file:///w/a.zfl', semanticId: 'file:///w/a.zfl#x' } },
     { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl' } },
+    { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl', mode: 'full' } },
+    { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl', mode: 'additive' } },
     { method: 'zenwave/eventFlowViews', params: { textDocument: { uri: 'file:///w/a.zfl' } } },
     { method: 'zenwave/preview', params: { textDocument: { uri: 'file:///w/a.zfl' } } },
     { method: 'zenwave/preview', params: { textDocument: { uri: 'file:///w/a.zfl' }, sequenceRenderMode: 'SEPARATE_VARIANTS' } },

@@ -28,8 +28,15 @@
 - Restricted Mode now also holds back the language server, content resolution
   and credentials; trusting the workspace enables them without a reload.
 - ZenWave: Go to What This References / Go to What References This, from the
-  editor context menu and the palette, and ZenWave: Organize ZFL Services as one
-  undoable edit. Offered only while a language server supporting them is connected.
+  editor context menu and the palette. Offered only while a language server
+  supporting them is connected.
+- A ZFL document shows Add missing and Full above its systems block. Add missing
+  adds what the flows use and removes nothing. Full also removes what no flow
+  uses, and asks first. ZenWave: Add Missing ZFL Services and ZenWave: Organize
+  ZFL Services in Full do the same from the palette, including when the document
+  has no systems block yet. Each rewrite is one undoable edit. Add missing is
+  offered only when the language server advertises organize modes; an older
+  server keeps Full, and is sent no mode.
 - A read-only preview of ZDL, ZW and ZFL models (a ZW file shows its plugin
   configuration, resolved), from the editor title bar's ZenWave
   menu, the palette (**ZenWave: Open Preview**, **Open Preview to the Side**) and

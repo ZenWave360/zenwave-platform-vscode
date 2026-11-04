@@ -52,12 +52,22 @@ function object(value: unknown): Record<string, unknown> | undefined {
 
 /** Matches the existing initialize response in ZenwaveLspServer.buildCapabilities. */
 export function advertisedRequests(initializeResult: unknown): ReadonlySet<string> {
-  const capabilities = object(object(initializeResult)?.capabilities);
-  const experimental = object(capabilities?.experimental);
-  const requests = experimental?.customRequests;
+  const requests = experimentalOf(initializeResult)?.customRequests;
   return new Set(Array.isArray(requests)
     ? requests.filter((value): value is string => typeof value === 'string' && value.startsWith('zenwave/'))
     : []);
+}
+
+/**
+ * The server accepts `mode` on `zenwave/organizeZflServices`. Anything other than
+ * the boolean `true` — including a missing field — is an older server.
+ */
+export function advertisedOrganizeModes(initializeResult: unknown): boolean {
+  return experimentalOf(initializeResult)?.organizeModes === true;
+}
+
+function experimentalOf(initializeResult: unknown): Record<string, unknown> | undefined {
+  return object(object(object(initializeResult)?.capabilities)?.experimental);
 }
 
 /** Reads a JSON-RPC error's code and data without depending on a transport's error class. */
