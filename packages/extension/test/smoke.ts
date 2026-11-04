@@ -1833,8 +1833,11 @@ async function previewZw(api: LanguageServerApi, preview: PreviewApi): Promise<v
   let probe = await editor.probe();
   assert(!probe.diagramSelector.visible && !probe.renderModeSelector.visible && probe.svgCount === 0 && probe.notice === undefined,
     `A .zw page with a selector or a diagram: ${JSON.stringify(probe.diagramSelector)}`);
-  assert(probe.text.includes('Resolved configuration') && probe.text.includes('Own configuration') && probe.text.includes('io.example.orders'),
-    `The .zw page does not show the resolved configuration: ${probe.text.slice(0, 300)}`);
+  // MP-R22: Command to run is open; each plugin's Configuration is collapsed, so its two tables are checked in the Markdown.
+  assert(probe.text.includes('Command to run') && probe.text.includes('io.example.orders'),
+    `The .zw page does not show the MP-R22 sections: ${probe.text.slice(0, 300)}`);
+  assert(page.content.includes('#### Own configuration') && page.content.includes('#### Inherited configuration'),
+    `The .zw answer has no configuration tables: ${page.content.slice(0, 300)}`);
   assert(probe.text.includes(shippedSummary) && probe.text.includes(`Plugin descriptions come from the plugin catalogue: ${SHIPPED_CATALOGUE.source}`),
     'The .zw page does not describe the plugin from the catalogue');
   assert(probe.content.unresolved.length === 0 && probe.content.hostile === 0 && probe.cspViolations.length === 0,
@@ -1848,14 +1851,14 @@ async function previewZw(api: LanguageServerApi, preview: PreviewApi): Promise<v
   const requests = editor.session.requests;
   try {
     await text.edit((edit) => edit.replace(new vscode.Range(document.positionAt(at), document.positionAt(at + 'maxDepth 3'.length)), 'maxDepth 7'));
-    probe = await zwShowing(editor, (content) => content.includes('| maxDepth | 7 | plugin |') && !content.includes('| maxDepth | 3 |'), 'The edited .zw was not shown');
+    probe = await zwShowing(editor, (content) => content.includes('| maxDepth | 7 |') && !content.includes('| maxDepth | 3 |'), 'The edited .zw was not shown');
     assert(editor.session.requests > requests, 'The .zw preview did not follow the edit');
     console.log('PASS: an edit to the .zw text re-renders its preview');
   } finally {
     await vscode.commands.executeCommand('workbench.action.files.revert');
   }
   await waitFor(() => !document.isDirty, 'Could not revert scripts.zw');
-  await zwShowing(editor, (content) => content.includes('| maxDepth | 3 | plugin |'), 'The .zw preview did not follow the revert');
+  await zwShowing(editor, (content) => content.includes('| maxDepth | 3 |'), 'The .zw preview did not follow the revert');
 
   // A title equal to a section name must not move the contents links: the link goes to the section (an H2 after the contents), not to the title (the H1).
   const titleAt = document.getText().indexOf('"Arcadia Editions - Orders Checkout scripts"');
@@ -1921,7 +1924,7 @@ async function previewZw(api: LanguageServerApi, preview: PreviewApi): Promise<v
       const answered = await editor.probe().catch(() => undefined);
       return answered && answered.text.includes(shippedSummary) && !answered.text.includes(marker) ? answered : undefined;
     }, "The .zw page did not fall back to the server's own catalogue", 60000);
-    assert(probe.text.includes('Resolved configuration'), 'The .zw page lost its content');
+    assert(probe.text.includes('Command to run'), 'The .zw page lost its content');
     console.log("PASS: an unreadable catalogue is left out, the server still starts and describes plugins from its own copy");
   } finally {
     api.overridePluginCatalogue(undefined);
