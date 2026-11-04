@@ -5,7 +5,7 @@ import { ZENWAVE_REQUESTS, type NavigationTarget } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import { commandAvailability } from './availability.js';
 import { presentLocations, toLocation, type PresentedLocations } from './navigation.js';
-import { organizeLenses, resolveOrganize, type OrganizeAction } from './organize.js';
+import { organizeLenses, resolveOrganize, type AskWarning, type OrganizeAction } from './organize.js';
 import { minimalReplacement, withLineEnding } from './text-replacement.js';
 
 export const MODEL_ACTION_COMMANDS = {
@@ -70,7 +70,35 @@ class OrganizeCodeLensProvider implements vscode.CodeLensProvider, vscode.Dispos
   }
 }
 
-export function registerModelActions(context: vscode.ExtensionContext, server: LanguageServerApi, logger: Logger): void {
+/** One confirmation the organize command asked for, as it was asked. */
+export interface ConfirmationRequest {
+  readonly message: string;
+  readonly modal: boolean;
+  readonly buttons: readonly string[];
+}
+
+/** A stand-in for the person at the Full organize confirmation. `dispose` puts the real dialog back. */
+export interface ConfirmationAnswer extends vscode.Disposable {
+  readonly requests: readonly ConfirmationRequest[];
+}
+
+/**
+ * What the smoke test drives. An installed extension has its own `vscode` API object, so a test cannot patch
+ * `vscode.window` for it: the answer is given through here, and the production path is unchanged without it.
+ */
+export interface ModelActionsApi {
+  /** Answers every Full organize confirmation with `answer` (the button, or `undefined` for Cancel or Escape) and records it. */
+  answerFullOrganize(answer: string | undefined): ConfirmationAnswer;
+}
+
+export function registerModelActions(context: vscode.ExtensionContext, server: LanguageServerApi, logger: Logger): ModelActionsApi {
+  let answering: { readonly answer: string | undefined; readonly requests: ConfirmationRequest[] } | undefined;
+  const askWarning: AskWarning = (message, options, accept) => {
+    if (!answering) return vscode.window.showWarningMessage(message, options, accept);
+    answering.requests.push({ message, modal: options.modal, buttons: [accept] });
+    return Promise.resolve(answering.answer);
+  };
+
   /** Re-checked on every execution: a `when` clause hides a command, it does not stop a programmatic call. */
   function unavailable(feature: string, methods: readonly string[]): { kind: 'no-server' | 'unsupported'; message: string } | undefined {
     const availability = commandAvailability(feature, methods, {
@@ -179,7 +207,7 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     const problem = unavailable(feature, [ZENWAVE_REQUESTS.organizeZflServices]);
     if (problem) return problem;
 
-    const decision = await resolveOrganize(action, server.organizeModes, (message, options, accept) => vscode.window.showWarningMessage(message, options, accept));
+    const decision = await resolveOrganize(action, server.organizeModes, askWarning);
     if (decision.kind === 'cancelled') {
       logger.debug(`${feature}: cancelled, nothing changed`);
       return { kind: 'cancelled' };
@@ -261,6 +289,14 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.addMissingServices,
       (uri?: unknown) => organizeServices('additive', uri)),
   );
+
+  return {
+    answerFullOrganize(answer) {
+      const current = { answer, requests: [] as ConfirmationRequest[] };
+      answering = current;
+      return { requests: current.requests, dispose: () => { if (answering === current) answering = undefined; } };
+    },
+  };
 }
 
 function isPosition(value: unknown): value is { line: number; character: number } {

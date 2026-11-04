@@ -17,22 +17,16 @@ function page(name: string, complete = true): void {
   if (complete) writeFileSync(join(root, name, 'protocol.json'), '{}');
 }
 
-test('the page with a view selector is shipped when the package has it', () => {
+test('the page with a view selector is shipped', () => {
   page('webview');
   page('webview-toolbar');
   assert.equal(chooseEventFlowPage(root).name, 'webview-toolbar');
   assert.equal(chooseEventFlowPage(root).page, join(root, 'webview-toolbar'));
 });
 
-test('a package with only webview/ (the pinned 0.1.0) ships that page', () => {
+test('the minimal webview/ page is never shipped, and an incomplete or missing toolbar page says so', () => {
   page('webview');
-  assert.equal(chooseEventFlowPage(root).name, 'webview');
-});
-
-test('an incomplete webview-toolbar/ falls back, and a package with no built page says so', () => {
-  page('webview');
+  assert.equal(chooseEventFlowPage(root), undefined);
   page('webview-toolbar', false);
-  assert.equal(chooseEventFlowPage(root).name, 'webview');
-  rmSync(join(root, 'webview'), { recursive: true });
   assert.equal(chooseEventFlowPage(root), undefined);
 });
