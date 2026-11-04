@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { DIAGRAM_STATE_KINDS, presentState, type DataState } from '../../src/eventflow/diagram-state.js';
 import { buildFallbackHtml, buildPageHtml, contentSecurityPolicy, createNonce, HOST_SCRIPT } from '../../src/eventflow/page.js';
 import { EVENTFLOW_PROTOCOL, EVENTFLOW_PROTOCOL_VERSION, EVENTFLOW_VIEW_TYPE, inboundMessage, readiness, type OutboundMessage } from '../../src/eventflow/protocol.js';
+import { parsePositionsFile, positionsFileName, serializePositions, validatePositions, type PositionsFile } from '../../src/eventflow/positions.js';
 import { DiagramSession } from '../../src/eventflow/session.js';
 import { ZenwaveRequests, type EventFlowViews } from '../../src/lsp/requests.js';
 import type { RequestResult } from '../../src/lsp/supervisor.js';
@@ -19,7 +20,8 @@ const URI = 'file:///workspace/place-order-flow.zfl';
 const READY = { type: 'webviewReady', payload: { protocol: EVENTFLOW_PROTOCOL, protocolVersion: 1 } };
 const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI, flowVariants = false) {
+function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI, flowVariants = false, savedPositions = false) {
+  const positionsFile = { file: { exists: false } as PositionsFile, written: [] as string[], removed: 0, readOnly: false };
   const posted: OutboundMessage[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
@@ -28,14 +30,25 @@ function harness(answer: () => RequestResult | Promise<RequestResult>, initial =
   const session = new DiagramSession({
     documentUri,
     fileName: 'place-order-flow.zfl',
-    eventFlowViews: (uri, variant) => requests.eventFlowViews(uri, variant),
+    eventFlowViews: (uri, variant, positions) => requests.eventFlowViews(uri, variant, positions),
     flowVariants: () => flowVariants,
+    savedPositions: () => savedPositions,
+    positionsFile: {
+      read: async () => positionsFile.file,
+      write: async (positions) => {
+        if (positionsFile.readOnly) return 'read-only';
+        positionsFile.written.push(serializePositions(positions));
+        positionsFile.file = { exists: true, positions };
+        return 'written';
+      },
+      remove: async () => { positionsFile.removed++; positionsFile.file = { exists: false }; },
+    },
     post: async (message) => { posted.push(message); return true; },
     runCommand: (command) => { commands.push(command); },
     log: { info: (line) => logs.push(line), warn: (line) => logs.push(line), debug: (line) => logs.push(line) },
   }, initial);
   const ofType = <T extends OutboundMessage['type']>(type: T) => posted.filter((message): message is Extract<OutboundMessage, { type: T }> => message.type === type);
-  return { session, posted, logs, commands, ofType, asked };
+  return { session, posted, logs, commands, ofType, asked, positionsFile };
 }
 
 const failure = (kind: string, extra: Record<string, unknown> = {}): RequestResult =>
@@ -375,4 +388,135 @@ test('a variant the server no longer knows (-32602) falls back to the full diagr
 test('variantChanged with an unknown payload is ignored', () => {
   assert.equal(inboundMessage({ type: 'variantChanged', payload: { variant: 3 } }), undefined);
   assert.deepEqual(inboundMessage({ type: 'variantChanged', payload: { variant: null } }), { type: 'variantChanged', payload: { variant: null } });
+});
+
+const SAVED = { 'command:A': { x: 120, y: 40 }, 'event:B': { x: 300, y: 40 } };
+const answerWith = (savedPositions?: object): RequestResult =>
+  ({ kind: 'ok', value: { flowGraph: { schema: 'g' }, serviceGraph: { schema: 's' }, variants: VARIANTS, ...(savedPositions ? { savedPositions } : {}) } });
+const positionsHarness = (answer: () => RequestResult = () => answerWith({ applied: true })) => harness(answer, undefined, URI, true, true);
+
+test('with the capability and a file, the full diagram request carries positions and renderBundle says they applied', async () => {
+  const h = positionsHarness();
+  h.positionsFile.file = { exists: true, positions: SAVED };
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI }, positions: SAVED });
+  assert.deepEqual(h.session.lastRenderBundle?.savedPositions, { exists: true, applied: true });
+  assert.equal(h.session.savedPositionsExist, true);
+});
+
+test('a file the server cannot apply is reported with the nodes it lacks', async () => {
+  const h = positionsHarness(() => answerWith({ applied: false, reason: 'missing-nodes', missing: ['command:C'] }));
+  h.positionsFile.file = { exists: true, positions: SAVED };
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.deepEqual(h.session.lastRenderBundle?.savedPositions, { exists: true, applied: false, missing: ['command:C'] });
+});
+
+test('no file: renderBundle says exists false and the request carries no positions', async () => {
+  const h = positionsHarness(() => answerWith());
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI } });
+  assert.deepEqual(h.session.lastRenderBundle?.savedPositions, { exists: false, applied: false });
+  assert.equal(h.session.savedPositionsExist, false);
+});
+
+test('a file that does not parse or has an unknown schema exists but is not sent, and the log says why', async () => {
+  for (const text of ['{ nope', '{"schema":"other@9","flow":{}}']) {
+    const h = positionsHarness(() => answerWith());
+    h.positionsFile.file = parsePositionsFile(text);
+    h.session.receive(READY);
+    await h.session.refresh();
+    assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI } });
+    assert.deepEqual(h.session.lastRenderBundle?.savedPositions, { exists: true, applied: false });
+    assert.ok(h.logs.some((line) => line.includes('saved positions file is ignored')), h.logs.join('\n'));
+  }
+});
+
+test('a variant request never carries positions, and renderBundle has no savedPositions for it', async () => {
+  const h = positionsHarness();
+  h.positionsFile.file = { exists: true, positions: SAVED };
+  h.session.receive(READY);
+  await h.session.refresh();
+  h.session.receive({ type: 'variantChanged', payload: { variant: 'happy' } });
+  await settle();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI }, variant: 'happy' });
+  assert.equal('savedPositions' in (h.session.lastRenderBundle ?? {}), false);
+  h.session.receive({ type: 'savePositions', payload: { positions: SAVED } });
+  await settle();
+  assert.deepEqual(h.positionsFile.written, [], 'positions are saved only from the full diagram');
+});
+
+test('without the capability nothing about positions is read, sent or reported', async () => {
+  const h = harness(() => answerWith(), undefined, URI, true, false);
+  h.positionsFile.file = { exists: true, positions: SAVED };
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI } });
+  assert.equal('savedPositions' in (h.session.lastRenderBundle ?? {}), false);
+  h.session.receive({ type: 'savePositions', payload: { positions: SAVED } });
+  await settle();
+  assert.deepEqual(h.positionsFile.written, []);
+});
+
+test('savePositions writes sorted keys, whole numbers and the schema, then asks again with them', async () => {
+  const h = positionsHarness();
+  h.session.receive(READY);
+  await h.session.refresh();
+  const before = h.asked.length;
+  h.session.receive({ type: 'savePositions', payload: { positions: { 'b:2': { x: 10.6, y: -3.2 }, '10': { x: 1, y: 2 }, '2': { x: 0, y: 0.4 }, 'a:1': { x: 120, y: 40 } } } });
+  await settle();
+  assert.deepEqual(h.positionsFile.written, [
+    '{\n  "schema": "zfl.eventflow.positions@1",\n  "flow": {\n' +
+    '    "10": { "x": 1, "y": 2 },\n    "2": { "x": 0, "y": 0 },\n    "a:1": { "x": 120, "y": 40 },\n    "b:2": { "x": 11, "y": -3 }\n  }\n}\n',
+  ]);
+  assert.equal(h.asked.length, before + 1, 're-requested after saving');
+  assert.deepEqual((h.asked.at(-1) as { positions: object }).positions, { 'b:2': { x: 11, y: -3 }, '10': { x: 1, y: 2 }, '2': { x: 0, y: 0 }, 'a:1': { x: 120, y: 40 } });
+  assert.equal(h.session.savedPositionsExist, true);
+});
+
+test('a read-only workspace writes nothing and does not re-request', async () => {
+  const h = positionsHarness();
+  h.positionsFile.readOnly = true;
+  h.session.receive(READY);
+  await h.session.refresh();
+  const before = h.asked.length;
+  h.session.receive({ type: 'savePositions', payload: { positions: SAVED } });
+  await settle();
+  assert.deepEqual(h.positionsFile.written, []);
+  assert.equal(h.asked.length, before);
+});
+
+test('savePositions with values that are not finite numbers is ignored', () => {
+  for (const positions of [null, [], { a: { x: 'ten', y: 1 } }, { a: { x: 1 } }, { a: null }, { a: { x: Number.POSITIVE_INFINITY, y: 1 } }]) {
+    assert.equal(inboundMessage({ type: 'savePositions', payload: { positions } }), undefined);
+  }
+  assert.deepEqual(validatePositions({ a: { x: 1.5, y: -0.4 } }), { a: { x: 2, y: 0 } });
+});
+
+test('discardSavedPositions deletes the file and asks again without positions', async () => {
+  const h = positionsHarness(() => answerWith());
+  h.positionsFile.file = { exists: true, positions: SAVED };
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.equal(h.session.savedPositionsExist, true);
+  await h.session.discardSavedPositions();
+  assert.equal(h.positionsFile.removed, 1);
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI } });
+  assert.deepEqual(h.session.lastRenderBundle?.savedPositions, { exists: false, applied: false });
+  assert.equal(h.session.savedPositionsExist, false);
+});
+
+test('the positions file sits beside the model and the discard command is contributed for the diagram only when the file exists', () => {
+  assert.equal(positionsFileName('checkout.zfl'), 'checkout.zfl.positions.json');
+  const { contributes } = manifest;
+  const command = contributes.commands.find((entry: { command: string }) => entry.command === 'zenwave.eventflow.discardSavedPositions');
+  assert.equal(command.title, 'Discard Saved Positions');
+  assert.equal(command.category, 'ZenWave');
+  const when = 'activeCustomEditorId == zenwave.eventflow && zenwave.eventflowPositionsExist';
+  assert.equal(contributes.menus.commandPalette.find((entry: { command: string }) => entry.command === command.command).when, when);
+  const title = contributes.menus['editor/title'].find((entry: { command: string }) => entry.command === command.command);
+  assert.equal(title.when, when);
+  assert.ok(!String(title.group).startsWith('navigation'), 'it belongs to the ... menu');
 });

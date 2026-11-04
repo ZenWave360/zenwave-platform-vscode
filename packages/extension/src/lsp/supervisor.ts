@@ -76,6 +76,11 @@ export function advertisedFlowVariants(initializeResult: unknown): boolean {
   return experimentalOf(initializeResult)?.flowVariants === true;
 }
 
+/** The server accepts `positions` on `zenwave/eventFlowViews` and answers `savedPositions` (LVR-R18). */
+export function advertisedSavedPositions(initializeResult: unknown): boolean {
+  return experimentalOf(initializeResult)?.savedPositions === true;
+}
+
 function experimentalOf(initializeResult: unknown): Record<string, unknown> | undefined {
   return object(object(object(initializeResult)?.capabilities)?.experimental);
 }

@@ -387,6 +387,11 @@
         "icon": "$(symbol-text)"
       },
       {
+        "command": "zenwave.eventflow.discardSavedPositions",
+        "title": "Discard Saved Positions",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.preview.openToSide",
         "title": "Open Preview to the Side",
         "category": "ZenWave",
@@ -576,6 +581,10 @@
           "when": "activeCustomEditorId == zenwave.eventflow && !zenwave.eventflowHumanizeLabels"
         },
         {
+          "command": "zenwave.eventflow.discardSavedPositions",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowPositionsExist"
+        },
+        {
           "command": "zenwave.preview.openToSide",
           "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
         },
@@ -727,6 +736,11 @@
           "command": "zenwave.preview.lockFollowing",
           "when": "activeWebviewPanelId == zenwave.previewFollowing",
           "group": "navigation@101"
+        },
+        {
+          "command": "zenwave.eventflow.discardSavedPositions",
+          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowPositionsExist",
+          "group": "9_eventflow@1"
         }
       ],
       "zenwave.zflViews": [

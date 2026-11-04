@@ -7,6 +7,8 @@
  * to the page (see `page.ts`); the upstream page ignores unknown message types.
  */
 
+import { validatePositions, type Positions } from './positions.js';
+
 /** The custom editor's view type. */
 export const EVENTFLOW_VIEW_TYPE = 'zenwave.eventflow';
 
@@ -39,6 +41,8 @@ export type PageMessage =
       readonly variants?: readonly { readonly id: string; readonly title: string }[];
       /** The variant `flowGraph` shows, or `null` for the full diagram. Sent with `variants`. */
       readonly variant?: string | null;
+      /** Only for the full diagram, when the server advertised `savedPositions` (EF-R14). */
+      readonly savedPositions?: { readonly exists: boolean; readonly applied: boolean; readonly missing?: readonly string[] };
     };
   }
   | { readonly type: 'setViewMode'; readonly payload: { readonly viewMode: ViewMode } }
@@ -115,6 +119,7 @@ export function readiness(payload: unknown): Readiness {
 export type InboundMessage =
   | { readonly type: 'viewModeChanged'; readonly payload: { readonly viewMode: ViewMode } }
   | { readonly type: 'variantChanged'; readonly payload: { readonly variant: string | null } }
+  | { readonly type: 'savePositions'; readonly payload: { readonly positions: Positions } }
   | { readonly type: 'webviewReady'; readonly payload?: unknown }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
   | { readonly type: 'zenwave.host.action'; readonly payload: { readonly command: string } }
@@ -132,6 +137,10 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
       return object?.viewMode === 'flow' || object?.viewMode === 'services' ? { type, payload: { viewMode: object.viewMode } } : undefined;
     case 'variantChanged':
       return typeof object?.variant === 'string' || object?.variant === null ? { type, payload: { variant: object.variant } } : undefined;
+    case 'savePositions': {
+      const positions = validatePositions(object?.positions);
+      return positions ? { type, payload: { positions } } : undefined;
+    }
     case 'zenwave.host.loadError':
       return { type, payload: { message: typeof object?.message === 'string' ? object.message : 'unknown error' } };
     case 'zenwave.host.action':

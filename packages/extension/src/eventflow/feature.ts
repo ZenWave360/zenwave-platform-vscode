@@ -5,7 +5,9 @@ import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
 import { commandDocument, isZflDocument } from '../model/active-document.js';
 import { fileName, findTab, replaceInPlace } from '../model/editor-tabs.js';
+import type { ConfirmationAnswer, ConfirmationRequest } from '../model/actions.js';
 import { buildFallbackHtml, buildPageHtml, createNonce } from './page.js';
+import { parsePositionsFile, positionsFileName, serializePositions, type PositionsFile } from './positions.js';
 import { EVENTFLOW_VIEW_TYPE, type PageProbe, type ViewMode } from './protocol.js';
 import { DiagramSession } from './session.js';
 
@@ -17,12 +19,15 @@ export const EVENTFLOW_COMMANDS = {
   showFlowView: 'zenwave.eventflow.showFlowView',
   showLabelsAsWritten: 'zenwave.eventflow.showLabelsAsWritten',
   showHumanizedLabels: 'zenwave.eventflow.showHumanizedLabels',
+  discardSavedPositions: 'zenwave.eventflow.discardSavedPositions',
 } as const;
 
 /** State of the focused diagram editor, for the title-bar toggles' `when` clauses. */
 export const EVENTFLOW_CONTEXT_KEYS = {
   viewMode: 'zenwave.eventflowViewMode',
   humanizeLabels: 'zenwave.eventflowHumanizeLabels',
+  /** A saved-positions file is beside the focused diagram's model (EF-R14). */
+  positionsExist: 'zenwave.eventflowPositionsExist',
 } as const;
 
 /**
@@ -59,7 +64,11 @@ export interface EventFlowApi {
   readonly active: EventFlowEditorApi | undefined;
   /** What `zenwave.eventflowViewMode` was last set to, for tests: the context key cannot be read back. */
   readonly contextViewMode: ViewMode | undefined;
+  /** Answers every *Discard Saved Positions* confirmation with `answer` (the button, or `undefined` for Cancel or Escape) and records it. For tests. */
+  answerDiscardSavedPositions(answer: string | undefined): ConfirmationAnswer;
 }
+
+export const DISCARD_BUTTON = 'Discard';
 
 interface Initial {
   readonly viewMode: ViewMode;
@@ -98,13 +107,18 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
     this.session = new DiagramSession({
       documentUri: this.documentUri,
       fileName: fileName(uri),
-      eventFlowViews: (target, variant) => deps.server.requests.eventFlowViews(target, variant),
+      eventFlowViews: (target, variant, positions) => deps.server.requests.eventFlowViews(target, variant, positions),
       flowVariants: () => deps.server.flowVariants,
+      savedPositions: () => deps.server.savedPositions,
+      positionsFile: this.positionsFile(),
       post: (message) => webview.postMessage(message),
       runCommand: (command) => { void vscode.commands.executeCommand(command); },
       log: deps.logger,
     }, { viewMode: initial.viewMode, displaySettings: { humanizeLabels: initial.humanizeLabels } });
-    this.refresher = new CoalescedRefresh(() => this.session.refresh(), EDIT_DELAY_MS);
+    this.refresher = new CoalescedRefresh(async () => {
+      await this.session.refresh();
+      if (this.panel.active) this.deps.onFocus(this);
+    }, EDIT_DELAY_MS);
 
     this.subscriptions.push(
       webview.onDidReceiveMessage((message) => this.receive(message)),
@@ -127,11 +141,51 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
       const directory = vscode.Uri.joinPath(uri, '..');
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, fileName(uri)));
       this.subscriptions.push(watcher, watcher.onDidChange(() => this.refresher.request()), watcher.onDidCreate(() => this.refresher.request()));
+      // The positions file is read through the host's file system, so a change by another tool or a branch switch reaches the diagram too.
+      const positions = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, positionsFileName(fileName(uri))));
+      const again = (): void => this.refresher.request();
+      this.subscriptions.push(positions, positions.onDidChange(again), positions.onDidCreate(again), positions.onDidDelete(again));
     }
 
     void this.load(webview, pageDirectory);
     void this.keepOpen().then(() => this.refresher.request(SWITCH_DELAY_MS));
     this.viewStateChanged();
+  }
+
+  private positionsUri(): vscode.Uri {
+    return vscode.Uri.joinPath(this.uri, '..', positionsFileName(fileName(this.uri)));
+  }
+
+  private positionsFile() {
+    return {
+      read: async (): Promise<PositionsFile> => {
+        let bytes: Uint8Array;
+        try {
+          bytes = await vscode.workspace.fs.readFile(this.positionsUri());
+        } catch (error) {
+          if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return { exists: false };
+          throw error;
+        }
+        return parsePositionsFile(new TextDecoder().decode(bytes));
+      },
+      write: async (positions: Parameters<typeof serializePositions>[0]): Promise<'written' | 'read-only'> => {
+        if (vscode.workspace.fs.isWritableFileSystem(this.uri.scheme) === false) {
+          void vscode.window.showInformationMessage(`The workspace is read-only, so the positions of ${fileName(this.uri)} cannot be saved.`);
+          return 'read-only';
+        }
+        await vscode.workspace.fs.writeFile(this.positionsUri(), new TextEncoder().encode(serializePositions(positions)));
+        this.deps.logger.info(`EventFlow diagram for ${fileName(this.uri)}: saved positions to ${positionsFileName(fileName(this.uri))}`);
+        return 'written';
+      },
+      remove: async (): Promise<void> => {
+        try {
+          await vscode.workspace.fs.delete(this.positionsUri());
+          this.deps.logger.info(`EventFlow diagram for ${fileName(this.uri)}: discarded ${positionsFileName(fileName(this.uri))}`);
+        } catch (error) {
+          if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) throw error;
+        }
+      },
+    };
   }
 
   private async load(webview: vscode.Webview, pageDirectory: vscode.Uri): Promise<void> {
@@ -230,6 +284,27 @@ export function registerEventFlowEditor(
     contextViewMode = editor.session.viewMode;
     void vscode.commands.executeCommand('setContext', EVENTFLOW_CONTEXT_KEYS.viewMode, editor.session.viewMode);
     void vscode.commands.executeCommand('setContext', EVENTFLOW_CONTEXT_KEYS.humanizeLabels, editor.session.displaySettings.humanizeLabels);
+    void vscode.commands.executeCommand('setContext', EVENTFLOW_CONTEXT_KEYS.positionsExist, editor.session.savedPositionsExist);
+  }
+
+  let answering: { readonly answer: string | undefined; readonly requests: ConfirmationRequest[] } | undefined;
+
+  async function discardSavedPositions(argument: unknown): Promise<'discarded' | 'cancelled' | 'no-diagram'> {
+    const editor = target(argument);
+    if (!editor) return 'no-diagram';
+    const message = `Discard the saved positions of ${fileName(vscode.Uri.parse(editor.documentUri, true))}?`;
+    const detail = 'The saved positions file is deleted and the diagram goes back to automatic layout. This cannot be undone.';
+    let answer: string | undefined;
+    if (answering) {
+      answering.requests.push({ message, modal: true, buttons: [DISCARD_BUTTON] });
+      answer = answering.answer;
+    } else {
+      answer = await vscode.window.showWarningMessage(message, { modal: true, detail }, DISCARD_BUTTON);
+    }
+    if (answer !== DISCARD_BUTTON) return 'cancelled';
+    await editor.session.discardSavedPositions();
+    if (editor.panel.active) publish(editor);
+    return 'discarded';
   }
 
   const provider: vscode.CustomReadonlyEditorProvider = {
@@ -318,6 +393,7 @@ export function registerEventFlowEditor(
     vscode.commands.registerCommand(EVENTFLOW_COMMANDS.showFlowView, toggle((editor) => editor.setViewMode('flow'))),
     vscode.commands.registerCommand(EVENTFLOW_COMMANDS.showLabelsAsWritten, toggle((editor) => editor.setHumanizeLabels(false))),
     vscode.commands.registerCommand(EVENTFLOW_COMMANDS.showHumanizedLabels, toggle((editor) => editor.setHumanizeLabels(true))),
+    vscode.commands.registerCommand(EVENTFLOW_COMMANDS.discardSavedPositions, discardSavedPositions),
     { dispose: () => { for (const editor of [...editors]) editor.dispose(); } },
   );
 
@@ -326,5 +402,10 @@ export function registerEventFlowEditor(
     editorsFor: (documentUri) => [...editors].filter((editor) => editor.documentUri === documentUri),
     get active() { return active && editors.has(active) ? active : undefined; },
     get contextViewMode() { return contextViewMode; },
+    answerDiscardSavedPositions(answer) {
+      const current = { answer, requests: [] as ConfirmationRequest[] };
+      answering = current;
+      return { requests: current.requests, dispose: () => { if (answering === current) answering = undefined; } };
+    },
   };
 }

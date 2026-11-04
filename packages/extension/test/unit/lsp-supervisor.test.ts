@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advertisedFlowVariants, advertisedOrganizeModes, advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
+import { advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
 
 const INITIALIZE = { capabilities: { experimental: { customRequests: ['zenwave/workspaceStatus'] } } };
 
@@ -200,4 +200,7 @@ test('flowVariants is advertised only by the boolean capability', () => {
     assert.equal(advertisedFlowVariants(result), false);
   }
   assert.equal(advertisedFlowVariants({ capabilities: { experimental: { flowVariants: true } } }), true);
+  assert.equal(advertisedSavedPositions({ capabilities: { experimental: { savedPositions: true } } }), true);
+  assert.equal(advertisedSavedPositions({ capabilities: { experimental: { savedPositions: 'yes' } } }), false);
+  assert.equal(advertisedSavedPositions({}), false);
 });
