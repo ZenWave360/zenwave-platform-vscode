@@ -523,8 +523,9 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   assert(treeTargets !== undefined && JSON.stringify(treeTargets) === JSON.stringify(editorTargets),
     `Go to References targets differ: tree ${JSON.stringify(treeTargets)} editor ${JSON.stringify(editorTargets)}`);
   const atDeclaration = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences', vscode.Uri.parse(orders.node.sourceUri), orders.node.sourceRange.start);
-  assert(atDeclaration.kind === 'no-symbol', `The position stored on Orders is not its name: ${JSON.stringify(atDeclaration)}`);
-  console.log('PASS: Go to References on the Orders system matches a cursor on its name, and the stored position does not');
+  // Since zenwave-lsp resolves ZDL positions on the right line (001 task 2.21), the stored position resolves to Orders too.
+  assert(atDeclaration.kind === fromEditor.kind, `The position stored on Orders resolves differently from its name: ${JSON.stringify(atDeclaration)} vs ${JSON.stringify(fromEditor)}`);
+  console.log('PASS: Go to References on the Orders system matches a cursor on its name, and its stored position');
 
   const placeOrderUri = await fixture('place-order-flow.zfl');
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(placeOrderUri));
@@ -657,7 +658,7 @@ const isDiagramTab = (tab: vscode.Tab | undefined, uri: string): boolean =>
   tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === 'zenwave.eventflow' && tab.input.uri.toString() === uri;
 const isTextTab = (tab: vscode.Tab | undefined, uri: string): boolean => tab?.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri;
 
-interface Graphs { readonly flowGraph: { readonly nodes: readonly { readonly id: string; readonly label?: string }[] }; readonly serviceGraph: { readonly nodes: readonly { readonly id: string }[] } }
+interface Graphs { readonly flowGraph: { readonly nodes: readonly { readonly id: string; readonly label?: string }[] }; readonly serviceGraph: { readonly nodes: readonly { readonly id: string }[] }; readonly variants?: readonly { readonly id: string; readonly title: string }[] }
 
 /** The diagram editor for a document once its page said it loaded and rendered a diagram, with no state shown over it. */
 async function renderedDiagram(eventflow: EventFlowApi, uri: string): Promise<EventFlowEditorApi> {
@@ -725,7 +726,9 @@ async function eventflowDiagrams(api: LanguageServerApi, explorer: ModelExplorer
   console.log(`PASS: renderBundle carries zenwave/eventFlowViews verbatim and the page draws all ${drawn.nodeIds.length} flow nodes`);
 
   // Controls, per editor: services view, labels as written.
-  const camel = views.flowGraph.nodes.map((node) => node.label ?? '').find((label) => /[a-z][A-Z]/.test(label));
+  // The variant dropdown (EF-R12) shows the server's titles as written, so a label it names would be on the page anyway.
+  const variantTitles = (views.variants ?? []).map((variant) => variant.title).join('\n');
+  const camel = views.flowGraph.nodes.map((node) => node.label ?? '').find((label) => /[a-z][A-Z]/.test(label) && !variantTitles.includes(label));
   assert(camel, 'No camel-case label to check humanised labels with');
   assert(!drawn.text.includes(camel), `Labels are not humanised by default: ${camel}`);
   assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.showLabelsAsWritten', placeOrderUri), 'Labels toggle found no diagram');
