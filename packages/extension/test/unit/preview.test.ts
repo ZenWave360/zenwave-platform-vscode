@@ -409,7 +409,10 @@ test('the manifest registers an optional preview editor and names each supported
   const menus = contributes.menus as Record<string, { command: string; when: string }[]>;
   const opens = (submenu: string) => menus[submenu]!.map((entry) => entry.command).filter((command) => !command.endsWith('.showText'));
   assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openToSide']);
-  assert.deepEqual(opens('zenwave.zdlViews'), ['zenwave.preview.openModelDocs', 'zenwave.preview.openToSide']);
+  assert.deepEqual(opens('zenwave.zdlViews'), ['zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openToSide']);
+  const zdlMenu = Object.fromEntries((menus['zenwave.zdlViews'] as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
+  assert.equal(zdlMenu['zenwave.preview.openZdlDiagrams'], 'zenwave.previewModesAvailable', 'ZDL Diagrams is offered only to a server that advertises previewModes (MP-R25)');
+  assert.equal(zdlMenu['zenwave.preview.openModelDocs'], undefined, 'Model Docs is reachable from inside a preview too (MP-R17)');
   assert.deepEqual(opens('zenwave.zwViews'), ['zenwave.preview.openScriptsDocs', 'zenwave.preview.openToSide']);
   for (const submenu of ['zenwave.zflViews', 'zenwave.zdlViews', 'zenwave.zwViews']) {
     assert.ok(menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.showText' && entry.when === 'activeCustomEditorId == zenwave.preview'), `${submenu} keeps the way back to text (MP-Q9)`);
@@ -418,6 +421,10 @@ test('the manifest registers an optional preview editor and names each supported
   assert.match(palette['zenwave.preview.openSequenceDiagrams'] ?? '', /zfl/);
   assert.match(palette['zenwave.preview.openModelDocs'] ?? '', /zdl/);
   assert.match(palette['zenwave.preview.openZdlDiagrams'] ?? '', /zdl/);
+  assert.match(palette['zenwave.preview.openZdlDiagrams'] ?? '', /zenwave\.previewModesAvailable/);
+  for (const command of ['zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams']) {
+    assert.doesNotMatch(palette[command] ?? '', /activeCustomEditorId/, `${command} switches mode from inside the preview`);
+  }
   assert.match(palette['zenwave.preview.openScriptsDocs'] ?? '', /zw/);
   assert.match(palette['zenwave.preview.openToSide'] ?? '', /!isInDiffEditor/);
   assert.match(palette['zenwave.preview.selectRenderMode'] ?? '', /resourceExtname == \.zfl/);

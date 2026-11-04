@@ -551,11 +551,11 @@
         },
         {
           "command": "zenwave.preview.openModelDocs",
-          "when": "(editorLangId == zdl || resourceExtname == .zdl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId == zdl || resourceExtname == .zdl) && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.openZdlDiagrams",
-          "when": "(editorLangId == zdl || resourceExtname == .zdl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId == zdl || resourceExtname == .zdl) && zenwave.previewModesAvailable && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.openScriptsDocs",
@@ -706,13 +706,17 @@
         },
         {
           "command": "zenwave.preview.openModelDocs",
-          "when": "activeCustomEditorId != zenwave.preview",
           "group": "2_preview@1"
+        },
+        {
+          "command": "zenwave.preview.openZdlDiagrams",
+          "when": "zenwave.previewModesAvailable",
+          "group": "2_preview@2"
         },
         {
           "command": "zenwave.preview.openToSide",
           "when": "activeCustomEditorId != zenwave.preview",
-          "group": "2_preview@2"
+          "group": "2_preview@3"
         }
       ],
       "zenwave.zwViews": [

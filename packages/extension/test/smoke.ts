@@ -29,31 +29,65 @@ function assert(condition: unknown, message: string): asserts condition {
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Full organise confirms in a modal. The smoke host has nobody to click it, so the
- * stand-in answers Organize in Full and leaves every other warning alone.
+ * Full organise confirms in a modal. The smoke host has nobody to click it, so the stand-in answers it
+ * (`answer`: the button, or `undefined` for Escape), records every time the exact confirmation was
+ * requested and with which options, and leaves every other warning alone.
  */
-function acceptingFullOrganize<T>(body: () => Promise<T>): Promise<T> {
+interface ConfirmationRequest { readonly modal: boolean | undefined; readonly items: readonly string[] }
+
+async function answeringFullOrganize<T>(answer: string | undefined, body: () => Promise<T>): Promise<{ readonly result: T; readonly confirmations: readonly ConfirmationRequest[] }> {
   const original = vscode.window.showWarningMessage.bind(vscode.window);
+  const confirmations: ConfirmationRequest[] = [];
   function patched(message: string, optionsOrItem?: string | vscode.MessageOptions, ...items: string[]) {
-    if (message === FULL_ORGANIZE_CONFIRMATION) return Promise.resolve(FULL_ORGANIZE_ACCEPT);
+    if (message === FULL_ORGANIZE_CONFIRMATION) {
+      confirmations.push({ modal: typeof optionsOrItem === 'object' ? optionsOrItem.modal : undefined, items: typeof optionsOrItem === 'string' ? [optionsOrItem, ...items] : items });
+      return Promise.resolve(answer);
+    }
     if (optionsOrItem === undefined) return original(message);
     if (typeof optionsOrItem === 'string') return original(message, optionsOrItem, ...items);
     return original(message, optionsOrItem, ...items);
   }
   const descriptor = Object.getOwnPropertyDescriptor(vscode.window, 'showWarningMessage');
   Object.defineProperty(vscode.window, 'showWarningMessage', { configurable: true, writable: true, value: patched });
-  return body().finally(() => {
+  try {
+    return { result: await body(), confirmations };
+  } finally {
     if (descriptor) Object.defineProperty(vscode.window, 'showWarningMessage', descriptor);
     else Object.defineProperty(vscode.window, 'showWarningMessage', { configurable: true, writable: true, value: original });
-  });
+  }
 }
 
-function organizeCommand(uri?: vscode.Uri): Promise<OrganizeOutcome> {
-  return acceptingFullOrganize(async () => {
+async function organizeCommand(uri?: vscode.Uri): Promise<OrganizeOutcome> {
+  const { result, confirmations } = await answeringFullOrganize(FULL_ORGANIZE_ACCEPT, async () => {
     const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', uri);
     assert(outcome !== undefined, 'zenwave.zfl.organizeServices returned nothing');
     return outcome;
   });
+  // Only a command that got as far as the server asks (a refusal before it does not): when it asked, it asked as a modal with the one button.
+  for (const confirmation of confirmations) {
+    assert(confirmation.modal === true && confirmation.items.length === 1 && confirmation.items[0] === FULL_ORGANIZE_ACCEPT,
+      `Full organize must confirm with modal: true and the one button: ${JSON.stringify(confirmation)}`);
+  }
+  if (result.kind === 'organized' || result.kind === 'unchanged') {
+    assert(confirmations.length === 1, `Full organize reached the server without asking exactly once: ${confirmations.length} confirmation(s)`);
+  }
+  return result;
+}
+
+/** Counts `zenwave/organizeZflServices` requests the extension sends while `body` runs. */
+async function countingOrganizeRequests<T>(api: LanguageServerApi, body: () => Promise<T>): Promise<{ readonly result: T; readonly sent: number }> {
+  let sent = 0;
+  const requests = api.requests;
+  const original = requests.organizeZflServices.bind(requests);
+  Object.defineProperty(requests, 'organizeZflServices', {
+    configurable: true, writable: true,
+    value: (...args: Parameters<typeof original>) => { sent++; return original(...args); },
+  });
+  try {
+    return { result: await body(), sent };
+  } finally {
+    delete (requests as unknown as Record<string, unknown>)['organizeZflServices'];
+  }
 }
 
 async function sharedLspFoundation(): Promise<void> {
@@ -273,6 +307,18 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   assert(flowEditor.selection.active.line === 27 && flowEditor.selection.active.character === 8,
     `A cursor after the change moved: ${JSON.stringify(flowEditor.selection.active)}`);
   const organizedText = flow.getText();
+  // Escape (and Cancel) on the confirmation: nothing is sent and the document is untouched.
+  const cancelVersion = flow.version;
+  const cancelled = await countingOrganizeRequests(api, () => answeringFullOrganize(undefined, async () => {
+    const outcome = await vscode.commands.executeCommand<OrganizeOutcome>('zenwave.zfl.organizeServices', flow.uri);
+    assert(outcome !== undefined, 'zenwave.zfl.organizeServices returned nothing');
+    return outcome;
+  }));
+  assert(cancelled.result.result.kind === 'cancelled', `Escape on the confirmation: ${JSON.stringify(cancelled.result.result)}`);
+  assert(cancelled.result.confirmations.length === 1 && cancelled.result.confirmations[0]!.modal === true,
+    `The confirmation was not requested once as a modal: ${JSON.stringify(cancelled.result.confirmations)}`);
+  assert(cancelled.sent === 0 && flow.version === cancelVersion && flow.getText() === organizedText,
+    `A cancelled Full organize changed something: ${cancelled.sent} request(s), v${cancelVersion}→${flow.version}`);
   const versionBefore = flow.version;
   const again = await organizeCommand(flow.uri);
   assert(again.kind === 'unchanged' && flow.version === versionBefore && flow.getText() === organizedText,

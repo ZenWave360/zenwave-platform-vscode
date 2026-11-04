@@ -64,9 +64,25 @@ export function decideOrganize(
   return { kind: 'send', mode: organizeModes ? 'full' : undefined };
 }
 
+/** Shows a modal warning and answers the button chosen, or `undefined` for Escape or a dismissal. */
+export type AskWarning = (message: string, options: { readonly modal: true }, accept: string) => PromiseLike<string | undefined>;
+
+/**
+ * The decision for an action, asking the user when it needs a confirmation: Full asks in a modal
+ * and anything but its button (Cancel, Escape) is a cancel (MA-R5).
+ */
+export async function resolveOrganize(action: OrganizeAction, organizeModes: boolean, ask: AskWarning): Promise<OrganizeDecision> {
+  const decision = decideOrganize(action, organizeModes);
+  if (decision.kind !== 'confirm') return decision;
+  const choice = await ask(decision.message, { modal: true }, decision.accept);
+  return decideOrganize(action, organizeModes, choice === decision.accept ? 'accepted' : 'cancelled');
+}
+
 function systemsKeyword(text: string): { start: number; end: number } | undefined {
   let i = 0;
   let depth = 0;
+  /** The last word read at depth 0: `flow systems {` names a flow, it does not open the block. */
+  let previousWord = '';
   while (i < text.length) {
     const c = text[i];
     const next = text[i + 1];
@@ -86,22 +102,36 @@ function systemsKeyword(text: string): { start: number; end: number } | undefine
       continue;
     }
     if (c === '{') {
+      previousWord = '';
       depth++;
       i++;
       continue;
     }
     if (c === '}') {
+      previousWord = '';
       if (depth > 0) depth--;
       i++;
       continue;
     }
-    if (depth === 0 && isSystemsKeyword(text, i)) {
+    if (depth === 0 && isIdent(c) && !isIdent(text[i - 1]) && !isSystemsKeyword(text, i)) {
+      let end = i;
+      while (isIdent(text[end])) end++;
+      previousWord = text.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (depth === 0 && isSystemsKeyword(text, i) && previousWord !== 'flow' && previousWord !== 'start') {
       const end = i + SYSTEMS.length;
       const brace = indexAfterGap(text, end);
       // An unclosed comment between the keyword and the brace swallows the rest of the file.
       if (brace === undefined) return undefined;
       if (text[brace] === '{') return { start: i, end };
       i = end;
+      continue;
+    }
+    if (depth === 0 && isSystemsKeyword(text, i)) {
+      previousWord = SYSTEMS;
+      i += SYSTEMS.length;
       continue;
     }
     i++;

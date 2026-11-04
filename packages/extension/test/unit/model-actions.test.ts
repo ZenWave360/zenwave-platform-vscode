@@ -9,6 +9,7 @@ import {
   FULL_ORGANIZE_ACCEPT,
   FULL_ORGANIZE_CONFIRMATION,
   organizeLenses,
+  resolveOrganize,
 } from '../../src/model/organize.js';
 import { applyReplacement, minimalReplacement, withLineEnding } from '../../src/model/text-replacement.js';
 
@@ -190,4 +191,34 @@ test('an older server shows only Full and is not asked for Add missing', () => {
   // The request decision does not look at the text, so a document with no systems block still sends.
   assert.deepEqual(decideOrganize('additive', true), { kind: 'send', mode: 'additive' });
   assert.deepEqual(organizeLenses('flow Only {\n}\n', true), []);
+});
+
+test('Full asks in a modal with its one button, and only that button sends (MA-R5)', async () => {
+  for (const organizeModes of [true, false]) {
+    const asked: unknown[][] = [];
+    const accepted = await resolveOrganize('full', organizeModes, async (message, options, accept) => { asked.push([message, options, accept]); return accept; });
+    assert.deepEqual(asked, [[FULL_ORGANIZE_CONFIRMATION, { modal: true }, FULL_ORGANIZE_ACCEPT]]);
+    assert.deepEqual(accepted, { kind: 'send', mode: organizeModes ? 'full' : undefined });
+    for (const answer of [undefined, 'Cancel', '']) {
+      assert.deepEqual(await resolveOrganize('full', organizeModes, async () => answer), { kind: 'cancelled' }, `answer ${String(answer)} cancels`);
+    }
+  }
+});
+
+test('Add missing never asks, and an older server refuses it before asking (MA-R5)', async () => {
+  const never = async (): Promise<string | undefined> => { throw new Error('asked'); };
+  assert.deepEqual(await resolveOrganize('additive', true, never), { kind: 'send', mode: 'additive' });
+  assert.deepEqual(await resolveOrganize('additive', false, never), { kind: 'unsupported' });
+});
+
+test('the lens is the top-level systems block, not a flow or start named systems', () => {
+  const named = 'flow systems {\n  start systems {\n  }\n}\n';
+  assert.deepEqual(organizeLenses(named, true), []);
+  const after = 'flow systems {\n}\nsystems {\n}\n';
+  const lenses = organizeLenses(after, true);
+  assert.equal(lenses.length, 2);
+  assert.equal(after.slice(lenses[0]!.start, lenses[0]!.end), 'systems');
+  assert.equal(lenses[0]!.start, after.lastIndexOf('systems'));
+  const sameLine = 'flow systems { }  systems { }';
+  assert.equal(organizeLenses(sameLine, false)[0]!.start, sameLine.lastIndexOf('systems'));
 });

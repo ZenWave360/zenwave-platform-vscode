@@ -29,6 +29,8 @@ const PAGE_DIRECTORY = ['dist', 'preview-webview'] as const;
 /** A burst of keystrokes is one request once typing pauses this long. */
 export const EDIT_DELAY_MS = 300;
 const SWITCH_DELAY_MS = 50;
+/** How long a requested mode waits for an editor that has not been created yet. */
+const PENDING_MODE_MS = 5000;
 /** How long a visible page may take to say it loaded before the editor calls it a failure. */
 const PAGE_LOAD_SECONDS = 30;
 
@@ -346,12 +348,27 @@ export function registerPreviewEditor(
       }
       if (uri) pendingModes.set(uri.toString(), mode);
     }
-    const outcome = await open(argument);
-    if (outcome.kind === 'opened') {
+    let outcome: PreviewOpenOutcome;
+    try {
+      outcome = await open(argument);
+    } catch (error) {
+      // A failed open must not leave its mode for the next editor of this document.
+      if (uri) pendingModes.delete(uri.toString());
+      throw error;
+    }
+    if (outcome.kind !== 'opened') {
+      if (uri) pendingModes.delete(uri.toString());
+      return outcome;
+    }
+    const resolved = [...editors].filter((editor) => editor.documentUri === outcome.documentUri);
+    if (resolved.length > 0) {
+      // The editor exists already (or was created before this resolved): tell it directly.
       pendingModes.delete(outcome.documentUri);
-      for (const editor of editors) {
-        if (editor.documentUri === outcome.documentUri) await editor.session.setPreviewMode(mode);
-      }
+      for (const editor of resolved) await editor.session.setPreviewMode(mode);
+    } else if (mode === 'diagrams') {
+      // The editor may be created after `openWith` resolves; its constructor reads the entry. Not a permanent one.
+      const timer = setTimeout(() => { if (pendingModes.get(outcome.documentUri) === mode) pendingModes.delete(outcome.documentUri); }, PENDING_MODE_MS);
+      context.subscriptions.push({ dispose: () => clearTimeout(timer) });
     }
     return outcome;
   }
@@ -381,7 +398,7 @@ export function registerPreviewEditor(
     }
     const { selectedId, representations } = editor.session;
     const pick = await vscode.window.showQuickPick(
-      representations.map((item) => ({ label: item.title, ...(item.id === selectedId ? { description: 'shown' } : {}), id: item.id })),
+      representations.map((item) => ({ label: item.title, description: [item.group, item.id === selectedId ? 'shown' : undefined].filter((part) => part !== undefined).join(' · '), id: item.id })),
       { title: 'Diagram', placeHolder: 'Choose what the preview shows' },
     );
     if (!pick) return { kind: 'cancelled' };

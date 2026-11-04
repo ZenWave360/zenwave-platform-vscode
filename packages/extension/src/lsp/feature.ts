@@ -25,7 +25,7 @@ import {
 import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource } from './plugin-catalogue.js';
 import { ZenwaveRequests } from './requests.js';
 import { languageServerStatus, presentStatus, type LanguageServerStatus } from './status.js';
-import { advertisedOrganizeModes, LspSupervisor, type LspState, type RequestResult } from './supervisor.js';
+import { advertisedOrganizeModes, LspSupervisor, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
 
 /** Context keys for `when` clauses. */
 export const LSP_CONTEXT_KEYS = {
@@ -35,6 +35,7 @@ export const LSP_CONTEXT_KEYS = {
   languageServerRequests: 'zenwave.languageServerRequests',
   /** The connected server accepts `mode` on `zenwave/organizeZflServices`. */
   organizeModesAvailable: 'zenwave.organizeModesAvailable',
+  previewModesAvailable: 'zenwave.previewModesAvailable',
   /** An architecture manifest was resolved for the workspace. */
   manifestAvailable: 'zenwave.manifestAvailable',
 } as const;
@@ -153,9 +154,11 @@ export function registerLanguageServer(
     if (relevantEditor()) item.show(); else item.hide();
     const advertised = [...supervisor.advertisedRequests].sort();
     const organizeModes = current.kind === 'connected' && advertisedOrganizeModes(supervisor.initializeResult);
+    const previewModes = current.kind === 'connected' && previewModesAdvertised(supervisor.initializeResult);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.languageServerAvailable, current.kind === 'connected');
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.languageServerRequests, current.kind === 'connected' ? advertised : []);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.organizeModesAvailable, organizeModes);
+    void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.previewModesAvailable, previewModes);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.manifestAvailable, manifest.manifestUri !== undefined);
     changed.fire();
   }
@@ -310,7 +313,7 @@ export function registerLanguageServer(
     get state() { return supervisor.state; },
     get manifest() { return manifest; },
     get advertisedRequests() { return [...supervisor.advertisedRequests]; },
-    get previewModes() { return supervisor.previewModes; },
+    get previewModes() { return status().kind === 'connected' && previewModesAdvertised(supervisor.initializeResult); },
     get organizeModes() { return status().kind === 'connected' && advertisedOrganizeModes(supervisor.initializeResult); },
     get serverInfo() { return serverInfo(); },
     requests,

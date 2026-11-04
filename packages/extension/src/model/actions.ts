@@ -5,7 +5,7 @@ import { ZENWAVE_REQUESTS, type NavigationTarget } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import { commandAvailability } from './availability.js';
 import { presentLocations, toLocation, type PresentedLocations } from './navigation.js';
-import { decideOrganize, organizeLenses, type OrganizeAction } from './organize.js';
+import { organizeLenses, resolveOrganize, type OrganizeAction } from './organize.js';
 import { minimalReplacement, withLineEnding } from './text-replacement.js';
 
 export const MODEL_ACTION_COMMANDS = {
@@ -179,14 +179,7 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     const problem = unavailable(feature, [ZENWAVE_REQUESTS.organizeZflServices]);
     if (problem) return problem;
 
-    let answer: 'accepted' | 'cancelled' | undefined;
-    let decision = decideOrganize(action, server.organizeModes, answer);
-    if (decision.kind === 'unsupported') return unsupportedMode(feature);
-    if (decision.kind === 'confirm') {
-      const choice = await vscode.window.showWarningMessage(decision.message, { modal: true }, decision.accept);
-      answer = choice === decision.accept ? 'accepted' : 'cancelled';
-      decision = decideOrganize(action, server.organizeModes, answer);
-    }
+    const decision = await resolveOrganize(action, server.organizeModes, (message, options, accept) => vscode.window.showWarningMessage(message, options, accept));
     if (decision.kind === 'cancelled') {
       logger.debug(`${feature}: cancelled, nothing changed`);
       return { kind: 'cancelled' };
