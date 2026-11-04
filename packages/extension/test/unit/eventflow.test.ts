@@ -21,10 +21,12 @@ const READY = { type: 'webviewReady', payload: { protocol: EVENTFLOW_PROTOCOL, p
 const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI, flowVariants = false, savedPositions = false) {
-  const positionsFile = { file: { exists: false } as PositionsFile, written: [] as string[], removed: 0, readOnly: false };
+  const positionsFile = { file: { exists: false } as PositionsFile, written: [] as string[], removed: 0, readOnly: false, fail: undefined as Error | undefined };
   const posted: OutboundMessage[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
+  const warnings: string[] = [];
+  const existChanges: boolean[] = [];
   const asked: unknown[] = [];
   const requests = new ZenwaveRequests({ request: async (_method, params) => { asked.push(params); return answer(); } });
   const session = new DiagramSession({
@@ -36,6 +38,7 @@ function harness(answer: () => RequestResult | Promise<RequestResult>, initial =
     positionsFile: {
       read: async () => positionsFile.file,
       write: async (positions) => {
+        if (positionsFile.fail) throw positionsFile.fail;
         if (positionsFile.readOnly) return 'read-only';
         positionsFile.written.push(serializePositions(positions));
         positionsFile.file = { exists: true, positions };
@@ -46,9 +49,11 @@ function harness(answer: () => RequestResult | Promise<RequestResult>, initial =
     post: async (message) => { posted.push(message); return true; },
     runCommand: (command) => { commands.push(command); },
     log: { info: (line) => logs.push(line), warn: (line) => logs.push(line), debug: (line) => logs.push(line) },
+    warn: (message) => { warnings.push(message); },
+    positionsExistChanged: () => { existChanges.push(true); },
   }, initial);
   const ofType = <T extends OutboundMessage['type']>(type: T) => posted.filter((message): message is Extract<OutboundMessage, { type: T }> => message.type === type);
-  return { session, posted, logs, commands, ofType, asked, positionsFile };
+  return { session, posted, logs, commands, ofType, asked, positionsFile, warnings, existChanges };
 }
 
 const failure = (kind: string, extra: Record<string, unknown> = {}): RequestResult =>
@@ -519,4 +524,55 @@ test('the positions file sits beside the model and the discard command is contri
   const title = contributes.menus['editor/title'].find((entry: { command: string }) => entry.command === command.command);
   assert.equal(title.when, when);
   assert.ok(!String(title.group).startsWith('navigation'), 'it belongs to the ... menu');
+});
+
+test('a save asks once; the watcher event of its own write is ignored, an outside change is not', async () => {
+  const h = positionsHarness();
+  h.session.receive(READY);
+  await h.session.refresh();
+  const before = h.asked.length;
+  h.session.receive({ type: 'savePositions', payload: { positions: SAVED } });
+  await settle();
+  assert.equal(h.asked.length, before + 1);
+  assert.equal(await h.session.positionsFileChanged(), false, 'the host wrote that content itself');
+  h.positionsFile.file = { exists: true, positions: { 'a:1': { x: 5, y: 6 } } };
+  assert.equal(await h.session.positionsFileChanged(), true, 'another tool changed the file');
+  h.positionsFile.file = { exists: false };
+  assert.equal(await h.session.positionsFileChanged(), true, 'another tool deleted the file');
+});
+
+test('discarding is not reported again by the watcher', async () => {
+  const h = positionsHarness();
+  h.positionsFile.file = { exists: true, positions: SAVED };
+  h.session.receive(READY);
+  await h.session.refresh();
+  await h.session.discardSavedPositions();
+  assert.equal(await h.session.positionsFileChanged(), false);
+});
+
+test('while a variant is shown, a file that is gone is noticed and the context is republished', async () => {
+  const h = harness(() => answerWith(), undefined, URI, true, true);
+  h.positionsFile.file = { exists: true, positions: SAVED };
+  h.session.receive(READY);
+  await h.session.refresh();
+  h.session.receive({ type: 'variantChanged', payload: { variant: 'happy' } });
+  await settle();
+  assert.equal(h.session.savedPositionsExist, true);
+  h.existChanges.length = 0;
+  h.positionsFile.file = { exists: false };
+  await h.session.refresh();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI }, variant: 'happy' });
+  assert.equal(h.session.savedPositionsExist, false);
+  assert.equal(h.existChanges.length, 1);
+});
+
+test('a failed write tells the user the positions were not saved, and why', async () => {
+  const h = positionsHarness();
+  h.positionsFile.fail = new Error('EACCES');
+  h.session.receive(READY);
+  await h.session.refresh();
+  h.session.receive({ type: 'savePositions', payload: { positions: SAVED } });
+  await settle();
+  assert.equal(h.warnings.length, 1);
+  assert.match(h.warnings[0]!, /not saved: EACCES/);
 });

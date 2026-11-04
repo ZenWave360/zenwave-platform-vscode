@@ -114,6 +114,8 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
       post: (message) => webview.postMessage(message),
       runCommand: (command) => { void vscode.commands.executeCommand(command); },
       log: deps.logger,
+      warn: (message) => { void vscode.window.showWarningMessage(message); },
+      positionsExistChanged: () => { if (panel.active) deps.onFocus(this); },
     }, { viewMode: initial.viewMode, displaySettings: { humanizeLabels: initial.humanizeLabels } });
     this.refresher = new CoalescedRefresh(async () => {
       await this.session.refresh();
@@ -143,7 +145,7 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
       this.subscriptions.push(watcher, watcher.onDidChange(() => this.refresher.request()), watcher.onDidCreate(() => this.refresher.request()));
       // The positions file is read through the host's file system, so a change by another tool or a branch switch reaches the diagram too.
       const positions = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, positionsFileName(fileName(uri))));
-      const again = (): void => this.refresher.request();
+      const again = (): void => { void this.session.positionsFileChanged().then((changed) => { if (changed) this.refresher.request(); }); };
       this.subscriptions.push(positions, positions.onDidChange(again), positions.onDidCreate(again), positions.onDidDelete(again));
     }
 
@@ -169,7 +171,9 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
         return parsePositionsFile(new TextDecoder().decode(bytes));
       },
       write: async (positions: Parameters<typeof serializePositions>[0]): Promise<'written' | 'read-only'> => {
-        if (vscode.workspace.fs.isWritableFileSystem(this.uri.scheme) === false) {
+        const writable = vscode.workspace.fs.isWritableFileSystem(this.uri.scheme);
+        if (writable === undefined) throw new Error(`no file system for "${this.uri.scheme}" is available to write to`);
+        if (writable === false) {
           void vscode.window.showInformationMessage(`The workspace is read-only, so the positions of ${fileName(this.uri)} cannot be saved.`);
           return 'read-only';
         }
