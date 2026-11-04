@@ -302,7 +302,12 @@
       },
       {
         "command": "zenwave.zfl.organizeServices",
-        "title": "Organize ZFL Services",
+        "title": "Organize ZFL Services in Full",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.zfl.addMissingServices",
+        "title": "Add Missing ZFL Services",
         "category": "ZenWave"
       },
       {
@@ -410,6 +415,11 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.preview.openZdlDiagrams",
+        "title": "ZDL Diagrams",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.preview.openScriptsDocs",
         "title": "Scripts Docs",
         "category": "ZenWave"
@@ -470,6 +480,10 @@
         {
           "command": "zenwave.zfl.organizeServices",
           "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests"
+        },
+        {
+          "command": "zenwave.zfl.addMissingServices",
+          "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests && zenwave.organizeModesAvailable"
         },
         {
           "command": "zenwave.explorer.refresh",
@@ -537,7 +551,11 @@
         },
         {
           "command": "zenwave.preview.openModelDocs",
-          "when": "(editorLangId == zdl || resourceExtname == .zdl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId == zdl || resourceExtname == .zdl) && !isInDiffEditor"
+        },
+        {
+          "command": "zenwave.preview.openZdlDiagrams",
+          "when": "(editorLangId == zdl || resourceExtname == .zdl) && zenwave.previewModesAvailable && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.openScriptsDocs",
@@ -570,6 +588,11 @@
           "command": "zenwave.model.reverseReferences",
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
           "group": "navigation@91"
+        },
+        {
+          "command": "zenwave.zfl.addMissingServices",
+          "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests && zenwave.organizeModesAvailable",
+          "group": "1_modification@89"
         },
         {
           "command": "zenwave.zfl.organizeServices",
@@ -683,13 +706,17 @@
         },
         {
           "command": "zenwave.preview.openModelDocs",
-          "when": "activeCustomEditorId != zenwave.preview",
           "group": "2_preview@1"
+        },
+        {
+          "command": "zenwave.preview.openZdlDiagrams",
+          "when": "zenwave.previewModesAvailable",
+          "group": "2_preview@2"
         },
         {
           "command": "zenwave.preview.openToSide",
           "when": "activeCustomEditorId != zenwave.preview",
-          "group": "2_preview@2"
+          "group": "2_preview@3"
         }
       ],
       "zenwave.zwViews": [

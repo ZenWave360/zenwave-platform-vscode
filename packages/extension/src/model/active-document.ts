@@ -24,6 +24,12 @@ export function isZflDocument(uri: vscode.Uri, languageId: string | undefined): 
   return /\.zfl$/i.test(uri.path);
 }
 
+/** A ZDL document: by its language when open as text, otherwise by its extension. */
+export function isZdlDocument(uri: vscode.Uri, languageId: string | undefined): boolean {
+  if (languageId !== undefined) return languageId === 'zdl';
+  return /\.zdl$/i.test(uri.path);
+}
+
 /**
  * A ZDL, ZW or ZFL document, the models that have a preview: by language when open as text,
  * otherwise by extension. An untitled buffer is not one: a preview is of a saved file.

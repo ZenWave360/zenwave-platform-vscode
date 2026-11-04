@@ -63,6 +63,9 @@ export interface EventFlowViews {
   readonly serviceGraph: ViewModel;
 }
 
+/** `mode` of `zenwave/organizeZflServices`. Absent on the wire means `full`. */
+export type OrganizeServicesMode = 'full' | 'additive';
+
 export type SequenceRenderMode = 'SEPARATE_VARIANTS' | 'ALT_BLOCKS' | 'AUTO';
 
 export interface PreviewRepresentation {
@@ -70,7 +73,12 @@ export interface PreviewRepresentation {
   readonly title: string;
   readonly format: 'MARKDOWN' | 'MERMAID' | 'HTML';
   readonly content: string;
+  /** The kind of element, in `diagrams` mode only (LVR-R17). */
+  readonly group?: string;
 }
+
+/** What `zenwave/preview` is asked for: the page (`docs`, the default) or one diagram per element (`diagrams`). */
+export type PreviewMode = 'docs' | 'diagrams';
 
 export interface Preview {
   readonly representations: readonly PreviewRepresentation[];
@@ -149,10 +157,15 @@ export class ZenwaveRequests {
   /**
    * The whole ZFL text with its services organised (equal to the current text when nothing changes), or `null`
    * when the server could not process the document, e.g. a syntax error (observed with lsp-js d7156e7).
+   *
+   * `mode` is sent only when the server advertised `organizeModes`. `full` rebuilds the block; `additive`
+   * adds what the flows use and removes nothing. Omitting it is what an older server already does, and it
+   * is `full`.
    */
-  async organizeZflServices(uri: string): Promise<RequestResult<string | null>> {
+  async organizeZflServices(uri: string, mode?: OrganizeServicesMode): Promise<RequestResult<string | null>> {
+    const params = mode === undefined ? { uri } : { uri, mode };
     return expect(ZENWAVE_REQUESTS.organizeZflServices,
-      await this.issuer.request(ZENWAVE_REQUESTS.organizeZflServices, { uri }),
+      await this.issuer.request(ZENWAVE_REQUESTS.organizeZflServices, params),
       (value) => value === null || typeof value === 'string');
   }
 
@@ -162,10 +175,12 @@ export class ZenwaveRequests {
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));
   }
 
-  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode): Promise<RequestResult<Preview>> {
-    const params = sequenceRenderMode === undefined
-      ? { textDocument: { uri } }
-      : { textDocument: { uri }, sequenceRenderMode };
+  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode): Promise<RequestResult<Preview>> {
+    const params = {
+      textDocument: { uri },
+      ...(sequenceRenderMode === undefined ? {} : { sequenceRenderMode }),
+      ...(mode === undefined ? {} : { mode }),
+    };
     return expect(ZENWAVE_REQUESTS.preview, await this.issuer.request(ZENWAVE_REQUESTS.preview, params),
       (value) => isObject(value) && Array.isArray(value.representations) && typeof value.defaultRepresentationId === 'string');
   }

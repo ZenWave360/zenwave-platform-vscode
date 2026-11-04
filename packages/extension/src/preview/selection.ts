@@ -4,7 +4,8 @@
  * The exact id wins. Failing that, the same outcome: the ids the server gave for
  * a ZFL sequence read `sequence:<outcome>:<index>`, and it is only these
  * identifiers that are read here, never a title or the content. Otherwise the
- * server's default.
+ * server's default. `byOutcome` is off for grouped sets (ZDL Diagrams), whose ids
+ * `<kind>:<service>:<name>` do not name an outcome.
  */
 
 export interface Identified {
@@ -26,11 +27,11 @@ export interface Selection {
 }
 
 /** `previous` is the id selected before; `undefined` when nothing was (a first answer). */
-export function reselect(previous: string | undefined, representations: readonly Identified[], defaultId: string): Selection | undefined {
+export function reselect(previous: string | undefined, representations: readonly Identified[], defaultId: string, byOutcome = true): Selection | undefined {
   if (representations.length === 0) return undefined;
   if (previous !== undefined) {
     if (representations.some((item) => item.id === previous)) return { id: previous, reason: 'kept' };
-    const outcome = outcomeOf(previous);
+    const outcome = byOutcome ? outcomeOf(previous) : undefined;
     if (outcome !== undefined) {
       const same = representations.find((item) => outcomeOf(item.id) === outcome);
       if (same) return { id: same.id, reason: 'same-outcome' };
