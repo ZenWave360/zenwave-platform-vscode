@@ -311,14 +311,19 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   const again = await organizeCommand(flow.uri);
   assert(again.kind === 'unchanged' && flow.version === versionBefore && flow.getText() === organizedText,
     `Organizing an organized flow must change nothing: ${JSON.stringify(again)} v${versionBefore}→${flow.version}`);
-  await vscode.window.showTextDocument(flow);
+  // `undo` is the workbench's global command. It undoes in the focused code editor, else in an editable DOM element,
+  // else in the last active editor, so the window's focus decides where it lands. Show the flow with focus and wait until
+  // it is the active editor, then wait (bounded) for the document version to move: the edit reaches the extension host
+  // asynchronously, so an immediate read can be stale (REL/8). One undo is issued and never repeated. A failure reports
+  // what was read at once and again after a wait, with the focus.
+  await vscode.window.showTextDocument(flow, { preserveFocus: false });
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === flow.uri.toString() || undefined,
+    'The flow editor did not become the active editor before undo', 10000);
   const versionBeforeUndo = flow.version;
   await vscode.commands.executeCommand('undo');
-  // `undo` is the workbench's global command. It undoes in the focused code editor, else in an editable DOM element,
-  // else in the last active editor, so the window's focus decides where it lands. A failure reports what was read at once
-  // and again after a wait, with the focus: an unmoved version and a lost focus, a stale read and a moved version are
-  // different causes (REL/8). It does not retry: the assertion still fails.
-  if (flow.getText() !== checkoutText) {
+  const moved = await waitFor(() => flow.version !== versionBeforeUndo || undefined, 'undo did not change the document version', 10000)
+    .then(() => true, () => false);
+  if (!moved || flow.getText() !== checkoutText) {
     const atOnce = `version ${versionBeforeUndo}->${flow.version}, window focused ${vscode.window.state.focused}, active editor ${vscode.window.activeTextEditor?.document.uri.toString()}`;
     const atOnceText = flow.getText();
     await delay(500);
