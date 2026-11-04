@@ -9,7 +9,7 @@ import type { LanguageServerHost } from './lsp/client.js';
 import { registerEventFlowEditor, type EventFlowApi } from './eventflow/feature.js';
 import { registerModelExplorer, type ModelExplorerApi } from './explorer/feature.js';
 import { registerLanguageServer, type LanguageServerApi } from './lsp/feature.js';
-import { registerModelActions } from './model/actions.js';
+import { registerModelActions, type ModelActionsApi } from './model/actions.js';
 import { registerPreviewEditor, type PreviewApi } from './preview/feature.js';
 import { registerSdkFeature } from './sdk/feature.js';
 import type { SdkProcessService } from './sdk/host.js';
@@ -22,6 +22,7 @@ export interface ZenwaveExtensionApi {
   readonly explorer: ModelExplorerApi;
   readonly eventflow: EventFlowApi;
   readonly preview: PreviewApi;
+  readonly modelActions: ModelActionsApi;
 }
 
 export interface HostServices {
@@ -60,11 +61,11 @@ export function activate(
     logger,
     capabilities.languageServer === 'none' ? undefined : services.languageServer,
   );
-  registerModelActions(context, languageServer, logger);
+  const modelActions = registerModelActions(context, languageServer, logger);
   const explorer = registerModelExplorer(context, languageServer, logger);
   const eventflow = registerEventFlowEditor(context, languageServer, logger, explorer.diagramPanels);
   const preview = registerPreviewEditor(context, languageServer, logger);
-  return { languageServer, explorer, eventflow, preview };
+  return { languageServer, explorer, eventflow, preview, modelActions };
 }
 
 /**

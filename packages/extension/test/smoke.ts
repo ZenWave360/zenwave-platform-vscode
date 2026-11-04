@@ -6,7 +6,7 @@ import { LspSupervisor } from '../src/lsp/supervisor.js';
 import type { ZenwaveExtensionApi } from '../src/activate.js';
 import type { LanguageServerApi } from '../src/lsp/feature.js';
 import { documentFailure } from '../src/lsp/requests.js';
-import type { OrganizeOutcome, ReferencesOutcome } from '../src/model/actions.js';
+import type { ConfirmationRequest, ModelActionsApi, OrganizeOutcome, ReferencesOutcome } from '../src/model/actions.js';
 import { FULL_ORGANIZE_ACCEPT, FULL_ORGANIZE_CONFIRMATION } from '../src/model/organize.js';
 import type { HierarchyTreeApi, ModelExplorerApi, OpenRelatedOutcome } from '../src/explorer/feature.js';
 import { findNode, type ExplorerNode } from '../src/explorer/hierarchy-model.js';
@@ -29,31 +29,19 @@ function assert(condition: unknown, message: string): asserts condition {
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Full organise confirms in a modal. The smoke host has nobody to click it, so the stand-in answers it
- * (`answer`: the button, or `undefined` for Escape), records every time the exact confirmation was
- * requested and with which options, and leaves every other warning alone.
+ * Full organise confirms in a modal. The smoke host has nobody to click it, so the extension's own seam answers it
+ * (`answer`: the button, or `undefined` for Escape) and records every request. The installed extension has its own
+ * `vscode` API object, so patching the test's one would never reach it.
  */
-interface ConfirmationRequest { readonly modal: boolean | undefined; readonly items: readonly string[] }
+let modelActionsApi: ModelActionsApi | undefined;
 
 async function answeringFullOrganize<T>(answer: string | undefined, body: () => Promise<T>): Promise<{ readonly result: T; readonly confirmations: readonly ConfirmationRequest[] }> {
-  const original = vscode.window.showWarningMessage.bind(vscode.window);
-  const confirmations: ConfirmationRequest[] = [];
-  function patched(message: string, optionsOrItem?: string | vscode.MessageOptions, ...items: string[]) {
-    if (message === FULL_ORGANIZE_CONFIRMATION) {
-      confirmations.push({ modal: typeof optionsOrItem === 'object' ? optionsOrItem.modal : undefined, items: typeof optionsOrItem === 'string' ? [optionsOrItem, ...items] : items });
-      return Promise.resolve(answer);
-    }
-    if (optionsOrItem === undefined) return original(message);
-    if (typeof optionsOrItem === 'string') return original(message, optionsOrItem, ...items);
-    return original(message, optionsOrItem, ...items);
-  }
-  const descriptor = Object.getOwnPropertyDescriptor(vscode.window, 'showWarningMessage');
-  Object.defineProperty(vscode.window, 'showWarningMessage', { configurable: true, writable: true, value: patched });
+  assert(modelActionsApi, 'The extension exposed no model actions API');
+  const answering = modelActionsApi.answerFullOrganize(answer);
   try {
-    return { result: await body(), confirmations };
+    return { result: await body(), confirmations: [...answering.requests] };
   } finally {
-    if (descriptor) Object.defineProperty(vscode.window, 'showWarningMessage', descriptor);
-    else Object.defineProperty(vscode.window, 'showWarningMessage', { configurable: true, writable: true, value: original });
+    answering.dispose();
   }
 }
 
@@ -65,7 +53,7 @@ async function organizeCommand(uri?: vscode.Uri): Promise<OrganizeOutcome> {
   });
   // Only a command that got as far as the server asks (a refusal before it does not): when it asked, it asked as a modal with the one button.
   for (const confirmation of confirmations) {
-    assert(confirmation.modal === true && confirmation.items.length === 1 && confirmation.items[0] === FULL_ORGANIZE_ACCEPT,
+    assert(confirmation.message === FULL_ORGANIZE_CONFIRMATION && confirmation.modal === true && confirmation.buttons.length === 1 && confirmation.buttons[0] === FULL_ORGANIZE_ACCEPT,
       `Full organize must confirm with modal: true and the one button: ${JSON.stringify(confirmation)}`);
   }
   if (result.kind === 'organized' || result.kind === 'unchanged') {
@@ -1765,7 +1753,8 @@ export async function run(): Promise<void> {
   await extension.activate();
   assert(extension.isActive, `${EXTENSION_ID} did not activate`);
   await sharedLspFoundation();
-  const { languageServer: api, explorer, eventflow, preview } = extension.exports as ZenwaveExtensionApi;
+  const { languageServer: api, explorer, eventflow, preview, modelActions: actions } = extension.exports as ZenwaveExtensionApi;
+  modelActionsApi = actions;
   const desktop = vscode.env.uiKind === vscode.UIKind.Desktop;
   await explorerBeforeAnyDocument(api, explorer, desktop);
   await realLanguageServer(api, desktop);
