@@ -7,9 +7,9 @@ import type { Preview, PreviewMode, SequenceRenderMode } from '../../src/lsp/req
 import type { RequestResult } from '../../src/lsp/supervisor.js';
 import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from '../../src/preview/page.js';
 import { decidePreviewLink } from '../../src/preview/links.js';
-import { inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
+import { FOLLOWING_VIEW_TYPE, inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
 import { outcomeOf, reselect } from '../../src/preview/selection.js';
-import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession } from '../../src/preview/session.js';
+import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from '../../src/preview/session.js';
 import { PREVIEW_STATE_KINDS, presentPreviewState, type PreviewDataState } from '../../src/preview/state.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -294,8 +294,7 @@ test('copy as markdown writes the page the server sent, and a diagram page write
   assert.deepEqual(diagram.markdownContext, []);
   assert.equal(await diagram.session.copyMarkdown(write), false);
   assert.deepEqual(written, [page], 'a diagram page writes nothing');
-  diagram.session.publishActiveMarkdown();
-  assert.deepEqual(diagram.markdownContext, [false], 'a diagram preview clears the markdown context when it is the one on screen');
+  assert.equal(diagram.session.showsMarkdown, false);
 
   let answer: Preview = { representations: [markdown, chart], defaultRepresentationId: 'docs' };
   const mixed = harness(() => ok(answer), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
@@ -398,22 +397,28 @@ test('the manifest registers an optional preview editor and names each supported
   assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === PREVIEW_VIEW_TYPE),
     { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zw' }, { filenamePattern: '*.zfl' }], priority: 'option' });
   const commands = (contributes.commands as { command: string; title: string }[]).map((entry) => entry.command);
-  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
+  for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.openSequenceDiagramsToSide', 'zenwave.preview.openModelDocsToSide', 'zenwave.preview.openScriptsDocsToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
     assert.ok(commands.includes(command), `${command} is not contributed`);
   }
   const title = contributes.menus['editor/title'] as { command?: string; submenu?: string; when: string }[];
   const submenus = title.filter((item) => item.submenu);
   assert.deepEqual(submenus.map((item) => item.submenu).sort(), ['zenwave.zdlViews', 'zenwave.zflViews', 'zenwave.zwViews']);
   for (const submenu of submenus) assert.match(submenu.when, /!isInDiffEditor/, 'no preview is offered in a diff (MP-Q4)');
-  assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.') && item.command !== 'zenwave.preview.copyMarkdown'), 'the preview has no title-bar icon of its own besides Copy as Markdown');
+  assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.') && item.command !== 'zenwave.preview.copyMarkdown' && item.command !== 'zenwave.preview.lockFollowing'), 'the preview has no title-bar icon of its own besides Copy as Markdown and the lock of the following preview');
   const menus = contributes.menus as Record<string, { command: string; when: string }[]>;
   const opens = (submenu: string) => menus[submenu]!.map((entry) => entry.command).filter((command) => !command.endsWith('.showText'));
-  assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openToSide']);
-  assert.deepEqual(opens('zenwave.zdlViews'), ['zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openToSide']);
+  assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openSequenceDiagramsToSide']);
+  assert.deepEqual(opens('zenwave.zdlViews'), ['zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openModelDocsToSide']);
   const zdlMenu = Object.fromEntries((menus['zenwave.zdlViews'] as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
   assert.equal(zdlMenu['zenwave.preview.openZdlDiagrams'], 'zenwave.previewModesAvailable', 'ZDL Diagrams is offered only to a server that advertises previewModes (MP-R25)');
   assert.equal(zdlMenu['zenwave.preview.openModelDocs'], undefined, 'Model Docs is reachable from inside a preview too (MP-R17)');
-  assert.deepEqual(opens('zenwave.zwViews'), ['zenwave.preview.openScriptsDocs', 'zenwave.preview.openToSide']);
+  assert.deepEqual(opens('zenwave.zwViews'), ['zenwave.preview.openScriptsDocs', 'zenwave.preview.openScriptsDocsToSide']);
+  const titles = Object.fromEntries((contributes.commands as { command: string; title: string }[]).map((entry) => [entry.command, entry.title]));
+  assert.deepEqual([titles['zenwave.preview.openSequenceDiagramsToSide'], titles['zenwave.preview.openModelDocsToSide'], titles['zenwave.preview.openScriptsDocsToSide']],
+    ['Open Sequence Diagrams to the Side', 'Open Model Docs to the Side', 'Open Scripts Docs to the Side'], 'each "to the side" entry names its view (MP-R27)');
+  for (const command of ['openSequenceDiagramsToSide', 'openModelDocsToSide', 'openScriptsDocsToSide']) {
+    assert.equal((contributes.menus.commandPalette as { command: string; when?: string }[]).find((entry) => entry.command === `zenwave.preview.${command}`)?.when, 'false', `${command} is a menu entry; Open Preview to the Side keeps the palette`);
+  }
   for (const submenu of ['zenwave.zflViews', 'zenwave.zdlViews', 'zenwave.zwViews']) {
     assert.ok(menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.showText' && entry.when === 'activeCustomEditorId == zenwave.preview'), `${submenu} keeps the way back to text (MP-Q9)`);
   }
@@ -436,7 +441,7 @@ test('copy as markdown is on the title bar and in the palette only while that pr
   assert.equal(copy?.title, 'Copy as Markdown');
   assert.equal(copy?.category, 'ZenWave');
   assert.equal(copy?.icon, '$(copy)');
-  const when = `activeCustomEditorId == ${PREVIEW_VIEW_TYPE} && ${PREVIEW_MARKDOWN_CONTEXT_KEY}`;
+  const when = `(activeCustomEditorId == ${PREVIEW_VIEW_TYPE} || activeWebviewPanelId == ${FOLLOWING_VIEW_TYPE}) && ${PREVIEW_MARKDOWN_CONTEXT_KEY}`;
   const title = manifest.contributes.menus['editor/title'] as { command?: string; when: string; group?: string }[];
   const button = title.filter((item) => item.command === 'zenwave.preview.copyMarkdown');
   assert.deepEqual(button.map((item) => [item.when, item.group]), [[when, 'navigation@100']]);
@@ -446,6 +451,46 @@ test('copy as markdown is on the title bar and in the palette only while that pr
   for (const submenu of ['zenwave.zflViews', 'zenwave.zdlViews', 'zenwave.zwViews']) {
     assert.ok(!menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.copyMarkdown'), `${submenu} does not carry Copy as Markdown`);
   }
+});
+
+test('every table of a Markdown page is as wide as the page, whatever its content (MP-R28)', () => {
+  const css = readFileSync(join(here, '../../webview/preview/preview.css'), 'utf8');
+  const rule = css.split(/\r?\n/).find((line) => /^\.document table\s*\{/.test(line));
+  assert.ok(rule, 'a rule for .document table');
+  assert.match(rule, /width:\s*100%\s*!important;/);
+  assert.match(rule, /display:\s*table;/, 'the table itself, not a block around it, is stretched');
+});
+
+test('the Copy as Markdown button follows the editor that is active, whatever order the events came in (MP-R26)', async () => {
+  const docs = { id: 'docs', title: 'Model Docs', format: 'MARKDOWN' as const, content: '# Orders\n' };
+  const side = harness(() => ok({ representations: [docs], defaultRepresentationId: 'docs' }), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
+  const diagram = harness(() => ok(ALT));
+  // Opened to the side without focus: its page arrives while it is not the active editor.
+  side.session.receive(READY);
+  await side.session.refresh();
+  diagram.session.receive(READY);
+  await diagram.session.refresh();
+  const previews = [
+    { documentUri: 'file:///workspace/orders.zdl', get showsMarkdown() { return side.session.showsMarkdown; } },
+    { documentUri: ZFL, get showsMarkdown() { return diagram.session.showsMarkdown; } },
+  ];
+  assert.equal(markdownContextValue(undefined, previews), false, 'a text editor is active');
+  assert.equal(markdownContextValue('file:///workspace/other.zdl', previews), false, 'an editor that is no preview of ours');
+  assert.equal(markdownContextValue(ZFL, previews), false, 'a diagram preview has no button');
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', previews), true, 'clicking the side preview shows the button, though its page arrived earlier');
+  // The page changes to a diagram while the preview stays active, and back.
+  const withChart = harness(() => ok({ representations: [docs, mermaid('classes', 'Classes')], defaultRepresentationId: 'docs' }), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
+  withChart.session.receive(READY);
+  await withChart.session.refresh();
+  const one = [{ documentUri: 'file:///workspace/orders.zdl', get showsMarkdown() { return withChart.session.showsMarkdown; } }];
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', one), true);
+  withChart.session.selectRepresentation('classes');
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', one), false);
+  withChart.session.selectRepresentation('docs');
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', one), true);
+  await withChart.session.setPreviewMode('docs');
+  assert.deepEqual(withChart.markdownContext, [true, false, true]);
+  assert.equal(markdownContextValue('file:///workspace/gone.zdl', []), false, 'a closed preview leaves nothing to show');
 });
 
 test('the preview keybindings are scoped to model editors and cannot reach the built-in Markdown preview', () => {

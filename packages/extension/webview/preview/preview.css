@@ -90,7 +90,7 @@ body > #state button:hover { background: var(--vscode-button-hoverBackground); }
 .document pre code { padding: 0; background: none; font-size: var(--vscode-editor-font-size, 13px); }
 .document blockquote { padding: 0 1em; border-left: 4px solid var(--vscode-textBlockQuote-border, var(--vscode-editorWidget-border, transparent)); background: var(--vscode-textBlockQuote-background, transparent); }
 .document hr { border: 0; border-top: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, transparent)); }
-.document table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.document table { display: table; width: 100% !important; border-collapse: collapse; }
 .document th, .document td { padding: 4px 10px; border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, currentColor)); text-align: left; vertical-align: top; }
 .document th { font-weight: 600; background: var(--vscode-editorWidget-background, transparent); }
 .document img { max-width: 100%; }

@@ -56,7 +56,7 @@ A model is only useful if the business can read it. The preview turns every mode
 - A **ZFL** flow shows its flowchart and one sequence diagram per outcome, with selectors for the diagram and for how sequence variants are rendered.
 - A **ZW** file shows each plugin with its description, the command to run it, and its own and inherited configuration.
 
-Open it from the ZenWave icon in the editor title bar, with **ZenWave: Open Preview** (`Ctrl+Shift+V`) or **Open Preview to the Side** (`Ctrl+K V`). The preview follows your edits, keeps the last good drawing while the model cannot be read, and follows your colour theme. Mermaid ships inside the extension, so nothing goes to the network. **Copy as Markdown**, in the preview's title bar, copies the document so you can paste it into a wiki or a pull request.
+Open it from the ZenWave icon in the editor title bar, with **ZenWave: Open Preview** (`Ctrl+Shift+V`) or **Open Preview to the Side** (`Ctrl+K V`). The preview follows your edits, keeps the last good drawing while the model cannot be read, and follows your colour theme. Mermaid ships inside the extension, so nothing goes to the network. **Copy as Markdown**, in the preview's title bar, copies the document so you can paste it into a wiki or a pull request. **Open Following Preview** opens one preview beside the text that shows whichever model you focus last and remembers the mode, diagram and scroll position of each file, and the lock in its title bar turns it into an ordinary preview of the current file.
 
 > 📸 **Screenshot:** a ZFL flow preview showing the flowchart on top and one sequence diagram below, with the diagram selector visible.
 

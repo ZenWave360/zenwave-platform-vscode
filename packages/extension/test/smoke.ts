@@ -1219,7 +1219,7 @@ async function desktopRuns(document: vscode.TextDocument): Promise<void> {
 
 const editorCount = (api: PreviewApi): number => api.editors.length;
 
-const PREVIEW_COMMANDS = ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode'];
+const PREVIEW_COMMANDS = ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagramsToSide', 'zenwave.preview.openModelDocsToSide', 'zenwave.preview.openScriptsDocsToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode'];
 
 const isPreviewTab = (tab: vscode.Tab | undefined, uri: string): boolean =>
   tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === 'zenwave.preview' && tab.input.uri.toString() === uri;

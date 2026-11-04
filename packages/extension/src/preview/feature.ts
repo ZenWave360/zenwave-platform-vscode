@@ -8,8 +8,9 @@ import { createNonce } from '../eventflow/page.js';
 import { buildFailedHtml, buildPreviewHtml } from './page.js';
 import { decidePreviewLink } from './links.js';
 import type { PreviewMode } from '../lsp/requests.js';
-import { PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
-import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession } from './session.js';
+import { FOLLOWING_VIEW_TYPE, PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
+import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from './session.js';
+import { FollowingMemory, followTarget, followingTitle, followsLanguage, isFollowingViewType } from './following.js';
 
 export const PREVIEW_COMMANDS = {
   open: 'zenwave.preview.open',
@@ -18,11 +19,17 @@ export const PREVIEW_COMMANDS = {
   openModelDocs: 'zenwave.preview.openModelDocs',
   openZdlDiagrams: 'zenwave.preview.openZdlDiagrams',
   openScriptsDocs: 'zenwave.preview.openScriptsDocs',
+  openSequenceDiagramsToSide: 'zenwave.preview.openSequenceDiagramsToSide',
+  openModelDocsToSide: 'zenwave.preview.openModelDocsToSide',
+  openScriptsDocsToSide: 'zenwave.preview.openScriptsDocsToSide',
   showText: 'zenwave.preview.showText',
   selectDiagram: 'zenwave.preview.selectDiagram',
   selectRenderMode: 'zenwave.preview.selectRenderMode',
   copyMarkdown: 'zenwave.preview.copyMarkdown',
+  openFollowing: 'zenwave.preview.openFollowing',
+  lockFollowing: 'zenwave.preview.lockFollowing',
 } as const;
+
 
 /** Where the page, its stylesheet and the Mermaid bundle are put by the build (esbuild.mjs). */
 const PAGE_DIRECTORY = ['dist', 'preview-webview'] as const;
@@ -54,6 +61,8 @@ export interface PreviewEditorApi {
 
 export interface PreviewApi {
   readonly editors: readonly PreviewEditorApi[];
+  /** The following preview of this window, if open (MP-R31). It is not among `editors`: those are of one document each. */
+  readonly following: PreviewEditorApi | undefined;
   editorsFor(documentUri: string): readonly PreviewEditorApi[];
   /** The preview with focus, if any. */
   readonly active: PreviewEditorApi | undefined;
@@ -70,10 +79,11 @@ function hasDiagrams(uri: vscode.Uri): boolean {
 }
 
 class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
-  readonly documentUri: string;
-  readonly session: PreviewSession;
+  documentUri: string;
+  session: PreviewSession;
   private readonly refresher: CoalescedRefresh;
   private readonly subscriptions: vscode.Disposable[] = [];
+  private watcher: vscode.Disposable[] = [];
   private loadTimer: ReturnType<typeof setTimeout> | undefined;
   private failedShown = false;
   private disposed = false;
@@ -81,26 +91,15 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
   textDocument: vscode.TextDocument | undefined;
 
   constructor(
-    private readonly uri: vscode.Uri,
+    private uri: vscode.Uri,
     readonly panel: vscode.WebviewPanel,
-    private readonly deps: { readonly context: vscode.ExtensionContext; readonly server: LanguageServerApi; readonly logger: Logger; readonly onDispose: (editor: PreviewEditor) => void; readonly onFocus: (editor: PreviewEditor) => void; readonly initialMode: (documentUri: string) => PreviewMode },
+    private readonly deps: { readonly memory?: FollowingMemory<PreviewSession>; readonly context: vscode.ExtensionContext; readonly server: LanguageServerApi; readonly logger: Logger; readonly onDispose: (editor: PreviewEditor) => void; readonly onFocus: (editor: PreviewEditor) => void; readonly onContextChange: () => void; readonly initialMode: (documentUri: string) => PreviewMode },
   ) {
     this.documentUri = uri.toString();
     const webview = panel.webview;
     const pageDirectory = vscode.Uri.joinPath(deps.context.extensionUri, ...PAGE_DIRECTORY);
     webview.options = { enableScripts: true, enableCommandUris: false, localResourceRoots: [pageDirectory] };
-    this.session = new PreviewSession({
-      documentUri: this.documentUri,
-      fileName: fileName(uri),
-      hasRenderMode: hasRenderMode(uri),
-      preview: (target, renderMode, mode) => deps.server.requests.preview(target, renderMode, mode),
-      diagramsAvailable: () => hasDiagrams(uri) && deps.server.previewModes,
-      post: (message) => webview.postMessage(message),
-      runCommand: (command) => { void vscode.commands.executeCommand(command); },
-      setContext: (key, value) => this.publishContext(key, value),
-      log: deps.logger,
-    });
-    this.session.requestedMode = deps.initialMode(this.documentUri);
+    this.session = this.sessionFor(uri);
     this.refresher = new CoalescedRefresh(() => this.session.refresh(), EDIT_DELAY_MS);
 
     this.subscriptions.push(
@@ -118,17 +117,61 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
       }),
       deps.server.onDidChange(() => this.refresher.request(SWITCH_DELAY_MS)),
     );
-    // A change on disk (a branch switch, another tool) reaches an open text document as a change event; the
-    // watcher covers a document whose text model VS Code has not loaded yet.
-    if (uri.scheme === 'file' || uri.scheme === 'vscode-vfs' || uri.scheme === 'vscode-test-web') {
-      const directory = vscode.Uri.joinPath(uri, '..');
-      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, fileName(uri)));
-      this.subscriptions.push(watcher, watcher.onDidChange(() => this.refresher.request()), watcher.onDidCreate(() => this.refresher.request()));
-    }
+    this.watchFile();
 
     this.load(webview, pageDirectory);
     void this.keepOpen().then(() => this.refresher.request(SWITCH_DELAY_MS));
     this.viewStateChanged();
+  }
+
+  /** The session of a document: the remembered one for a following preview (MP-R31), a new one otherwise. */
+  private sessionFor(uri: vscode.Uri): PreviewSession {
+    const create = (): PreviewSession => {
+      const session: PreviewSession = new PreviewSession({
+        documentUri: uri.toString(),
+        fileName: fileName(uri),
+        hasRenderMode: hasRenderMode(uri),
+        preview: (target, renderMode, mode) => this.deps.server.requests.preview(target, renderMode, mode),
+        diagramsAvailable: () => hasDiagrams(uri) && this.deps.server.previewModes,
+        // A session that is not the one on screen, or a panel that is gone, has nobody to tell.
+        post: (message) => this.disposed || this.session !== session ? Promise.resolve(false) : this.panel.webview.postMessage(message),
+        runCommand: (command) => { void vscode.commands.executeCommand(command); },
+        setContext: () => this.publishContext(),
+        log: this.deps.logger,
+      });
+      session.requestedMode = this.deps.initialMode(uri.toString());
+      return session;
+    };
+    return this.deps.memory ? this.deps.memory.recall(uri.toString(), create) : create();
+  }
+
+  /**
+   * A change on disk (a branch switch, another tool) reaches an open text document as a change event; the
+   * watcher covers a document whose text model VS Code has not loaded yet.
+   */
+  private watchFile(): void {
+    for (const item of this.watcher) item.dispose();
+    this.watcher = [];
+    const uri = this.uri;
+    if (uri.scheme === 'file' || uri.scheme === 'vscode-vfs' || uri.scheme === 'vscode-test-web') {
+      const directory = vscode.Uri.joinPath(uri, '..');
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, fileName(uri)));
+      this.watcher = [watcher, watcher.onDidChange(() => this.refresher.request()), watcher.onDidCreate(() => this.refresher.request())];
+    }
+  }
+
+  /** The following preview moves to another document (MP-R31): its session is the file's own, so mode, diagram and scroll come back. */
+  showDocument(uri: vscode.Uri): void {
+    if (this.disposed || uri.toString() === this.documentUri) return;
+    const page = this.session.page;
+    this.uri = uri;
+    this.documentUri = uri.toString();
+    this.session = this.sessionFor(uri);
+    this.panel.title = followingTitle(fileName(uri));
+    this.watchFile();
+    this.session.attach(page);
+    void this.keepOpen().then(() => this.refresher.request(SWITCH_DELAY_MS));
+    this.deps.onContextChange();
   }
 
   private resources(webview: vscode.Webview, pageDirectory: vscode.Uri): { cspSource: string; nonce: string; scriptUri: string; styleUri: string; mermaidUri: string; contentUri: string } {
@@ -207,15 +250,15 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
     }
   }
 
-  /** The title bar follows this preview only while it is the active editor. */
-  private publishContext(key: string, value: boolean): void {
-    if (!this.panel.active) return;
-    void vscode.commands.executeCommand('setContext', key, value);
+  /** The host decides what the title bar shows, from the editor active now (MP-R26): a page that changed while this preview was in the background still counts once it is shown. */
+  private publishContext(): void {
+    this.deps.onContextChange();
   }
 
   private viewStateChanged(): void {
     this.startLoadTimer();
     if (this.panel.active) this.deps.onFocus(this);
+    this.deps.onContextChange();
   }
 
   settled(): Promise<void> {
@@ -231,8 +274,9 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
     this.disposed = true;
     if (this.loadTimer !== undefined) clearTimeout(this.loadTimer);
     this.refresher.dispose();
-    this.session.dispose();
-    for (const subscription of this.subscriptions) subscription.dispose();
+    // A remembered session outlives the panel: the next following preview brings it back.
+    if (!this.deps.memory) this.session.dispose();
+    for (const subscription of [...this.subscriptions, ...this.watcher]) subscription.dispose();
     this.textDocument = undefined;
     this.deps.onDispose(this);
   }
@@ -259,6 +303,36 @@ export function registerPreviewEditor(
   /** The mode a command asked for a preview that is still opening; read once when its editor is created. */
   const pendingModes = new Map<string, PreviewMode>();
   let active: PreviewEditor | undefined;
+  /** The window's following preview and what it remembers per file (MP-R31). */
+  let following: PreviewEditor | undefined;
+  const memory = new FollowingMemory<PreviewSession>();
+  let markdownPublished: boolean | undefined;
+
+  /** Whether the following preview is the active editor, by the active tab or, for a tab the host has not listed yet, its panel's flag. */
+  function followingIsActive(): boolean {
+    if (!following) return false;
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (tab) return tab.input instanceof vscode.TabInputWebview && isFollowingViewType(tab.input.viewType);
+    return following.panel.active;
+  }
+
+  /** The preview that is the active editor: the active tab says so, and its panel's own flag covers a tab the host has not listed yet. */
+  function activePreviewUri(): string | undefined {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (tab) return tab.input instanceof vscode.TabInputCustom && tab.input.viewType === PREVIEW_VIEW_TYPE ? tab.input.uri.toString() : undefined;
+    return [...editors].find((editor) => editor.panel.active)?.documentUri;
+  }
+
+  /** Publishes whether the title bar offers Copy as Markdown, once per change (MP-R26); for the following preview too (MP-R31). */
+  function syncMarkdownContext(): void {
+    const lock = followingIsActive();
+    const value = lock && following
+      ? following.session.showsMarkdown
+      : markdownContextValue(activePreviewUri(), [...editors].map((editor) => ({ documentUri: editor.documentUri, showsMarkdown: editor.session.showsMarkdown })));
+    if (value === markdownPublished) return;
+    markdownPublished = value;
+    void vscode.commands.executeCommand('setContext', PREVIEW_MARKDOWN_CONTEXT_KEY, value);
+  }
 
   const provider: vscode.CustomReadonlyEditorProvider = {
     openCustomDocument: (uri) => ({ uri, dispose: () => undefined }),
@@ -267,13 +341,12 @@ export function registerPreviewEditor(
         context, server, logger,
         onDispose: (closed) => {
           editors.delete(closed);
-          if (active === closed) {
-            active = undefined;
-            void vscode.commands.executeCommand('setContext', PREVIEW_MARKDOWN_CONTEXT_KEY, false);
-          }
+          if (active === closed) active = undefined;
+          syncMarkdownContext();
         },
+        onContextChange: syncMarkdownContext,
         initialMode: (documentUri) => { const mode = pendingModes.get(documentUri) ?? 'docs'; pendingModes.delete(documentUri); return mode; },
-        onFocus: (focused) => { active = focused; focused.session.publishActiveMarkdown(); },
+        onFocus: (focused) => { active = focused; },
       });
       editors.add(editor);
       logger.info(`Preview opened for ${fileName(document.uri)}`);
@@ -289,7 +362,7 @@ export function registerPreviewEditor(
       return candidates.find((editor) => editor.documentUri === uri && editor.panel.active) ??
         (active?.documentUri === uri ? active : candidates.find((editor) => editor.documentUri === uri));
     }
-    return candidates.find((editor) => editor.panel.active) ?? active;
+    return [...candidates, ...(following ? [following] : [])].find((editor) => editor.panel.active) ?? active;
   }
 
   function noDocument(argument: unknown): PreviewOpenOutcome {
@@ -319,6 +392,15 @@ export function registerPreviewEditor(
     return { kind: 'opened', documentUri: uri.toString() };
   }
 
+  /** Model Docs beside the text (MP-R27): the preview opens as `openToSide` does, then shows the page, as `openModelDocs` does. */
+  async function openModelDocsToSide(argument: unknown): Promise<PreviewOpenOutcome> {
+    const outcome = await openToSide(argument);
+    if (outcome.kind === 'opened') {
+      for (const editor of [...editors].filter((candidate) => candidate.documentUri === outcome.documentUri)) await editor.session.setPreviewMode('docs');
+    }
+    return outcome;
+  }
+
   async function open(argument: unknown): Promise<PreviewOpenOutcome> {
     const uri = commandDocument(argument, isPreviewableDocument);
     if (!uri) return noDocument(argument);
@@ -339,6 +421,11 @@ export function registerPreviewEditor(
 
   /** Opens the preview and chooses what it shows: the page (Model Docs) or one diagram at a time (ZDL Diagrams, MP-R25). */
   async function openInMode(argument: unknown, mode: PreviewMode): Promise<PreviewOpenOutcome> {
+    if (followingIsActive() && following) {
+      // From inside the following preview, a mode is chosen for the file it shows (MP-R31).
+      if (!await following.session.setPreviewMode(mode)) void vscode.window.showInformationMessage('The language server does not offer ZDL Diagrams.');
+      return { kind: 'opened', documentUri: following.documentUri };
+    }
     const uri = commandDocument(argument, isPreviewableDocument);
     if (mode === 'diagrams') {
       if (uri && !server.previewModes) {
@@ -439,6 +526,66 @@ export function registerPreviewEditor(
     }
   }
 
+  /** One following preview per window, beside the text (MP-R31): the one that exists is revealed and shows the file the command was run on. */
+  async function openFollowing(argument: unknown): Promise<PreviewOpenOutcome> {
+    const uri = commandDocument(argument, (candidate, languageId) => isPreviewableDocument(candidate, languageId) && followsLanguage(languageId, candidate.path));
+    if (following) {
+      following.panel.reveal(undefined, true);
+      if (uri) following.showDocument(uri);
+      return { kind: 'opened', documentUri: following.documentUri };
+    }
+    if (!uri) return noDocument(argument);
+    const title = followingTitle(fileName(uri));
+    const pageDirectory = vscode.Uri.joinPath(context.extensionUri, ...PAGE_DIRECTORY);
+    const panel = vscode.window.createWebviewPanel(FOLLOWING_VIEW_TYPE, title, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [pageDirectory] });
+    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'zenwave-preview-light.svg');
+    const editor = new PreviewEditor(uri, panel, {
+      context, server, logger, memory,
+      onDispose: (closed) => {
+        if (following === closed) following = undefined;
+        if (active === closed) active = undefined;
+        syncMarkdownContext();
+      },
+      onContextChange: syncMarkdownContext,
+      initialMode: () => 'docs',
+      onFocus: (focused) => { active = focused; },
+    });
+    following = editor;
+    logger.info(`Following preview opened for ${fileName(uri)}`);
+    return { kind: 'opened', documentUri: uri.toString() };
+  }
+
+  /** The lock: the following preview becomes the ordinary preview (MP-R3) of the file it shows, in its place. */
+  async function lockFollowing(): Promise<PreviewOpenOutcome> {
+    const editor = following;
+    if (!editor) return { kind: 'no-document' };
+    const uri = vscode.Uri.parse(editor.documentUri, true);
+    const column = editor.panel.viewColumn ?? vscode.ViewColumn.Beside;
+    const mode = editor.session.requestedMode;
+    if (!await reveal(uri, false)) {
+      pendingModes.set(editor.documentUri, mode);
+      const timer = setTimeout(() => pendingModes.delete(editor.documentUri), PENDING_MODE_MS);
+      context.subscriptions.push({ dispose: () => clearTimeout(timer) });
+      await vscode.commands.executeCommand('vscode.openWith', uri, PREVIEW_VIEW_TYPE, { viewColumn: column, preserveFocus: false });
+    }
+    editor.panel.dispose();
+    logger.info(`Following preview locked on ${fileName(uri)}`);
+    return { kind: 'opened', documentUri: uri.toString() };
+  }
+
+  /** The following preview moves with the last focused text editor of a model, and with nothing else (MP-R31). */
+  function editorFocused(editor: vscode.TextEditor | undefined): void {
+    if (!following) return;
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const document = editor?.document;
+    const target = followTarget(
+      editor && document ? { uri: document.uri.toString(), previewable: isPreviewableDocument(document.uri, document.languageId) && followsLanguage(document.languageId, document.uri.path), inDiff: tab?.input instanceof vscode.TabInputTextDiff } : undefined,
+      following.documentUri,
+    );
+    if (target !== undefined && document) following.showDocument(document.uri);
+  }
+
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(PREVIEW_VIEW_TYPE, provider, {
       // A preview keeps its drawing and scroll while its tab is in the background, instead of redrawing on every switch.
@@ -451,16 +598,27 @@ export function registerPreviewEditor(
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openModelDocs, (argument: unknown) => openInMode(argument, 'docs')),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openZdlDiagrams, (argument: unknown) => openInMode(argument, 'diagrams')),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openScriptsDocs, open),
+    // VS Code shows one title per command, so each view has its own "to the side" entry (MP-R27).
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openSequenceDiagramsToSide, openToSide),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openModelDocsToSide, openModelDocsToSide),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openScriptsDocsToSide, openToSide),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.showText, showText),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectDiagram, selectDiagram),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectRenderMode, selectRenderMode),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.copyMarkdown, copyMarkdown),
-    { dispose: () => { for (const editor of [...editors]) editor.dispose(); } },
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.openFollowing, openFollowing),
+    vscode.commands.registerCommand(PREVIEW_COMMANDS.lockFollowing, lockFollowing),
+    vscode.window.onDidChangeActiveTextEditor(editorFocused),
+    // The title bar follows the active editor: a tab change, in any group, is when it may need to change.
+    vscode.window.tabGroups.onDidChangeTabs(syncMarkdownContext),
+    vscode.window.tabGroups.onDidChangeTabGroups(syncMarkdownContext),
+    { dispose: () => { for (const editor of [...editors, ...(following ? [following] : [])]) editor.dispose(); } },
   );
 
   return {
     get editors() { return [...editors]; },
+    get following() { return following; },
     editorsFor: (documentUri) => [...editors].filter((editor) => editor.documentUri === documentUri),
-    get active() { return active && editors.has(active) ? active : undefined; },
+    get active() { return active && (editors.has(active) || active === following) ? active : undefined; },
   };
 }

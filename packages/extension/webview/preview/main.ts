@@ -167,7 +167,25 @@ function showNotice(message: string, source?: string): void {
   view.appendChild(box);
 }
 
+/** A following preview that shows another file again asks for the scroll it had there (MP-R31): applied once per request, after the drawing is in place. */
+let appliedRestore = 0;
+let pendingRestore: { readonly key: number; readonly top: number } | undefined;
+
+function applyRestore(): void {
+  if (!pendingRestore || view.hidden || !drawn) return;
+  view.scrollTop = pendingRestore.top;
+  appliedRestore = pendingRestore.key;
+  pendingRestore = undefined;
+}
+
 async function show(): Promise<void> {
+  const asked = payload;
+  if (asked?.restore && asked.restore.key !== appliedRestore) pendingRestore = asked.restore;
+  await draw();
+  if (payload === asked) applyRestore();
+}
+
+async function draw(): Promise<void> {
   if (!payload) return;
   syncControls(payload);
   const current = payload.representations.find((item) => item.id === payload!.selectedId);
@@ -359,6 +377,7 @@ function showState(state: StatePresentation | null): void {
     stateBox.hidden = true;
     stateBox.className = '';
     view.hidden = false;
+    applyRestore();
     return;
   }
   stateBox.hidden = false;
@@ -497,6 +516,15 @@ window.addEventListener('message', (event: MessageEvent<OutboundMessage>) => {
       probe(message.payload.requestId, message.payload.followLink, message.payload.copyMermaid);
       return;
   }
+});
+
+let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+view.addEventListener('scroll', () => {
+  if (scrollTimer !== undefined) clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    scrollTimer = undefined;
+    post({ type: 'zenwave.preview.scrolled', payload: { top: view.scrollTop, key: appliedRestore } });
+  }, 100);
 });
 
 groupSelect.addEventListener('change', () => post({ type: 'zenwave.preview.selectGroup', payload: { group: groupSelect.value } }));

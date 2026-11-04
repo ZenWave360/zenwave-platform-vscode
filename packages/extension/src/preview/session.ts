@@ -33,9 +33,20 @@ export interface PreviewSessionPorts {
 }
 
 const POSTED_HISTORY = 200;
+let nextRestoreKey = 1;
 
 /** Title-bar and palette `when`: the preview on screen is a Markdown page (MP-R26). */
 export const PREVIEW_MARKDOWN_CONTEXT_KEY = 'zenwave.previewMarkdownAvailable';
+
+/**
+ * Whether the title bar offers Copy as Markdown: the active editor is a preview and its page is Markdown (MP-R26).
+ * Computed from the editor that is active now, not from the last focus event, so the answer cannot go stale.
+ */
+export function markdownContextValue(activeDocumentUri: string | undefined, previews: Iterable<{ readonly documentUri: string; readonly showsMarkdown: boolean }>): boolean {
+  if (activeDocumentUri === undefined) return false;
+  for (const preview of previews) if (preview.documentUri === activeDocumentUri) return preview.showsMarkdown;
+  return false;
+}
 
 /**
  * One preview editor's relay between the language server and the preview page.
@@ -58,6 +69,10 @@ export class PreviewSession {
   /** The last good set, in the server's order. */
   representations: readonly PageRepresentation[] = [];
   defaultRepresentationId: string | undefined;
+  /** Where the page was scrolled to last, for a following preview that comes back to this file (MP-R31). */
+  scrollTop = 0;
+  /** The scroll the page is still to apply after `attach`; each render carries it until the page reports from it. */
+  private restore: { readonly key: number; readonly top: number } | undefined;
   /** The last `render` payload posted. */
   lastRender: RenderPayload | undefined;
   /** `zenwave/preview` requests issued. */
@@ -102,6 +117,11 @@ export class PreviewSession {
 
   get hasPreview(): boolean {
     return this.representations.length > 0;
+  }
+
+  /** Whether the page on screen is Markdown (MP-R26). */
+  get showsMarkdown(): boolean {
+    return this.markdownPage !== undefined;
   }
 
   /** The Markdown page on screen, exactly as the server sent it. Nothing when the page is not Markdown (MP-R26). */
@@ -200,6 +220,7 @@ export class PreviewSession {
     this.requestedMode = mode;
     this.selectedId = undefined;
     this.representations = [];
+    this.updateMarkdownContext();
     await this.refresh();
     return true;
   }
@@ -215,17 +236,25 @@ export class PreviewSession {
     return true;
   }
 
-  /** This preview became the active editor, so the title bar follows its page even when the page did not just change. */
-  publishActiveMarkdown(): void {
-    this.updateMarkdownContext(true);
-  }
-
   /** Changes how sequence variants are rendered and asks the server again with the new mode (MP-R11). */
   async setRenderMode(mode: RenderMode): Promise<void> {
     if (!this.ports.hasRenderMode || this.renderMode === mode) return;
     this.renderMode = mode;
     this.renderIfReady();
     await this.refresh();
+  }
+
+  /**
+   * A following preview shows this session's file again (MP-R31): the page in the panel is ready already or not,
+   * whatever it drew belongs to another file, so the state and the last good drawing are sent again, at the scroll
+   * the page had here.
+   */
+  attach(page: PreviewPageState): void {
+    if (this.disposed) return;
+    this.page = page;
+    this.restore = { key: nextRestoreKey++, top: this.scrollTop };
+    this.present(true);
+    this.renderIfReady();
   }
 
   /** Something the webview posted. */
@@ -247,6 +276,12 @@ export class PreviewSession {
         return;
       case 'zenwave.preview.selectRenderMode':
         void this.setRenderMode(message.payload.mode);
+        return;
+      case 'zenwave.preview.scrolled':
+        if (this.restore === undefined || message.payload.key === this.restore.key) {
+          this.scrollTop = message.payload.top;
+          this.restore = undefined;
+        }
         return;
       case 'zenwave.preview.diagramFailed':
         this.ports.log.warn(`Preview of ${this.ports.fileName}: ${message.payload.id} could not be drawn: ${message.payload.message}`);
@@ -316,6 +351,7 @@ export class PreviewSession {
       showRenderMode: this.ports.hasRenderMode,
       groups: this.groups,
       ...(this.selectedGroup === undefined ? {} : { selectedGroup: this.selectedGroup }),
+      ...(this.restore === undefined ? {} : { restore: this.restore }),
     };
     this.lastRender = payload;
     this.post({ type: 'zenwave.preview.render', payload });
@@ -339,10 +375,10 @@ export class PreviewSession {
     this.post({ type: 'zenwave.host.state', payload: presentation });
   }
 
-  /** Publishes whether the page on screen is Markdown. `force` republishes the current value. */
-  private updateMarkdownContext(force = false): void {
+  /** Tells the host when whether the page on screen is Markdown changes; the host decides what the title bar shows (MP-R26). */
+  private updateMarkdownContext(): void {
     const showing = this.markdownPage !== undefined;
-    if (!force && showing === this.markdownShown) return;
+    if (showing === this.markdownShown) return;
     this.markdownShown = showing;
     this.ports.setContext(PREVIEW_MARKDOWN_CONTEXT_KEY, showing);
   }
