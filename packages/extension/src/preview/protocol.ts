@@ -9,6 +9,8 @@ import type { StatePresentation } from '../eventflow/protocol.js';
 
 /** The custom editor's view type. */
 export const PREVIEW_VIEW_TYPE = 'zenwave.preview';
+/** The following preview's panel type (MP-R31). */
+export const FOLLOWING_VIEW_TYPE = 'zenwave.previewFollowing';
 
 /** How the server renders ZFL sequence variants (`zenwave/preview` `sequenceRenderMode`). */
 export type RenderMode = 'ALT_BLOCKS' | 'SEPARATE_VARIANTS';
@@ -53,6 +55,8 @@ export interface RenderPayload {
   readonly groups: readonly string[];
   /** The kind shown now; the Element selector lists that kind's representations. Absent when not grouped. */
   readonly selectedGroup?: string;
+  /** Where to put the scroll once this page is drawn: a following preview that shows another file again (MP-R31). The page applies each key once. */
+  readonly restore?: { readonly key: number; readonly top: number };
 }
 
 /** Host to page. */
@@ -140,6 +144,8 @@ export type InboundMessage =
   | { readonly type: 'zenwave.preview.diagramFailed'; readonly payload: { readonly id: string; readonly message: string } }
   | { readonly type: 'zenwave.preview.copyMermaid'; readonly payload: { readonly content: string } }
   | { readonly type: 'zenwave.preview.followLink'; readonly payload: { readonly href: string } }
+  /** The page was scrolled; `key` is the last `restore` it applied, so a report from before a file switch is told apart (MP-R31). */
+  | { readonly type: 'zenwave.preview.scrolled'; readonly payload: { readonly top: number; readonly key: number } }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
   | { readonly type: 'zenwave.host.action'; readonly payload: { readonly command: string } }
   | { readonly type: 'zenwave.host.probeResult'; readonly payload: PreviewProbe & { readonly requestId: number } };
@@ -163,6 +169,8 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
       return typeof object?.content === 'string' ? { type, payload: { content: object.content } } : undefined;
     case 'zenwave.preview.followLink':
       return typeof object?.href === 'string' ? { type, payload: { href: object.href } } : undefined;
+    case 'zenwave.preview.scrolled':
+      return typeof object?.top === 'number' && typeof object.key === 'number' ? { type, payload: { top: object.top, key: object.key } } : undefined;
     case 'zenwave.host.loadError':
       return { type, payload: { message: typeof object?.message === 'string' ? object.message : 'unknown error' } };
     case 'zenwave.host.action':

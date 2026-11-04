@@ -7,7 +7,7 @@ import type { Preview, PreviewMode, SequenceRenderMode } from '../../src/lsp/req
 import type { RequestResult } from '../../src/lsp/supervisor.js';
 import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from '../../src/preview/page.js';
 import { decidePreviewLink } from '../../src/preview/links.js';
-import { inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
+import { FOLLOWING_VIEW_TYPE, inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
 import { outcomeOf, reselect } from '../../src/preview/selection.js';
 import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from '../../src/preview/session.js';
 import { PREVIEW_STATE_KINDS, presentPreviewState, type PreviewDataState } from '../../src/preview/state.js';
@@ -404,7 +404,7 @@ test('the manifest registers an optional preview editor and names each supported
   const submenus = title.filter((item) => item.submenu);
   assert.deepEqual(submenus.map((item) => item.submenu).sort(), ['zenwave.zdlViews', 'zenwave.zflViews', 'zenwave.zwViews']);
   for (const submenu of submenus) assert.match(submenu.when, /!isInDiffEditor/, 'no preview is offered in a diff (MP-Q4)');
-  assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.') && item.command !== 'zenwave.preview.copyMarkdown'), 'the preview has no title-bar icon of its own besides Copy as Markdown');
+  assert.ok(!title.some((item) => item.command?.startsWith('zenwave.preview.') && item.command !== 'zenwave.preview.copyMarkdown' && item.command !== 'zenwave.preview.lockFollowing'), 'the preview has no title-bar icon of its own besides Copy as Markdown and the lock of the following preview');
   const menus = contributes.menus as Record<string, { command: string; when: string }[]>;
   const opens = (submenu: string) => menus[submenu]!.map((entry) => entry.command).filter((command) => !command.endsWith('.showText'));
   assert.deepEqual(opens('zenwave.zflViews'), ['zenwave.eventflow.open', 'zenwave.eventflow.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openSequenceDiagramsToSide']);
@@ -441,7 +441,7 @@ test('copy as markdown is on the title bar and in the palette only while that pr
   assert.equal(copy?.title, 'Copy as Markdown');
   assert.equal(copy?.category, 'ZenWave');
   assert.equal(copy?.icon, '$(copy)');
-  const when = `activeCustomEditorId == ${PREVIEW_VIEW_TYPE} && ${PREVIEW_MARKDOWN_CONTEXT_KEY}`;
+  const when = `(activeCustomEditorId == ${PREVIEW_VIEW_TYPE} || activeWebviewPanelId == ${FOLLOWING_VIEW_TYPE}) && ${PREVIEW_MARKDOWN_CONTEXT_KEY}`;
   const title = manifest.contributes.menus['editor/title'] as { command?: string; when: string; group?: string }[];
   const button = title.filter((item) => item.command === 'zenwave.preview.copyMarkdown');
   assert.deepEqual(button.map((item) => [item.when, item.group]), [[when, 'navigation@100']]);

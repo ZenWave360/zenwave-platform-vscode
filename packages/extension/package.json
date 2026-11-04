@@ -472,6 +472,17 @@
         "title": "Copy as Markdown",
         "category": "ZenWave",
         "icon": "$(copy)"
+      },
+      {
+        "command": "zenwave.preview.openFollowing",
+        "title": "Open Following Preview",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.preview.lockFollowing",
+        "title": "Lock Following Preview on This File",
+        "category": "ZenWave",
+        "icon": "$(lock)"
       }
     ],
     "menus": {
@@ -590,11 +601,11 @@
         },
         {
           "command": "zenwave.preview.openModelDocs",
-          "when": "(editorLangId == zdl || resourceExtname == .zdl) && !isInDiffEditor"
+          "when": "((editorLangId == zdl || resourceExtname == .zdl) && !isInDiffEditor) || activeWebviewPanelId == zenwave.previewFollowing"
         },
         {
           "command": "zenwave.preview.openZdlDiagrams",
-          "when": "(editorLangId == zdl || resourceExtname == .zdl) && zenwave.previewModesAvailable && !isInDiffEditor"
+          "when": "((editorLangId == zdl || resourceExtname == .zdl) && !isInDiffEditor || activeWebviewPanelId == zenwave.previewFollowing) && zenwave.previewModesAvailable"
         },
         {
           "command": "zenwave.preview.openScriptsDocs",
@@ -606,15 +617,23 @@
         },
         {
           "command": "zenwave.preview.selectDiagram",
-          "when": "activeCustomEditorId == zenwave.preview"
+          "when": "activeCustomEditorId == zenwave.preview || activeWebviewPanelId == zenwave.previewFollowing"
         },
         {
           "command": "zenwave.preview.selectRenderMode",
-          "when": "activeCustomEditorId == zenwave.preview && resourceExtname == .zfl"
+          "when": "(activeCustomEditorId == zenwave.preview && resourceExtname == .zfl) || activeWebviewPanelId == zenwave.previewFollowing"
         },
         {
           "command": "zenwave.preview.copyMarkdown",
-          "when": "activeCustomEditorId == zenwave.preview && zenwave.previewMarkdownAvailable"
+          "when": "(activeCustomEditorId == zenwave.preview || activeWebviewPanelId == zenwave.previewFollowing) && zenwave.previewMarkdownAvailable"
+        },
+        {
+          "command": "zenwave.preview.openFollowing",
+          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && !isInDiffEditor"
+        },
+        {
+          "command": "zenwave.preview.lockFollowing",
+          "when": "activeWebviewPanelId == zenwave.previewFollowing"
         }
       ],
       "editor/context": [
@@ -701,8 +720,13 @@
         },
         {
           "command": "zenwave.preview.copyMarkdown",
-          "when": "activeCustomEditorId == zenwave.preview && zenwave.previewMarkdownAvailable",
+          "when": "(activeCustomEditorId == zenwave.preview || activeWebviewPanelId == zenwave.previewFollowing) && zenwave.previewMarkdownAvailable",
           "group": "navigation@100"
+        },
+        {
+          "command": "zenwave.preview.lockFollowing",
+          "when": "activeWebviewPanelId == zenwave.previewFollowing",
+          "group": "navigation@101"
         }
       ],
       "zenwave.zflViews": [

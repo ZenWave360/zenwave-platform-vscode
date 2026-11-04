@@ -33,6 +33,7 @@ export interface PreviewSessionPorts {
 }
 
 const POSTED_HISTORY = 200;
+let nextRestoreKey = 1;
 
 /** Title-bar and palette `when`: the preview on screen is a Markdown page (MP-R26). */
 export const PREVIEW_MARKDOWN_CONTEXT_KEY = 'zenwave.previewMarkdownAvailable';
@@ -68,6 +69,10 @@ export class PreviewSession {
   /** The last good set, in the server's order. */
   representations: readonly PageRepresentation[] = [];
   defaultRepresentationId: string | undefined;
+  /** Where the page was scrolled to last, for a following preview that comes back to this file (MP-R31). */
+  scrollTop = 0;
+  /** The scroll the page is still to apply after `attach`; each render carries it until the page reports from it. */
+  private restore: { readonly key: number; readonly top: number } | undefined;
   /** The last `render` payload posted. */
   lastRender: RenderPayload | undefined;
   /** `zenwave/preview` requests issued. */
@@ -239,6 +244,19 @@ export class PreviewSession {
     await this.refresh();
   }
 
+  /**
+   * A following preview shows this session's file again (MP-R31): the page in the panel is ready already or not,
+   * whatever it drew belongs to another file, so the state and the last good drawing are sent again, at the scroll
+   * the page had here.
+   */
+  attach(page: PreviewPageState): void {
+    if (this.disposed) return;
+    this.page = page;
+    this.restore = { key: nextRestoreKey++, top: this.scrollTop };
+    this.present(true);
+    this.renderIfReady();
+  }
+
   /** Something the webview posted. */
   receive(raw: unknown): void {
     const message = inboundMessage(raw);
@@ -258,6 +276,12 @@ export class PreviewSession {
         return;
       case 'zenwave.preview.selectRenderMode':
         void this.setRenderMode(message.payload.mode);
+        return;
+      case 'zenwave.preview.scrolled':
+        if (this.restore === undefined || message.payload.key === this.restore.key) {
+          this.scrollTop = message.payload.top;
+          this.restore = undefined;
+        }
         return;
       case 'zenwave.preview.diagramFailed':
         this.ports.log.warn(`Preview of ${this.ports.fileName}: ${message.payload.id} could not be drawn: ${message.payload.message}`);
@@ -327,6 +351,7 @@ export class PreviewSession {
       showRenderMode: this.ports.hasRenderMode,
       groups: this.groups,
       ...(this.selectedGroup === undefined ? {} : { selectedGroup: this.selectedGroup }),
+      ...(this.restore === undefined ? {} : { restore: this.restore }),
     };
     this.lastRender = payload;
     this.post({ type: 'zenwave.preview.render', payload });
