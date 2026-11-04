@@ -127,18 +127,22 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
   /** The session of a document: the remembered one for a following preview (MP-R31), a new one otherwise. */
   private sessionFor(uri: vscode.Uri): PreviewSession {
     const create = (): PreviewSession => {
-      const session: PreviewSession = new PreviewSession({
+      // Held outside the session: it posts its first state from its constructor, before `new` returns.
+      const built: { session?: PreviewSession } = {};
+      const session = new PreviewSession({
         documentUri: uri.toString(),
         fileName: fileName(uri),
         hasRenderMode: hasRenderMode(uri),
         preview: (target, renderMode, mode) => this.deps.server.requests.preview(target, renderMode, mode),
         diagramsAvailable: () => hasDiagrams(uri) && this.deps.server.previewModes,
-        // A session that is not the one on screen, or a panel that is gone, has nobody to tell.
-        post: (message) => this.disposed || this.session !== session ? Promise.resolve(false) : this.panel.webview.postMessage(message),
+        // A session that is not the one on screen, or a panel that is gone, has nobody to tell. While the editor's first
+        // session is being built there is no other on screen, so its first state goes out as it did before MP-R31.
+        post: (message) => this.disposed || (this.session !== undefined && this.session !== built.session) ? Promise.resolve(false) : this.panel.webview.postMessage(message),
         runCommand: (command) => { void vscode.commands.executeCommand(command); },
         setContext: () => this.publishContext(),
         log: this.deps.logger,
       });
+      built.session = session;
       session.requestedMode = this.deps.initialMode(uri.toString());
       return session;
     };
