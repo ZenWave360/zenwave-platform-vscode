@@ -9,7 +9,7 @@ import { buildFailedHtml, buildPreviewHtml } from './page.js';
 import { decidePreviewLink } from './links.js';
 import type { PreviewMode } from '../lsp/requests.js';
 import { PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
-import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession } from './session.js';
+import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from './session.js';
 
 export const PREVIEW_COMMANDS = {
   open: 'zenwave.preview.open',
@@ -86,7 +86,7 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
   constructor(
     private readonly uri: vscode.Uri,
     readonly panel: vscode.WebviewPanel,
-    private readonly deps: { readonly context: vscode.ExtensionContext; readonly server: LanguageServerApi; readonly logger: Logger; readonly onDispose: (editor: PreviewEditor) => void; readonly onFocus: (editor: PreviewEditor) => void; readonly initialMode: (documentUri: string) => PreviewMode },
+    private readonly deps: { readonly context: vscode.ExtensionContext; readonly server: LanguageServerApi; readonly logger: Logger; readonly onDispose: (editor: PreviewEditor) => void; readonly onFocus: (editor: PreviewEditor) => void; readonly onContextChange: () => void; readonly initialMode: (documentUri: string) => PreviewMode },
   ) {
     this.documentUri = uri.toString();
     const webview = panel.webview;
@@ -100,7 +100,7 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
       diagramsAvailable: () => hasDiagrams(uri) && deps.server.previewModes,
       post: (message) => webview.postMessage(message),
       runCommand: (command) => { void vscode.commands.executeCommand(command); },
-      setContext: (key, value) => this.publishContext(key, value),
+      setContext: () => this.publishContext(),
       log: deps.logger,
     });
     this.session.requestedMode = deps.initialMode(this.documentUri);
@@ -210,15 +210,15 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
     }
   }
 
-  /** The title bar follows this preview only while it is the active editor. */
-  private publishContext(key: string, value: boolean): void {
-    if (!this.panel.active) return;
-    void vscode.commands.executeCommand('setContext', key, value);
+  /** The host decides what the title bar shows, from the editor active now (MP-R26): a page that changed while this preview was in the background still counts once it is shown. */
+  private publishContext(): void {
+    this.deps.onContextChange();
   }
 
   private viewStateChanged(): void {
     this.startLoadTimer();
     if (this.panel.active) this.deps.onFocus(this);
+    this.deps.onContextChange();
   }
 
   settled(): Promise<void> {
@@ -262,6 +262,22 @@ export function registerPreviewEditor(
   /** The mode a command asked for a preview that is still opening; read once when its editor is created. */
   const pendingModes = new Map<string, PreviewMode>();
   let active: PreviewEditor | undefined;
+  let markdownPublished: boolean | undefined;
+
+  /** The preview that is the active editor: the active tab says so, and its panel's own flag covers a tab the host has not listed yet. */
+  function activePreviewUri(): string | undefined {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (tab) return tab.input instanceof vscode.TabInputCustom && tab.input.viewType === PREVIEW_VIEW_TYPE ? tab.input.uri.toString() : undefined;
+    return [...editors].find((editor) => editor.panel.active)?.documentUri;
+  }
+
+  /** Publishes whether the title bar offers Copy as Markdown, once per change (MP-R26). */
+  function syncMarkdownContext(): void {
+    const value = markdownContextValue(activePreviewUri(), [...editors].map((editor) => ({ documentUri: editor.documentUri, showsMarkdown: editor.session.showsMarkdown })));
+    if (value === markdownPublished) return;
+    markdownPublished = value;
+    void vscode.commands.executeCommand('setContext', PREVIEW_MARKDOWN_CONTEXT_KEY, value);
+  }
 
   const provider: vscode.CustomReadonlyEditorProvider = {
     openCustomDocument: (uri) => ({ uri, dispose: () => undefined }),
@@ -270,13 +286,12 @@ export function registerPreviewEditor(
         context, server, logger,
         onDispose: (closed) => {
           editors.delete(closed);
-          if (active === closed) {
-            active = undefined;
-            void vscode.commands.executeCommand('setContext', PREVIEW_MARKDOWN_CONTEXT_KEY, false);
-          }
+          if (active === closed) active = undefined;
+          syncMarkdownContext();
         },
+        onContextChange: syncMarkdownContext,
         initialMode: (documentUri) => { const mode = pendingModes.get(documentUri) ?? 'docs'; pendingModes.delete(documentUri); return mode; },
-        onFocus: (focused) => { active = focused; focused.session.publishActiveMarkdown(); },
+        onFocus: (focused) => { active = focused; },
       });
       editors.add(editor);
       logger.info(`Preview opened for ${fileName(document.uri)}`);
@@ -471,6 +486,9 @@ export function registerPreviewEditor(
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectDiagram, selectDiagram),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.selectRenderMode, selectRenderMode),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.copyMarkdown, copyMarkdown),
+    // The title bar follows the active editor: a tab change, in any group, is when it may need to change.
+    vscode.window.tabGroups.onDidChangeTabs(syncMarkdownContext),
+    vscode.window.tabGroups.onDidChangeTabGroups(syncMarkdownContext),
     { dispose: () => { for (const editor of [...editors]) editor.dispose(); } },
   );
 

@@ -38,6 +38,16 @@ const POSTED_HISTORY = 200;
 export const PREVIEW_MARKDOWN_CONTEXT_KEY = 'zenwave.previewMarkdownAvailable';
 
 /**
+ * Whether the title bar offers Copy as Markdown: the active editor is a preview and its page is Markdown (MP-R26).
+ * Computed from the editor that is active now, not from the last focus event, so the answer cannot go stale.
+ */
+export function markdownContextValue(activeDocumentUri: string | undefined, previews: Iterable<{ readonly documentUri: string; readonly showsMarkdown: boolean }>): boolean {
+  if (activeDocumentUri === undefined) return false;
+  for (const preview of previews) if (preview.documentUri === activeDocumentUri) return preview.showsMarkdown;
+  return false;
+}
+
+/**
  * One preview editor's relay between the language server and the preview page.
  * Holds no editor API, so the rules are unit-tested with fakes.
  *
@@ -102,6 +112,11 @@ export class PreviewSession {
 
   get hasPreview(): boolean {
     return this.representations.length > 0;
+  }
+
+  /** Whether the page on screen is Markdown (MP-R26). */
+  get showsMarkdown(): boolean {
+    return this.markdownPage !== undefined;
   }
 
   /** The Markdown page on screen, exactly as the server sent it. Nothing when the page is not Markdown (MP-R26). */
@@ -200,6 +215,7 @@ export class PreviewSession {
     this.requestedMode = mode;
     this.selectedId = undefined;
     this.representations = [];
+    this.updateMarkdownContext();
     await this.refresh();
     return true;
   }
@@ -213,11 +229,6 @@ export class PreviewSession {
     if (content === undefined) return false;
     await writeText(content);
     return true;
-  }
-
-  /** This preview became the active editor, so the title bar follows its page even when the page did not just change. */
-  publishActiveMarkdown(): void {
-    this.updateMarkdownContext(true);
   }
 
   /** Changes how sequence variants are rendered and asks the server again with the new mode (MP-R11). */
@@ -339,10 +350,10 @@ export class PreviewSession {
     this.post({ type: 'zenwave.host.state', payload: presentation });
   }
 
-  /** Publishes whether the page on screen is Markdown. `force` republishes the current value. */
-  private updateMarkdownContext(force = false): void {
+  /** Tells the host when whether the page on screen is Markdown changes; the host decides what the title bar shows (MP-R26). */
+  private updateMarkdownContext(): void {
     const showing = this.markdownPage !== undefined;
-    if (!force && showing === this.markdownShown) return;
+    if (showing === this.markdownShown) return;
     this.markdownShown = showing;
     this.ports.setContext(PREVIEW_MARKDOWN_CONTEXT_KEY, showing);
   }

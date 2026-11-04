@@ -9,7 +9,7 @@ import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from 
 import { decidePreviewLink } from '../../src/preview/links.js';
 import { inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
 import { outcomeOf, reselect } from '../../src/preview/selection.js';
-import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession } from '../../src/preview/session.js';
+import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from '../../src/preview/session.js';
 import { PREVIEW_STATE_KINDS, presentPreviewState, type PreviewDataState } from '../../src/preview/state.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -294,8 +294,7 @@ test('copy as markdown writes the page the server sent, and a diagram page write
   assert.deepEqual(diagram.markdownContext, []);
   assert.equal(await diagram.session.copyMarkdown(write), false);
   assert.deepEqual(written, [page], 'a diagram page writes nothing');
-  diagram.session.publishActiveMarkdown();
-  assert.deepEqual(diagram.markdownContext, [false], 'a diagram preview clears the markdown context when it is the one on screen');
+  assert.equal(diagram.session.showsMarkdown, false);
 
   let answer: Preview = { representations: [markdown, chart], defaultRepresentationId: 'docs' };
   const mixed = harness(() => ok(answer), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
@@ -460,6 +459,38 @@ test('every table of a Markdown page is as wide as the page, whatever its conten
   assert.ok(rule, 'a rule for .document table');
   assert.match(rule, /width:\s*100%\s*!important;/);
   assert.match(rule, /display:\s*table;/, 'the table itself, not a block around it, is stretched');
+});
+
+test('the Copy as Markdown button follows the editor that is active, whatever order the events came in (MP-R26)', async () => {
+  const docs = { id: 'docs', title: 'Model Docs', format: 'MARKDOWN' as const, content: '# Orders\n' };
+  const side = harness(() => ok({ representations: [docs], defaultRepresentationId: 'docs' }), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
+  const diagram = harness(() => ok(ALT));
+  // Opened to the side without focus: its page arrives while it is not the active editor.
+  side.session.receive(READY);
+  await side.session.refresh();
+  diagram.session.receive(READY);
+  await diagram.session.refresh();
+  const previews = [
+    { documentUri: 'file:///workspace/orders.zdl', get showsMarkdown() { return side.session.showsMarkdown; } },
+    { documentUri: ZFL, get showsMarkdown() { return diagram.session.showsMarkdown; } },
+  ];
+  assert.equal(markdownContextValue(undefined, previews), false, 'a text editor is active');
+  assert.equal(markdownContextValue('file:///workspace/other.zdl', previews), false, 'an editor that is no preview of ours');
+  assert.equal(markdownContextValue(ZFL, previews), false, 'a diagram preview has no button');
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', previews), true, 'clicking the side preview shows the button, though its page arrived earlier');
+  // The page changes to a diagram while the preview stays active, and back.
+  const withChart = harness(() => ok({ representations: [docs, mermaid('classes', 'Classes')], defaultRepresentationId: 'docs' }), { hasRenderMode: false, uri: 'file:///workspace/orders.zdl', fileName: 'orders.zdl' });
+  withChart.session.receive(READY);
+  await withChart.session.refresh();
+  const one = [{ documentUri: 'file:///workspace/orders.zdl', get showsMarkdown() { return withChart.session.showsMarkdown; } }];
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', one), true);
+  withChart.session.selectRepresentation('classes');
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', one), false);
+  withChart.session.selectRepresentation('docs');
+  assert.equal(markdownContextValue('file:///workspace/orders.zdl', one), true);
+  await withChart.session.setPreviewMode('docs');
+  assert.deepEqual(withChart.markdownContext, [true, false, true]);
+  assert.equal(markdownContextValue('file:///workspace/gone.zdl', []), false, 'a closed preview leaves nothing to show');
 });
 
 test('the preview keybindings are scoped to model editors and cannot reach the built-in Markdown preview', () => {
