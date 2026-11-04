@@ -25,7 +25,7 @@ import {
 import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource } from './plugin-catalogue.js';
 import { ZenwaveRequests } from './requests.js';
 import { languageServerStatus, presentStatus, type LanguageServerStatus } from './status.js';
-import { advertisedOrganizeModes, LspSupervisor, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
+import { advertisedFlowVariants, advertisedOrganizeModes, LspSupervisor, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
 
 /** Context keys for `when` clauses. */
 export const LSP_CONTEXT_KEYS = {
@@ -63,6 +63,8 @@ export interface LanguageServerApi {
   readonly previewModes: boolean;
   /** The connected server accepts `mode` on `zenwave/organizeZflServices`. False when none is connected. */
   readonly organizeModes: boolean;
+  /** The connected server lists flow `variants` and accepts `variant` on `zenwave/eventFlowViews`. False when none is connected. */
+  readonly flowVariants: boolean;
   readonly serverInfo: { readonly name: string; readonly version?: string } | undefined;
   readonly requests: ZenwaveRequests;
   /** Issue any `zenwave/*` request; answers with the four-way result, never throws. */
@@ -315,6 +317,7 @@ export function registerLanguageServer(
     get advertisedRequests() { return [...supervisor.advertisedRequests]; },
     get previewModes() { return status().kind === 'connected' && previewModesAdvertised(supervisor.initializeResult); },
     get organizeModes() { return status().kind === 'connected' && advertisedOrganizeModes(supervisor.initializeResult); },
+    get flowVariants() { return status().kind === 'connected' && advertisedFlowVariants(supervisor.initializeResult); },
     get serverInfo() { return serverInfo(); },
     requests,
     request,

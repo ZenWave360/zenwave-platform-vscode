@@ -29,6 +29,7 @@ test('every request the server advertises today has a wrapper sending the wire p
   await requests.organizeZflServices('file:///w/a.zfl', 'full');
   await requests.organizeZflServices('file:///w/a.zfl', 'additive');
   await requests.eventFlowViews('file:///w/a.zfl');
+  await requests.eventFlowViews('file:///w/a.zfl', 'happy');
   await requests.preview('file:///w/a.zfl');
   await requests.preview('file:///w/a.zfl', 'SEPARATE_VARIANTS');
   await requests.symbolAt('file:///w/a.zfl', { line: 14, character: 30 });
@@ -40,6 +41,7 @@ test('every request the server advertises today has a wrapper sending the wire p
     { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl', mode: 'full' } },
     { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl', mode: 'additive' } },
     { method: 'zenwave/eventFlowViews', params: { textDocument: { uri: 'file:///w/a.zfl' } } },
+    { method: 'zenwave/eventFlowViews', params: { textDocument: { uri: 'file:///w/a.zfl' }, variant: 'happy' } },
     { method: 'zenwave/preview', params: { textDocument: { uri: 'file:///w/a.zfl' } } },
     { method: 'zenwave/preview', params: { textDocument: { uri: 'file:///w/a.zfl' }, sequenceRenderMode: 'SEPARATE_VARIANTS' } },
     { method: 'zenwave/symbolAt', params: { textDocument: { uri: 'file:///w/a.zfl' }, position: { line: 14, character: 30 } } },

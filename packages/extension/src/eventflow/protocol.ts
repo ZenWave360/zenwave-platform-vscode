@@ -35,6 +35,10 @@ export type PageMessage =
        * so this is the document URI.
        */
       readonly diagramId: string;
+      /** Only when the server advertised `flowVariants`; the dropdown is absent otherwise (EF-R12). */
+      readonly variants?: readonly { readonly id: string; readonly title: string }[];
+      /** The variant `flowGraph` shows, or `null` for the full diagram. Sent with `variants`. */
+      readonly variant?: string | null;
     };
   }
   | { readonly type: 'setViewMode'; readonly payload: { readonly viewMode: ViewMode } }
@@ -110,6 +114,7 @@ export function readiness(payload: unknown): Readiness {
 /** Inbound messages from the page and the host script, by type. Anything else is ignored. */
 export type InboundMessage =
   | { readonly type: 'viewModeChanged'; readonly payload: { readonly viewMode: ViewMode } }
+  | { readonly type: 'variantChanged'; readonly payload: { readonly variant: string | null } }
   | { readonly type: 'webviewReady'; readonly payload?: unknown }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
   | { readonly type: 'zenwave.host.action'; readonly payload: { readonly command: string } }
@@ -125,6 +130,8 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
     case 'viewModeChanged':
       // Only the two known views; anything else is ignored like an unknown message.
       return object?.viewMode === 'flow' || object?.viewMode === 'services' ? { type, payload: { viewMode: object.viewMode } } : undefined;
+    case 'variantChanged':
+      return typeof object?.variant === 'string' || object?.variant === null ? { type, payload: { variant: object.variant } } : undefined;
     case 'zenwave.host.loadError':
       return { type, payload: { message: typeof object?.message === 'string' ? object.message : 'unknown error' } };
     case 'zenwave.host.action':
