@@ -339,14 +339,16 @@ function fill(select: HTMLSelectElement, options: readonly { readonly value: str
 function syncControls(current: RenderPayload): void {
   renderModeField.hidden = !current.showRenderMode;
   // A grouped set (ZDL Diagrams): Show picks the kind, Element one of that kind. A selector with no real choice is hidden (MP-R25).
-  const grouped = current.groups.length > 0 && current.selectedGroup !== undefined;
+  // A message without groups (an older host, or a test) is an ungrouped set.
+  const groups: readonly string[] = current.groups ?? [];
+  const grouped = groups.length > 0 && current.selectedGroup !== undefined;
   const elements = grouped ? current.representations.filter((item) => item.group === current.selectedGroup) : current.representations;
-  groupField.hidden = current.groups.length <= 1;
+  groupField.hidden = groups.length <= 1;
   diagramField.hidden = elements.length <= 1;
   diagramLabel.textContent = grouped ? 'Element' : 'Diagram';
   controls.hidden = renderModeField.hidden && groupField.hidden && diagramField.hidden;
   fill(renderModeSelect, RENDER_MODES, current.renderMode);
-  fill(groupSelect, current.groups.map((group) => ({ value: group, label: group })), current.selectedGroup ?? '');
+  fill(groupSelect, groups.map((group) => ({ value: group, label: group })), current.selectedGroup ?? '');
   fill(diagramSelect, elements.map((item: PageRepresentation) => ({ value: item.id, label: item.title })), current.selectedId);
 }
 
