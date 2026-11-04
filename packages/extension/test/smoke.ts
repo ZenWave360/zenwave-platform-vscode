@@ -735,11 +735,9 @@ async function eventflowDiagrams(api: LanguageServerApi, explorer: ModelExplorer
     `Controls were not relayed: ${flow.session.posted.join()}`);
   console.log('PASS: the title-bar toggles switch this diagram to the service view and to labels as written');
 
-  // EF-R3: the page's own selector and the title-bar toggle end in the same state. A page without a selector (the
-  // published 0.1.0) has nothing to drive, so these checks are skipped, not failed.
-  if ((await flow.probe()).viewSelector === undefined) {
-    console.log('SKIP: the EventFlow page has no view selector (webview/ page, pin 0.1.0): selector, viewModeChanged and context key checks not run');
-  } else {
+  // EF-R3: the page's own selector and the title-bar toggle end in the same state.
+  assert((await flow.probe()).viewSelector !== undefined, 'The EventFlow page has no view selector: the shipped page must be webview-toolbar/');
+  {
     const selectorShows = (view: string) => async () => (await flow.probe()).viewSelector === view;
     const drawsFlow = async () => { const probe = await flow.probe(); return flowIds.every((id) => probe.nodeIds.includes(id)); };
     await waitFor(selectorShows('services'), 'The selector did not follow the title-bar command to services', 15000);
