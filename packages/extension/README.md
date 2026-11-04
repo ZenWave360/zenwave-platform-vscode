@@ -131,7 +131,7 @@ This extension supersedes **ZDL VSCode** (`ZenWave360.zdl-vscode`). Uninstall th
 
 ## Contributing
 
-Development setup, sibling repositories and release builds are described in [CONTRIBUTING.md](https://github.com/ZenWave360/zenwave-platform-vscode/blob/develop/CONTRIBUTING.md). Design documentation lives in [zenwave-specs](https://github.com/ZenWave360/zenwave-specs/tree/main/zenwave-platform-vscode).
+Development setup, sibling repositories and release builds are described in [CONTRIBUTING.md](https://github.com/ZenWave360/zenwave-platform-vscode/blob/main/CONTRIBUTING.md). Design documentation lives in [zenwave-specs](https://github.com/ZenWave360/zenwave-specs/tree/main/zenwave-platform-vscode).
 
 ## License
 
