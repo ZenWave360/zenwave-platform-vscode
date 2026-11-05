@@ -82,6 +82,8 @@ test('R-R15 only prepare writes before publication, dispatch only starts a workf
 test('R-R15 dry_run stops after plan, and the order inside prepare keeps the tag for last', () => {
   assert.match(main.jobs.prepare?.if ?? '', /needs\.plan\.outputs\.version != ''/);
   assert.match(main.jobs.prepare?.if ?? '', /!inputs\.dry_run/);
+  // Nothing is changed until the owner turns releases on, as ZENWAVE_PUBLISH_PRERELEASE does for the pre-release.
+  assert.match(main.jobs.prepare?.if ?? '', /vars\.ZENWAVE_RELEASE_ON_MAIN == 'true'/);
   assert.deepEqual(main.jobs.dispatch?.needs, ['plan', 'prepare']);
   const plan = jobText(mainText, 'plan');
   assert.ok(plan.indexOf('release.mjs plan --json') < plan.indexOf('release.mjs check-next-notes'));

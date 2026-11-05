@@ -5,7 +5,8 @@ name: Release on main
 # by hand still starts release.yml on its own.
 #
 #   plan      no credential: the current head of main, the next version from its commits (r-r14) and the notes check on
-#             release-notes/next.md. No version, no change: the run ends green. dry_run stops here.
+#             release-notes/next.md. No version, no change: the run ends green. dry_run stops here, and so does every run
+#             while the repository variable ZENWAVE_RELEASE_ON_MAIN is not true: the owner turns releases on.
 #   prepare   the only job that writes before publication: release/X.Y.Z from the planned commit, the release commit,
 #             a pull request merged with a merge commit, then the tag vX.Y.Z on the release commit
 #   dispatch  starts release.yml on the tag and ends. The approval, the publication, the GitHub release and the sync with
@@ -135,9 +136,16 @@ jobs:
         run: |
           echo "Dry run: the notes check passed, and nothing was changed, tagged or published." >> "$GITHUB_STEP_SUMMARY"
 
+      # Until the owner sets the repository variable ZENWAVE_RELEASE_ON_MAIN to true, a run plans and checks the notes like a
+      # dry run, and changes, tags and publishes nothing, as ZENWAVE_PUBLISH_PRERELEASE does for the pre-release.
+      - name: Say that releases are withheld
+        if: steps.plan.outputs.version != '' && !inputs.dry_run && vars.ZENWAVE_RELEASE_ON_MAIN != 'true'
+        run: |
+          echo "Releases are withheld: ZENWAVE_RELEASE_ON_MAIN is not true, so nothing was changed, tagged or published." >> "$GITHUB_STEP_SUMMARY"
+
   prepare:
     needs: plan
-    if: needs.plan.outputs.version != '' && !inputs.dry_run
+    if: needs.plan.outputs.version != '' && !inputs.dry_run && vars.ZENWAVE_RELEASE_ON_MAIN == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

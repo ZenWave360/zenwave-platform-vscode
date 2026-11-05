@@ -116,6 +116,13 @@ rest (spec R-R14 and R-R15):
 To see what a merge would release without changing anything, run the workflow by hand (Actions, Release on main, Run
 workflow, `dry_run` on): it prints the version, the commits that decided it and the notes check, and stops.
 
+Until the repository variable `ZENWAVE_RELEASE_ON_MAIN` is `true`, every run stops there too, as a dry run: a merge to
+`main` changes, tags and publishes nothing. Turn releases on when the `vscode-release` environment is ready:
+
+```sh
+gh variable set ZENWAVE_RELEASE_ON_MAIN --body true --repo ZenWave360/zenwave-platform-vscode
+```
+
 Runs are one at a time and never cancelled, and a release is one unit from the plan to the sync: `plan` stops with
 "release vA.B.C is not finished: approve, re-run or finish it first" while a `release.yml` run on a stable tag is queued,
 waiting or running. Approve or finish that run, then run `release-on-main` again. A failed or refused release does not
