@@ -8,22 +8,37 @@ name: Release
 #            as every other build
 #   publish  waits for the reviewer of the vscode-release environment, then publishes the verified bytes to both registries
 #
+#   release  after the registries were tried (not when publish never ran): the GitHub release for the tag, with the notes
+#            file and the line with the commit and the registry outcomes (spec:release#r-r10, r-r15)
+#   sync     the release commit into develop through a pull request, then a pre-release run on develop
+#
 # The tag pattern matches only a stable-shaped tag: v0.1.99-pre starts nothing here, and neither does the tag the
 # pre-release workflow creates. A stable release is a new build from its own tag, never a promoted pre-release.
+#
+# release-on-main.yml starts this workflow with workflow_dispatch on the tag it pushed, because a tag pushed with the
+# workflow's own token starts nothing. The run's ref is then the tag, so the vscode-release environment, limited to v*
+# tags, applies as it does to a tag pushed by hand, and its secrets are read here with nothing passed from anywhere.
+# A dispatch on a branch or on any other tag does nothing.
 
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
 
 concurrency:
-  group: release
+  # Stable tags, dispatched or pushed by hand, share one group and are serialized. GitHub keeps only the newest pending run,
+  # which release-on-main's gate makes possible only for tags pushed by hand. A ref that is not a tag does nothing, and
+  # has a group of its own, so it cannot replace a real pending run.
+  group: ${{ github.ref_type == 'tag' && 'release' || format('release-rejected-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
   verify:
+    # A tag push is always a tag. A dispatch must be on one too; whether it is a stable tag of main is verify's check.
+    if: github.ref_type == 'tag'
     uses: ./.github/workflows/verify.yml
     permissions:
       contents: read
@@ -37,6 +52,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      marketplace: ${{ steps.marketplace.outcome }}
+      openvsx: ${{ steps.openvsx.outcome }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
 
@@ -178,3 +196,171 @@ jobs:
             echo "::error::A version cannot be withdrawn: run this workflow's failed jobs again to finish publishing $VERSION."
             exit 1
           fi
+
+  release:
+    needs:
+      - verify
+      - publish
+    # After the registries were tried, whichever way they went. When publish never started (the reviewer refused, or
+    # verify failed) its outputs are empty and no GitHub release is made. It fails when a registry did, so the run is not
+    # reported as a success, and running the failed jobs again brings the release up to date (spec:release#r-r12).
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.publish.outputs.marketplace != '' && needs.publish.outputs.marketplace != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the GitHub release for the existing tag
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      TAG: ${{ github.ref_name }}
+      MARKETPLACE: ${{ needs.publish.outputs.marketplace }}
+      OPENVSX: ${{ needs.publish.outputs.openvsx }}
+    steps:
+      - name: Check the version is major.minor.patch
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::The version from verify is not major.minor.patch with no leading zeros, so this job stops."
+            exit 1
+          fi
+
+      # The notes and the VSIX are only read as data, from the build that publish used.
+      - name: Download the verified VSIX
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-vsix
+          path: artifacts
+
+      - name: Create the GitHub release
+        run: |
+          set -euo pipefail
+          [ "$TAG" = "v$VERSION" ]
+          vsix=$(ls artifacts/zenwave-platform-*.vsix)
+          {
+            cat artifacts/release-notes.md
+            echo
+            echo "Built from $GITHUB_SHA. VS Code Marketplace: $MARKETPLACE. Open VSX: $OPENVSX."
+          } > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # A re-run: one release, and the VSIX stays the file first attached.
+            gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "$(basename "$vsix")" ||
+              gh release upload "$TAG" "$vsix"
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" "$vsix" --verify-tag --title "ZenWave Platform $VERSION" --notes-file notes.md
+          fi
+          echo "GitHub release: $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Do not report success when a registry failed
+        if: ${{ needs.publish.result != 'success' }}
+        run: |
+          echo "::error::A registry did not take $VERSION, so this run is a failure; the release records the build. Run the failed jobs again to finish publishing."
+          exit 1
+
+  sync:
+    needs:
+      - verify
+      - release
+    # Only after the release, so a refused approval or a failed registry leaves develop as it is until the run is finished.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the sync branch, and merging the pull request
+      pull-requests: write # open it
+      actions: write # start the pre-release run on develop
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check the version is major.minor.patch
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::The version from verify is not major.minor.patch with no leading zeros, so this job stops."
+            exit 1
+          fi
+
+      - name: Check out the history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # What goes to develop is the release commit, the tag's commit. An open `chore: sync version` pull request whose head
+      # holds it is used as it is, with whatever was done on its branch to resolve a conflict; else a pull request is made from
+      # release/X.Y.Z when that branch ends at the tag (release-on-main made it), else from sync/X.Y.Z, made here from the tag
+      # (a tag pushed by hand). Nothing is published here, and a conflict leaves the pull request open to be resolved.
+      - name: Merge the release commit into develop
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/develop; then
+            echo "develop already holds the release commit; nothing to merge." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          number=''
+          head_sha=''
+          while read -r candidate oid; do
+            [ -n "$candidate" ] || continue
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$oid" 2> /dev/null; then
+              number="$candidate"
+              head_sha="$oid"
+              break
+            fi
+          done < <(gh pr list --base develop --state open --json number,title,headRefOid \
+            --jq '.[] | select(.title == "chore: sync version") | "\(.number) \(.headRefOid)"')
+          if [ -z "$number" ]; then
+            if [ "$(git rev-parse --verify --quiet "refs/remotes/origin/release/$VERSION" || true)" = "$GITHUB_SHA" ]; then
+              head="release/$VERSION"
+            else
+              head="sync/$VERSION"
+              if git rev-parse --verify --quiet "refs/remotes/origin/$head" > /dev/null; then
+                git merge-base --is-ancestor "$GITHUB_SHA" "origin/$head" ||
+                  { echo "::error::Branch $head exists and does not hold the release commit $GITHUB_SHA. Look at it and delete it, then run the failed jobs again."; exit 1; }
+              else
+                ASKPASS="$(mktemp)"
+                trap 'rm -f "$ASKPASS"' EXIT
+                printf '#!/bin/sh\nprintf %%s "${GITHUB_TOKEN}"\n' > "$ASKPASS"
+                chmod 700 "$ASKPASS"
+                GIT_ASKPASS="$ASKPASS" git push "https://x-access-token@github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA:refs/heads/$head"
+              fi
+            fi
+            url=$(gh pr create --base develop --head "$head" \
+              --title "chore: sync version" \
+              --body "The release commit of v$VERSION, so develop carries its major.minor and its pre-releases stay above the release.")
+            number="${url##*/}"
+            head_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$head" || echo "$GITHUB_SHA")
+          fi
+          # The head of the pull request as it is now, not the tag: a conflict resolved on its branch counts.
+          if ! merged=$(git merge-tree --write-tree --name-only --no-messages origin/develop "$head_sha"); then
+            conflicts=$(printf '%s\n' "$merged" | tail -n +2)
+            {
+              echo "## Sync to develop needs a hand"
+              echo
+              echo "The release commit conflicts with develop in these files. Pull request #$number is open; resolve it there and run the failed jobs again. Nothing is published again."
+              echo
+              printf '%s\n' "$conflicts" | sed 's/.*/- `&`/'
+              echo
+              echo "release-notes/next.md is the usual one: keep only what develop added after the merge to main, and none of what is in the release's notes."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Pull request #$number conflicts with develop in: $(printf '%s' "$conflicts" | tr '\n' ' ')"
+            exit 1
+          fi
+          gh pr merge "$number" --merge --subject "chore: sync version"
+          [ "$(gh pr view "$number" --json state --jq '.state')" = MERGED ]
+          echo "develop holds the release commit of v$VERSION (pull request #$number)." >> "$GITHUB_STEP_SUMMARY"
+
+      # The token's merge starts no workflow, and a develop push between the tag and this merge failed the pre-release
+      # check for the old minor (spec:release#r-r8), so the pre-release is asked for here, whenever develop ends up holding the
+      # release commit, merged by this attempt or an earlier one: a retry after a failed dispatch recovers. A re-run may start
+      # a duplicate pre-release, which is accepted. It runs on develop only.
+      - name: Start the pre-release run on develop
+        run: |
+          set -euo pipefail
+          gh workflow run pre-release.yml --ref develop
+          echo "Started pre-release.yml on develop." >> "$GITHUB_STEP_SUMMARY"

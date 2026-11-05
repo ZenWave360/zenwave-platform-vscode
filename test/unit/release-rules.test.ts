@@ -11,6 +11,7 @@ import {
   buildChangelog,
   latestStable,
   nextStableVersion,
+  nextNotesProblems,
   notesProblems,
   parseExtensionVersion,
   pinProblems,
@@ -288,6 +289,33 @@ test('R-R11 "has content" is a line that is not a heading, and a draft is named 
   // A later line, and words that only contain "draft".
   assert.deepEqual(stable('# Release\n- x\n- the draft preview\n'), []);
   assert.deepEqual(stable('- Overdraft domain sample\n'), []);
+});
+
+test('R-R15 next.md must exist, have content and not be a draft before a release is prepared', () => {
+  assert.deepEqual(nextNotesProblems('### Fixed\n- x\n'), []);
+  assert.match(nextNotesProblems(undefined)[0], /release-notes\/next\.md is missing/);
+  assert.match(nextNotesProblems('')[0], /release-notes\/next\.md is empty/);
+  assert.match(nextNotesProblems('### Added\n\n')[0], /is empty: it needs a line that is not a heading/);
+  assert.match(nextNotesProblems('# Draft\n- x\n')[0], /release-notes\/next\.md is marked as a draft/);
+  assert.deepEqual(nextNotesProblems('# Release\n- x\n- the draft preview\n'), []);
+});
+
+test('R-R15 the check-next-notes command fails on a missing, empty or draft next.md and names the file', () => {
+  const { repo, release, extension } = scratchRepository({ 'package.json': '{\n  "version": "0.1.0"\n}\n', 'release-notes/next.md': '- a fix\n' });
+  try {
+    const ok = release('check-next-notes');
+    assert.equal(ok.status, 0, ok.stderr);
+    writeFileSync(join(extension, 'release-notes/next.md'), '');
+    const empty = release('check-next-notes');
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /error: release-notes\/next\.md is empty/);
+    writeFileSync(join(extension, 'release-notes/next.md'), 'DRAFT\n- x\n');
+    assert.match(release('check-next-notes').stderr, /release-notes\/next\.md is marked as a draft/);
+    rmSync(join(extension, 'release-notes/next.md'));
+    assert.match(release('check-next-notes').stderr, /release-notes\/next\.md is missing/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test('R-R10 the GitHub release text is the notes file, whole', () => {
@@ -593,6 +621,11 @@ test('nextStableVersion: a milestone is asked for with a Release trailer', () =>
   assert.equal(on('Release: 1.0.0').version, '1.0.0');
   assert.deepEqual(on('Release: major').decidedBy.map(({ effect }) => effect), ['Release: major']);
   assert.throws(() => on('Release: v0.5.0'), /not above the stable release 0\.7\.2/);
+});
+
+test('nextStableVersion: the Release-Run trailer of a release commit is not a Release trailer (spec:release#r-r15)', () => {
+  assert.deepEqual(nextOf(['v0.2.0'], ['chore(release): 0.3.0\n\nRelease-Run: 123']), { version: null, base: '0.2.0', decidedBy: [] });
+  assert.equal(nextOf(['v0.2.0'], ['fix: x\n\nRelease-Run: major\nSigned-off-by: a <a@b.c>']).version, '0.2.1');
 });
 
 test('nextStableVersion: breaking is not major', () => {

@@ -70,6 +70,10 @@ const VERSION_JOBS = [
   ['pre-release.yml', 'publish'],
   ['pre-release.yml', 'trace'],
   ['release.yml', 'publish'],
+  ['release.yml', 'release'],
+  ['release.yml', 'sync'],
+  ['release-on-main.yml', 'prepare'],
+  ['release-on-main.yml', 'dispatch'],
 ] as const;
 const VALID_VERSION = '1.2.3';
 const INVALID_VERSION = '01.2.3';
@@ -325,7 +329,7 @@ test('publish and trace check the version format before they use it', () => {
     const checkAt = body.indexOf(VERSION_CHECK);
     const firstUse = firstCodeOffset(body, '$VERSION');
     assert.equal(firstUse, checkAt + VERSION_CHECK.indexOf('$VERSION'), `${label} checks the version before using it`);
-    assert.match(run, /echo "::error::The version from verify is not major\.minor\.patch with no leading zeros, so this job stops\."\n\s+exit 1/);
+    assert.match(run, /echo "::error::The version from (verify|plan) is not major\.minor\.patch with no leading zeros, so this job stops\."\n\s+exit 1/);
   }
 });
 

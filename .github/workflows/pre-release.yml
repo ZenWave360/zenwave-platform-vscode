@@ -27,17 +27,23 @@ on:
       - 'CHANGELOG.md'
       - '.github/workflows/pre-release.yml'
       - '.github/workflows/verify.yml'
+  # release.yml asks for a run after it has merged the release commit into develop: a push by the workflow's own token
+  # starts none. Only on develop; on any other ref nothing runs.
+  workflow_dispatch:
 
 # One publication at a time. A run that is already publishing is never cancelled; of the runs waiting behind it, only the
 # newest stays, so the newest commit ends up as the highest version and one in between may be skipped.
 concurrency:
-  group: pre-release
+  # Only a run on develop waits in the publishing group; a dispatch on another ref, which its job skips, must not replace a
+  # pending run of develop there.
+  group: ${{ github.ref == 'refs/heads/develop' && 'pre-release' || format('pre-release-rejected-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
   verify:
+    if: github.ref == 'refs/heads/develop'
     uses: ./.github/workflows/verify.yml
     permissions:
       contents: read

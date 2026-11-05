@@ -7,6 +7,7 @@
 //   node scripts/release.mjs notes --channel development|pre-release|stable
 //   node scripts/release.mjs info <file.vsix>
 //   node scripts/release.mjs plan [--json]
+//   node scripts/release.mjs check-next-notes
 //
 // `check` prints every problem and exits 1; `--run-number` also checks the version the stamp will give, and
 // `--git-tags` the tags of the repository. `stamp` sets the patch of the version in this checkout and commits
@@ -20,7 +21,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { formatVersion, latestStable, nextStableVersion, prepareProblems, releaseNotesFile, releaseNotesText, releaseProblems, setLockVersion, setVersion, stampVersion, NEXT_NOTES } from './release-rules.mjs';
+import { formatVersion, latestStable, nextNotesProblems, nextStableVersion, prepareProblems, releaseNotesFile, releaseNotesText, releaseProblems, setLockVersion, setVersion, stampVersion, NEXT_NOTES } from './release-rules.mjs';
 import { notesDirectory, readNotes } from './release-notes.mjs';
 import { linkedSiblings } from './siblings.mjs';
 
@@ -81,6 +82,16 @@ function plan() {
   console.log(`Base: ${result.base}${stable ? '' : ' (no stable release yet)'}`);
   console.log(result.version ? `Next version: ${result.version}` : 'Nothing to release.');
   for (const { sha, subject, effect } of result.decidedBy) console.log(`  ${sha.slice(0, 7)} [${effect}] ${subject}`);
+}
+
+/** spec:release#r-r15. `release-notes/next.md` is a note a release can use: it exists, has content and is not a draft. */
+function checkNextNotes() {
+  const problems = nextNotesProblems(readNotes(projectDir).next);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`error: ${problem}`);
+    process.exit(1);
+  }
+  console.log('release-notes/next.md has content and is not a draft.');
 }
 
 function check() {
@@ -157,8 +168,8 @@ async function info() {
 }
 
 try {
-  const commands = { check, stamp, prepare, notes, info, plan };
-  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|prepare|notes|info|plan ...');
+  const commands = { check, stamp, prepare, notes, info, plan, 'check-next-notes': checkNextNotes };
+  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|prepare|notes|info|plan|check-next-notes ...');
   await commands[command]();
 } catch (error) {
   console.error(`error: ${error.message}`);
