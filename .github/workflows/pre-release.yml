@@ -16,7 +16,7 @@ on:
       - develop
     paths:
       # Everything, except documentation, agent configuration, other workflows and Markdown at the repository root, whose
-      # README.md is the extension's and ships in the VSIX.
+      # README.md and CHANGELOG.md are the extension's and ship in the VSIX.
       # A later pattern overrides an earlier one, so the two workflows of this pipeline count again.
       - '**'
       - '!docs/**'
@@ -24,6 +24,7 @@ on:
       - '!.github/**'
       - '!*.md'
       - 'README.md'
+      - 'CHANGELOG.md'
       - '.github/workflows/pre-release.yml'
       - '.github/workflows/verify.yml'
 
