@@ -20,7 +20,7 @@ after each item.
 
 1. **Write the code and its tests together**, for all of the step.
 2. **While working, run only the fast check, and only when you need an answer from it.** That is the type check or the
-   tests of what you touched: `npm run typecheck` and `npm test --workspace packages/extension`, `pnpm check`, or
+   tests of what you touched: `npm run typecheck` and `npm test`, `pnpm check`, or
    one module's tests such as `./gradlew :dsl-docs:jvmTest`. Don't run it after every edit.
 3. **Don't run the long commands while working:** `clean`, a full `build` or `check` in Gradle, JS or browser targets,
    `test:desktop`, `test:browser`, or packaging a VSIX.

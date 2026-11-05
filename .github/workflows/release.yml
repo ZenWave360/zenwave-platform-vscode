@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
-          sparse-checkout: packages/extension/publish-tools
+          sparse-checkout: publish-tools
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -94,7 +94,7 @@ jobs:
       # OIDC request variables are, as in every step of a job that may publish, which is why the tree is locked. The
       # publishing steps only run what it installed (spec:release#r-r13). vsce 4.1.0 is the first to have --oidc.
       - name: Install the publishing tools from their lock
-        working-directory: packages/extension/publish-tools
+        working-directory: publish-tools
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund

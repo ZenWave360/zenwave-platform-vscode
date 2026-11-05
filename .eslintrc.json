@@ -43,7 +43,7 @@
   },
   "overrides": [
     {
-      "files": ["packages/extension/src/node/**/*.ts"],
+      "files": ["src/node/**/*.ts"],
       "rules": {
         "@typescript-eslint/no-restricted-imports": [
           "error",
@@ -59,7 +59,7 @@
       }
     },
     {
-      "files": ["packages/extension/src/browser/**/*.ts"],
+      "files": ["src/browser/**/*.ts"],
       "rules": {
         "@typescript-eslint/no-restricted-imports": [
           "error",
@@ -86,7 +86,7 @@
       }
     },
     {
-      "files": ["packages/extension/test/unit/**/*.ts"],
+      "files": ["test/unit/**/*.ts"],
       "rules": {
         "@typescript-eslint/no-restricted-imports": "off"
       }

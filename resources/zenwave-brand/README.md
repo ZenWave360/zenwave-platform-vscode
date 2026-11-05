@@ -28,7 +28,7 @@ size or square canvas, export it from the relevant SVG.
 
 The `platform/icons` files in `bak/root` came from website assets; that folder
 was not the VS Code extension's icon directory. The VS Code extension has its
-own assets under `zenwave-platform-vscode/packages/extension/resources`. Its
+own assets under `zenwave-platform-vscode/resources`. Its
 existing `zdl-file-icon` is a blue hexagon, so using the orange and teal ZDL
 icon there requires updating that consumer.
 

@@ -128,12 +128,12 @@ test('R-R10 the changelog has the full notes, highest version first, in semantic
 /** A scratch repository with the release scripts, one commit, and notes; tests choose the files and the commit date. */
 function scratchRepository(files: Record<string, string>, date = '2026-03-04T23:30:00+02:00') {
   const repo = mkdtempSync(join(tmpdir(), 'zenwave-release-'));
-  const scripts = join(repo, 'packages/extension/scripts');
+  const scripts = join(repo, 'scripts');
   mkdirSync(scripts, { recursive: true });
   for (const file of ['release.mjs', 'release-rules.mjs', 'release-notes.mjs', 'siblings.mjs']) {
     writeFileSync(join(scripts, file), readFileSync(join(import.meta.dirname, '../../scripts', file)));
   }
-  const lock = { packages: { 'packages/extension': { name: 'zenwave-platform', version: '0.0.0', license: 'MIT' } } };
+  const lock = { packages: { '': { name: 'zenwave-platform', version: '0.0.0', license: 'MIT' } } };
   writeFileSync(join(repo, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`);
   for (const [name, content] of Object.entries(files)) {
     mkdirSync(dirname(join(repo, name)), { recursive: true });
@@ -154,15 +154,15 @@ function scratchRepository(files: Record<string, string>, date = '2026-03-04T23:
   git('commit', '-q', '-m', 'x');
   const release = (...args: string[]) =>
     spawnSync(process.execPath, [join(scripts, 'release.mjs'), ...args], { cwd: repo, env, encoding: 'utf8' });
-  return { repo, git, release, env, scripts, extension: join(repo, 'packages/extension') };
+  return { repo, git, release, env, scripts, extension: repo };
 }
 
 test('R-R10 the generated changelog is deterministic, dated by the commits, and a stable release uses the date of its tag', () => {
   const extensionFiles = {
-    'packages/extension/package.json': '{\n  "version": "0.1.0"\n}\n',
-    'packages/extension/release-notes/next.md': '- next\n',
-    'packages/extension/release-notes/release-notes.v0.1.0.md': '- one\n',
-    'packages/extension/release-notes/release-notes.v0.10.0.md': '- ten\n',
+    'package.json': '{\n  "version": "0.1.0"\n}\n',
+    'release-notes/next.md': '- next\n',
+    'release-notes/release-notes.v0.1.0.md': '- one\n',
+    'release-notes/release-notes.v0.10.0.md': '- ten\n',
   };
   const { repo, git, env, extension } = scratchRepository(extensionFiles);
   try {
@@ -202,7 +202,7 @@ test('R-R10 the generated changelog is deterministic, dated by the commits, and 
 
 test('R-R8 the stamp changes only the version and commits nothing', () => {
   const manifestText = '{\r\n  "version": "0.1.0",\r\n  "engines": { "version": "9.9.9" }\r\n}\r\n';
-  const { repo, release, extension } = scratchRepository({ 'packages/extension/package.json': manifestText });
+  const { repo, release, extension } = scratchRepository({ 'package.json': manifestText });
   try {
     const run = release('stamp', '--run-number', '58');
     assert.equal(run.status, 0, run.stderr);
@@ -262,9 +262,9 @@ test('decision 0024 a number with a leading zero is not a version or a tag', () 
   assert.match(pinProblems(manifest({ dependencies: { '@zenwave360/dsl': '01.10.0' } }))[0], /pin an exact version/);
   assert.throws(() => stampVersion('{\n  "version": "0.01.0"\n}\n', 3), /no top-level "version"/);
   const { repo, release } = scratchRepository({
-    'packages/extension/package.json': '{\n  "version": "0.0.0"\n}\n',
-    'packages/extension/release-notes/release-notes.v0.01.0.md': '- ignored\n',
-    'packages/extension/release-notes/next.md': '',
+    'package.json': '{\n  "version": "0.0.0"\n}\n',
+    'release-notes/release-notes.v0.01.0.md': '- ignored\n',
+    'release-notes/next.md': '',
   });
   try {
     // A file name with a leading zero is not the notes of a release.
@@ -301,9 +301,9 @@ test('R-R10 the GitHub release text is the notes file, whole', () => {
 test('R-R10 the notes command prints next.md for a pre-release and the stable notes of the manifest version', () => {
   const tricky = '## [Unreleased]\n- a\n\n## [Breaking] changes\n- b\n\n```md\n## [1.0.0] - 2026-01-01\n```\n';
   const { repo, release, extension } = scratchRepository({
-    'packages/extension/package.json': '{\n  "version": "0.1.71"\n}\n',
-    'packages/extension/release-notes/next.md': tricky,
-    'packages/extension/release-notes/release-notes.v0.1.71.md': '- stable\n',
+    'package.json': '{\n  "version": "0.1.71"\n}\n',
+    'release-notes/next.md': tricky,
+    'release-notes/release-notes.v0.1.71.md': '- stable\n',
   });
   try {
     const pre = release('notes', '--channel', 'pre-release');
@@ -327,17 +327,17 @@ test('R-R11 prepare sets the version and the notes, refusing a version that is n
   assert.match(prepareProblems('0.1.0', [], { targetExists: true })[0], /release-notes\.v0\.1\.0\.md already exists/);
   assert.match(prepareProblems('0.1', [])[0], /not major.minor.patch/);
   const lock = (version: string) =>
-    `{\n  "packages": {\n    "": { "version": "0.1.0" },\n    "packages/extension": {\n      "name": "z",\n      "version": "${version}",\n      "dependencies": { "a": "1.0.0" }\n    }\n  }\n}\n`;
+    `{\n  "name": "z",\n  "version": "${version}",\n  "packages": {\n    "": {\n      "name": "z",\n      "version": "${version}",\n      "dependencies": { "a": "1.0.0" }\n    }\n  }\n}\n`;
   assert.equal(setLockVersion(lock('0.0.0'), '0.2.0'), lock('0.2.0'));
-  assert.throws(() => setLockVersion('{ "packages": {} }', '0.2.0'), /no "packages\/extension" entry/);
+  assert.throws(() => setLockVersion('{ "packages": {} }', '0.2.0'), /no root package entry/);
   assert.match(prepareProblems('0.2.0', [], { nextExists: false })[0], /release-notes\/next\.md is missing/);
   assert.equal(setVersion('{\n  "version": "0.0.0",\n  "x": { "version": "9.9.9" }\n}\n', '0.1.0'), '{\n  "version": "0.1.0",\n  "x": { "version": "9.9.9" }\n}\n');
 });
 
 test('R-R11 the prepare command moves next.md, leaves an empty one, and commits nothing', () => {
   const { repo, release, git, extension } = scratchRepository({
-    'packages/extension/package.json': '{\n  "version": "0.0.0"\n}\n',
-    'packages/extension/release-notes/next.md': '- the notes\n',
+    'package.json': '{\n  "version": "0.0.0"\n}\n',
+    'release-notes/next.md': '- the notes\n',
   });
   try {
     const refused = release('prepare', '0.1');
@@ -351,7 +351,7 @@ test('R-R11 the prepare command moves next.md, leaves an empty one, and commits 
     const done = release('prepare', '0.2.0');
     assert.equal(done.status, 0, done.stderr);
     assert.equal(readFileSync(join(extension, 'package.json'), 'utf8'), '{\n  "version": "0.2.0"\n}\n');
-    assert.equal(JSON.parse(readFileSync(join(repo, 'package-lock.json'), 'utf8')).packages['packages/extension'].version, '0.2.0');
+    assert.equal(JSON.parse(readFileSync(join(repo, 'package-lock.json'), 'utf8')).packages[''].version, '0.2.0');
     assert.equal(readFileSync(join(extension, 'release-notes/release-notes.v0.2.0.md'), 'utf8'), '- the notes\n');
     assert.equal(readFileSync(join(extension, 'release-notes/next.md'), 'utf8'), '');
     const log = spawnSync('git', ['log', '--oneline'], { cwd: repo, encoding: 'utf8' });
@@ -378,8 +378,8 @@ test('R-R11 the prepare command moves next.md, leaves an empty one, and commits 
 
 test('R-R8 and R-R11 the check command reads the tags of the repository', () => {
   const { repo, release, git, extension } = scratchRepository({
-    'packages/extension/package.json': '{\n  "version": "0.0.0"\n}\n',
-    'packages/extension/release-notes/next.md': '',
+    'package.json': '{\n  "version": "0.0.0"\n}\n',
+    'release-notes/next.md': '',
   });
   try {
     assert.equal(release('check', '--channel', 'pre-release', '--git-tags', '--run-number', '57').status, 0);
@@ -449,8 +449,8 @@ test('R-R11 a stable release refuses every next pin and names it', () => {
 });
 
 test('the pins committed in this repository pass the pre-release checks', () => {
-  const root = join(import.meta.dirname, '../../../..');
-  const real = JSON.parse(readFileSync(join(root, 'packages/extension/package.json'), 'utf8'));
+  const root = join(import.meta.dirname, '../..');
+  const real = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
   assert.deepEqual(pinProblems(real, { lock }), []);
   assert.ok(parseExtensionVersion(real.version), real.version);
@@ -497,8 +497,8 @@ const LOCK = `${JSON.stringify(
 
 beforeEach(() => {
   workspace = mkdtempSync(join(tmpdir(), 'zenwave-pins-'));
-  mkdirSync(join(workspace, 'packages/extension'), { recursive: true });
-  writeFileSync(join(workspace, 'packages/extension/package.json'), SOURCE);
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(join(workspace, 'package.json'), SOURCE);
   writeFileSync(join(workspace, 'package-lock.json'), LOCK);
 });
 afterEach(() => rmSync(workspace, { recursive: true, force: true }));
@@ -512,12 +512,12 @@ const NEXT: Record<string, string> = {
 test('R-R9 raising writes every place a pin lives, keeps the formatting, and leaves dsl alone', () => {
   const synced: string[] = [];
   const lines = raisePins({
-    extensionDirectory: join(workspace, 'packages/extension'),
+    extensionDirectory: workspace,
     root: workspace,
     latest: (name: string) => NEXT[name],
     syncLock: (root: string) => synced.push(root),
   });
-  const text = readFileSync(join(workspace, 'packages/extension/package.json'), 'utf8');
+  const text = readFileSync(join(workspace, 'package.json'), 'utf8');
   assert.equal(
     text,
     SOURCE.replace('"0.1.0-next.12.1"', '"0.1.0-next.13.1"')
@@ -539,15 +539,15 @@ test('R-R9 raising writes every place a pin lives, keeps the formatting, and lea
 });
 
 test('R-R9 dsl is raised only when named, and nothing is written when nothing changes or on a dry run', () => {
-  const extensionDirectory = join(workspace, 'packages/extension');
+  const extensionDirectory = workspace;
   const synced: string[] = [];
   const options = { extensionDirectory, root: workspace, latest: (name: string) => NEXT[name], syncLock: (root: string) => synced.push(root) };
   raisePins({ ...options, dryRun: true, include: ['@zenwave360/dsl'] });
-  assert.equal(readFileSync(join(workspace, 'packages/extension/package.json'), 'utf8'), SOURCE);
+  assert.equal(readFileSync(join(workspace, 'package.json'), 'utf8'), SOURCE);
   assert.deepEqual(synced, []);
 
   raisePins({ ...options, include: ['@zenwave360/dsl'] });
-  assert.equal(JSON.parse(readFileSync(join(workspace, 'packages/extension/package.json'), 'utf8')).dependencies['@zenwave360/dsl'], '1.11.0-next.13.1');
+  assert.equal(JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8')).dependencies['@zenwave360/dsl'], '1.11.0-next.13.1');
 
   synced.length = 0;
   const again = raisePins({ ...options, include: ['@zenwave360/dsl'] });
@@ -557,7 +557,7 @@ test('R-R9 dsl is raised only when named, and nothing is written when nothing ch
 
 test('R-R9 raising refuses a package the extension does not use, and a version that is not exact', () => {
   assert.throws(
-    () => raisePins({ extensionDirectory: join(workspace, 'packages/extension'), root: workspace, include: ['@zenwave360/nope'], latest: () => '1.0.0' }),
+    () => raisePins({ extensionDirectory: workspace, root: workspace, include: ['@zenwave360/nope'], latest: () => '1.0.0' }),
     /Not a dependency of the extension: @zenwave360\/nope/,
   );
   assert.throws(() => raisePinsText(SOURCE, { '@zenwave360/lsp-js': 'next' }), /not an exact version/);

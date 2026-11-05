@@ -1,5 +1,40 @@
 # Contributing
 
+## Repository layout
+
+The repository root is the extension: `package.json` is the extension manifest, and
+there are no npm workspaces.
+
+```
+src/               the extension (src/node, src/browser and shared code)
+webview/           the page scripts of the webviews
+test/              unit tests (test/unit) and the smoke tests run in VS Code
+scripts/           build, package, release and smoke runner scripts
+fixtures/          the workspace the extension is launched against
+resources/         icons, the SDK plugin catalogue
+syntaxes/          the TextMate grammars
+release-notes/     the notes the changelog is generated from
+publish-tools/     the pinned publishing tools, a separate package outside the VSIX
+docs/              pointer to the design documentation in zenwave-specs
+```
+
+## Development
+
+Requires Node 20+.
+
+```bash
+npm install
+npm run build          # both bundles
+npm run watch          # rebuild on change
+npm run typecheck
+npm test               # unit tests
+npm run run-in-browser # launch in a browser host via @vscode/test-web
+```
+
+In VS Code, **Run Extension (Desktop)** and **Run Extension (Web)** launch
+configurations open the `fixtures` folder. Test both: a change that works on the
+desktop can still be broken in the browser.
+
 ## Development dependencies
 
 `@zenwave360/dsl`, `@zenwave360/lsp-js` and
@@ -8,7 +43,7 @@
 into `dist/server`, the diagram page into `dist/eventflow-webview` and the pinned
 Mermaid bundle into `dist/preview-webview`, and checks the first two against
 `zenwaveLanguageServer` and `zenwaveEventFlowWebview` in
-`packages/extension/package.json`.
+`package.json`.
 
 To work against your checkouts without publishing, keep the sibling repositories
 next to this one. As with the composite builds of `zenwave-lsp`, a sibling that
@@ -41,7 +76,7 @@ with no sibling linked:
 ```console
 ZENWAVE_USE_LOCAL_DEPENDENCIES=false npm ci
 npm run build
-npm run package --workspace packages/extension
+npm run package
 ```
 
 The `[siblings]` lines of `npm ci` must all say `from the registry`.
@@ -69,18 +104,18 @@ Gradle build, and the only message is `25.0.2`. `zenwave-lsp` needs Java
 
 1. At the root of this repository, run `npm ci`.
 2. In `zenwave-architectural-vistas`, run `pnpm install --frozen-lockfile`.
-3. At the root of this repository, run `node packages/extension/scripts/build-siblings.mjs`.
-4. Run `npm run package --workspace packages/extension`.
+3. At the root of this repository, run `node scripts/build-siblings.mjs`.
+4. Run `npm run package`.
 
 A `[siblings]` line that says `linked to ../...` is a sibling that was linked.
 `from the registry` means that sibling was not built.
 
-The VSIX is written to `packages/extension/<name>-<version>.vsix`, taking `name`
-and `version` from `packages/extension/package.json`. At the current version
-that file is `packages/extension/zenwave-platform-0.0.0.vsix`. Install it with:
+The VSIX is written to `<name>-<version>.vsix` at the repository root, taking `name`
+and `version` from `package.json`. At the current version
+that file is `zenwave-platform-0.0.0.vsix`. Install it with:
 
 ```console
-code --install-extension packages/extension/zenwave-platform-0.0.0.vsix
+code --install-extension zenwave-platform-0.0.0.vsix
 ```
 
 If the vistas build says `vite` is not recognized, `node_modules/.bin` is

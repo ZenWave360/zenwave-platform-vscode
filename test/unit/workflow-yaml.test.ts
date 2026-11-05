@@ -5,7 +5,7 @@ import test from 'node:test';
 // @ts-expect-error The installed YAML parser has no type declarations.
 import { load } from 'js-yaml';
 
-const workflows = join(import.meta.dirname, '../../../../.github/workflows');
+const workflows = join(import.meta.dirname, '../../.github/workflows');
 
 test('every GitHub workflow parses as YAML, including run commands containing colons', () => {
   const files = readdirSync(workflows).filter((file) => /\.ya?ml$/.test(file));

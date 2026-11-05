@@ -1,0 +1,9 @@
+{
+  "name": "zenwave-publish-tools",
+  "private": true,
+  "description": "The tools that publish a verified VSIX, locked. Not part of the root install and not part of the extension (spec:release#r-r13).",
+  "dependencies": {
+    "@vscode/vsce": "4.1.0",
+    "ovsx": "1.3.0"
+  }
+}

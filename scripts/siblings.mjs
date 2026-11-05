@@ -12,7 +12,7 @@ export const SIBLINGS = [
   { package: '@zenwave360/vistas-eventflow-webview', directory: 'zenwave-architectural-vistas/packages/eventflow-webview', built: 'webview/index.html' },
 ];
 
-export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function installedPath(root, packageName) {
   return path.join(root, 'node_modules', ...packageName.split('/'));

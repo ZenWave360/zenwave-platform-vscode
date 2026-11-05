@@ -12,6 +12,9 @@ In the workspace these are at `../zenwave-specs/`. [`docs/README.md`](docs/READM
 lists every document for this project. Cross-repository flows (EventFlow, the LSP
 requests, the webview protocol) are under `flows/` there.
 
+The repository root is the extension itself: `package.json` is the extension manifest and there are no npm
+workspaces. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the layout and the development commands.
+
 ## The workflow, briefly
 
 Behaviour is **described in `zenwave-specs` first**, then implemented here. Edit the
