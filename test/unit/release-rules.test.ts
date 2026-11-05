@@ -656,3 +656,29 @@ test('nextStableVersion: CRLF messages and a trailer only after the subject', ()
   assert.equal(nextOf(['v0.7.2'], ['Release: major']).version, null);
   assert.equal(nextOf(['v0.7.2'], ['chore: a\n\nThe Release: mayor line inside a sentence']).version, null);
 });
+
+test('nextStableVersion: Release is read only in the footer, the last paragraph made of trailers', () => {
+  const fence = '```\nRelease: major\n```';
+  assert.equal(nextOf(['v0.7.2'], [`docs: explain it\n\nExample:\n\n${fence}`]).version, null);
+  assert.equal(nextOf(['v0.7.2'], [`docs: explain it\n\n${fence}\n\nMore text.`]).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['docs: explain it\n\nExample:\n\nRelease: mayor\n\nMore text.']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['docs: explain it\n\nRelease: mayor\nand some prose\n\nMore text.']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nBody.\n\nSigned-off-by: A <a@b.c>\nRelease: major']).version, '1.0.0');
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nRelease: v0.9.0\nRefs #12\nCo-authored-by: A <a@b.c>\n  and more']).version, '0.9.0');
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nSome prose.\nRelease: major']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nRelease: major\nSome prose.']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\nRelease: major']).version, null);
+});
+
+test('nextStableVersion: an explicit version has real dots', () => {
+  assert.throws(() => nextOf(['v0.7.2'], ['chore: m\n\nRelease: v1x0x0']), /neither "major" nor a version/);
+  assert.throws(() => nextOf(['v0.7.2'], ['chore: m\n\nRelease: 1-0-0']), /neither "major" nor a version/);
+  assert.throws(() => nextOf(['v0.7.2'], ['chore: m\n\nRelease: 01.0.0']), /neither "major" nor a version/);
+});
+
+test('nextStableVersion: types are matched in any case', () => {
+  assert.equal(nextOf(['v0.2.0'], ['FEAT: x']).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.0'], ['Fix(scope): y']).version, '0.2.1');
+  assert.equal(nextStableVersion({ tags: ['v0.2.0'], commits: [commit('Feat: merged', true)] }).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.0'], ['CHORE: z']).version, null);
+});

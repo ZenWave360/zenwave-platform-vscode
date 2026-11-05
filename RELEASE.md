@@ -89,7 +89,9 @@ it, and the tag and GitHub pre-release are updated, never duplicated.
    To see which version the commits ask for, run `node scripts/release.mjs plan` (add `--json` for a machine-readable
    answer). It takes the highest stable tag as the base and reads the commits since it: a `Release: major` or
    `Release: vX.Y.Z` footer gives that version, else a `feat` gives a minor, else a `fix` a patch, else nothing is
-   released. `!` and `BREAKING CHANGE` have no effect.
+   released. `!` and `BREAKING CHANGE` have no effect. The `Release:` footer is read only in the last paragraph of a
+   message, and only when that paragraph is made of trailers (`Signed-off-by: ...`, `Release: major`). `plan` needs the
+   full history and the tags, so a CI checkout needs `fetch-depth: 0`; on a shallow clone it fails.
 2. Prepare the release, still on `main`:
 
    ```console

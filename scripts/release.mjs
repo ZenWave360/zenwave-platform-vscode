@@ -15,7 +15,7 @@
 // `release-notes.v<version>.md`, leaving an empty `next.md`; it commits nothing. `info` prints what a VSIX says about
 // itself as JSON. `plan` computes the next stable version from the conventional commits since the highest stable tag
 // (spec:release#r-r14): it prints the base, the version or "nothing to release" and the commits that decided it, or one
-// JSON object with `--json`; it exits 0 when there is nothing to release, and 1 with `error: ...` when the commits are invalid.
+// JSON object with `--json`; it needs the full history and the tags, so it fails on a shallow clone (use fetch-depth 0); it exits 0 when there is nothing to release, and 1 with `error: ...` when the commits are invalid.
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -57,12 +57,20 @@ function gitCommits(baseTag) {
     .split('\0')
     .filter((record) => record.trim() !== '')
     .map((record) => {
-      const [sha, parents, message] = record.replace(/^\n/, '').split('\x1f');
-      return { sha, merge: parents.trim().split(/\s+/).filter(Boolean).length > 1, message: message ?? '' };
+      const text = record.replace(/^\n/, '');
+      // Only the first two separators count: the message is kept whole.
+      const first = text.indexOf('\x1f');
+      const second = text.indexOf('\x1f', first + 1);
+      const parents = text.slice(first + 1, second);
+      return { sha: text.slice(0, first), merge: parents.trim().split(/\s+/).filter(Boolean).length > 1, message: text.slice(second + 1) };
     });
 }
 
 function plan() {
+  const shallow = spawnSync('git', ['rev-parse', '--is-shallow-repository'], { cwd: repositoryRoot, encoding: 'utf8' });
+  if (shallow.status === 0 && shallow.stdout.trim() === 'true') {
+    throw new Error('plan needs the full history and tags: check out with fetch-depth 0');
+  }
   const tags = gitTags();
   const stable = latestStable(tags);
   const result = nextStableVersion({ tags, commits: gitCommits(stable ? `v${formatVersion(stable)}` : undefined) });

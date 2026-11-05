@@ -261,18 +261,42 @@ export function setLockVersion(lockText, version) {
 }
 
 /** A conventional subject: `type`, an optional `(scope)`, an optional `!`, then `: `. The `!` has no effect (spec:release#r-r14). */
-const CONVENTIONAL_SUBJECT = /^([a-z]+)(?:\([^)]*\))?!?: \S/;
-/** A `Release:` footer line. Only lines after the subject count; the value is whatever follows on that line. */
+const CONVENTIONAL_SUBJECT = /^([a-z]+)(?:\([^)]*\))?!?: \S/i;
+/** A `Release:` footer line; the value is whatever follows on that line. */
 const RELEASE_TRAILER = /^Release:[ \t]*(.*?)[ \t]*$/;
-const EXPLICIT_VERSION = new RegExp(`^v?${NUMBER}\.${NUMBER}\.${NUMBER}$`);
+/** A git trailer line, `Token: value` or `Token #value`, and the continuation of one. */
+const TRAILER_LINE = /^[A-Za-z][A-Za-z0-9-]*(?::(?:[ \t]|$)|[ \t]#)/;
+const CONTINUATION_LINE = /^[ \t]+\S/;
+const EXPLICIT_VERSION = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+/**
+ * The trailer lines of a message: the last paragraph, when it is not the subject's and every line of it is a trailer or
+ * the continuation of one. Anything else, a code fence or prose in the last paragraph included, means no trailers.
+ */
+function footerLines(lines) {
+  const paragraphs = [[]];
+  for (const line of lines) {
+    if (line.trim() === '') {
+      if (paragraphs.at(-1).length > 0) paragraphs.push([]);
+    } else {
+      paragraphs.at(-1).push(line);
+    }
+  }
+  if (paragraphs.at(-1).length === 0) paragraphs.pop();
+  if (paragraphs.length < 2) return [];
+  const footer = paragraphs.at(-1);
+  const shaped = footer.every((line, index) => TRAILER_LINE.test(line) || (index > 0 && CONTINUATION_LINE.test(line)));
+  return shaped ? footer : [];
+}
 const shortSha = (sha) => String(sha).slice(0, 7);
 
 /**
  * spec:release#r-r14. The next stable version, from the tags and the commits since the highest stable tag.
  * `commits` are `{ sha, message, merge? }` with the whole message (subject, body, footers). The base is the highest
  * stable-shaped tag (`STABLE_TAG`), `0.0.0` before the first. A merge commit with a subject that is not conventional is
- * ignored altogether, trailers included. A `Release:` trailer is any line `Release: <value>` after the subject, in any
- * commit that is not ignored. Returns `{ version, base, decidedBy }`: `version` is null when nothing is to be released,
+ * ignored altogether, trailers included. A `Release:` trailer is a line `Release: <value>` in the footer, the last
+ * paragraph of the message when it is made only of git trailers, in any commit that is not ignored. Types are matched
+ * in any case. Returns `{ version, base, decidedBy }`: `version` is null when nothing is to be released,
  * and `decidedBy` lists the commits that gave the version, each with its `effect`. Throws an Error naming the commit for
  * a trailer that is neither `major` nor a version, or a version not above the base tag.
  */
@@ -289,10 +313,10 @@ export function nextStableVersion({ tags, commits }) {
   for (const { sha, message, merge = false } of commits) {
     const lines = String(message).split(/\r?\n/);
     const subject = lines[0].trim();
-    const type = CONVENTIONAL_SUBJECT.exec(subject)?.[1];
+    const type = CONVENTIONAL_SUBJECT.exec(subject)?.[1]?.toLowerCase();
     if (merge && !type) continue;
     const candidates = [];
-    for (const line of lines.slice(1)) {
+    for (const line of footerLines(lines)) {
       const value = RELEASE_TRAILER.exec(line)?.[1];
       if (value === undefined) continue;
       const explicit = EXPLICIT_VERSION.exec(value);
