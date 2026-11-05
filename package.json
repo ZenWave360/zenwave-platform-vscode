@@ -397,6 +397,11 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.eventflow.lanes",
+        "title": "EventFlow Lanes…",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.preview.openToSide",
         "title": "Open Preview to the Side",
         "category": "ZenWave",
@@ -588,6 +593,10 @@
         {
           "command": "zenwave.eventflow.discardSavedPositions",
           "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowPositionsExist"
+        },
+        {
+          "command": "zenwave.eventflow.lanes",
+          "when": "activeCustomEditorId == zenwave.eventflow"
         },
         {
           "command": "zenwave.preview.openToSide",
@@ -974,6 +983,22 @@
           "default": true,
           "scope": "resource",
           "description": "Whether an EventFlow diagram opens with humanized labels (CheckoutStarted shown as \"Checkout Started\"). Each open diagram can be switched from the page or the command palette afterwards."
+        },
+        "zenwave.eventflow.lanes": {
+          "type": "string",
+          "enum": [
+            "none",
+            "systems",
+            "services"
+          ],
+          "enumDescriptions": [
+            "No lanes: the flow in its usual layout.",
+            "One full-width band per system.",
+            "One full-width band per service."
+          ],
+          "default": "none",
+          "scope": "resource",
+          "description": "How an EventFlow diagram opens: in lanes per system or per service, or without lanes. Needs a language server that draws lanes; saved positions are not used with lanes. Each open diagram can be switched from the page or the command palette afterwards."
         }
       }
     },
