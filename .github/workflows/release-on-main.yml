@@ -49,6 +49,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read # the release.yml runs that may still be going
     outputs:
       version: ${{ steps.plan.outputs.version }}
       sha: ${{ steps.plan.outputs.sha }}
@@ -66,6 +67,30 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+
+      # release.yml runs on after this workflow ends, waiting for the reviewer. A second release prepared meanwhile would
+      # put a higher tag above the first one, which then fails its own check, so nothing is planned until the last release
+      # is finished: it has a GitHub release, and no release.yml run is queued, waiting or running. Before the first stable
+      # release there is nothing to wait for.
+      - name: Refuse while a release is not finished
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          stable_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          running=$(gh run list --workflow release.yml --limit 100 --json status,headBranch             --jq '.[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested") | .headBranch')
+          while IFS= read -r branch; do
+            if [[ "$branch" =~ $stable_re ]]; then
+              echo "::error::release $branch is not finished: approve, re-run or finish it first."
+              exit 1
+            fi
+          done <<< "$running"
+          last=$(git tag --list 'v*' | grep -E "$stable_re" | sort -V | tail -n 1 || true)
+          if [ -n "$last" ] && ! gh release view "$last" > /dev/null 2>&1; then
+            echo "::error::release $last is not finished: approve, re-run or finish it first."
+            exit 1
+          fi
 
       - name: Compute the next version from the commits
         id: plan
@@ -128,6 +153,7 @@ jobs:
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       PLAN_SHA: ${{ needs.plan.outputs.sha }}
+      RUN_ID: ${{ github.run_id }}
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Check the version is major.minor.patch
@@ -166,12 +192,13 @@ jobs:
           head=$(gh api "repos/$GH_REPO/commits/release/$VERSION" --jq '.sha')
           subject=$(gh api "repos/$GH_REPO/commits/release/$VERSION" --jq '.commit.message | split("\n")[0]')
           parents=$(gh api "repos/$GH_REPO/commits/release/$VERSION" --jq '[.parents[].sha] | join(" ")')
-          if [ "$subject" = "chore(release): $VERSION" ] && [ "$parents" = "$PLAN_SHA" ]; then
-            echo "Branch release/$VERSION is this run's release commit $head: resuming from it."
+          run=$(gh api "repos/$GH_REPO/commits/release/$VERSION" --jq '.commit.message | split("\n") | map(select(startswith("Release-Run: "))) | (.[0] // "") | ltrimstr("Release-Run: ")')
+          if [ "$subject" = "chore(release): $VERSION" ] && [ "$parents" = "$PLAN_SHA" ] && [ "$run" = "$RUN_ID" ]; then
+            echo "Branch release/$VERSION is the release commit $head of this run: resuming from it."
             echo "release_sha=$head" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::error::Branch release/$VERSION already exists on origin and is not the release commit of this run (a release that did not finish, or one that did). Look at it and delete it before running again."
+          echo "::error::Branch release/$VERSION already exists from run ${run:-unknown}, not this run ($RUN_ID) (a release that did not finish, or one that did). Look at it and delete it before running again."
           exit 1
 
       - name: Set the version and create the release commit
@@ -193,7 +220,8 @@ jobs:
             exit 1
           fi
           git --no-pager diff --cached --stat
-          git commit -m "chore(release): $VERSION"
+          # The run is in the message so that only a re-run of this run resumes the branch; a new run fails on it.
+          git commit -m "chore(release): $VERSION" -m "Release-Run: $RUN_ID"
           echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # The token is only in the environment of the steps that push; it is never written to the checkout.
@@ -320,6 +348,11 @@ jobs:
       - name: Start the stable workflow on the tag
         run: |
           set -euo pipefail
+          existing=$(gh run list --workflow release.yml --branch "v$VERSION" --limit 1 --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            echo "release.yml was already started on v$VERSION, so it is not started again: $existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           gh workflow run release.yml --ref "v$VERSION"
           echo "Started release.yml on v$VERSION. It waits for the reviewer of vscode-release." >> "$GITHUB_STEP_SUMMARY"
           # Best effort: the run takes a moment to appear, and the link is only a convenience.

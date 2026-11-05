@@ -116,7 +116,12 @@ rest (spec R-R14 and R-R15):
 To see what a merge would release without changing anything, run the workflow by hand (Actions, Release on main, Run
 workflow, `dry_run` on): it prints the version, the commits that decided it and the notes check, and stops.
 
-Runs are one at a time and never cancelled. The release commit and the sync merge have a `chore(release)` or
+Runs are one at a time and never cancelled, and a release is one unit from the plan to the sync: `plan` stops with
+"release vA.B.C is not finished: approve, re-run or finish it first" while the highest stable tag has no GitHub release or
+a `release.yml` run is queued, waiting or running (before the first stable release there is nothing to wait for). Approve,
+re-run or finish that release, then run `release-on-main` again. `release.yml` has one concurrency group per tag, so a
+tag never replaces the pending run of another, and `release.yml` and `pre-release.yml` give a ref they do not accept (a
+branch, or any branch but `develop`) a group of its own, so it cannot replace a real pending run. The release commit and the sync merge have a `chore(release)` or
 `chore: sync version` subject, and a run started for such a head commit does nothing (for a manual run, the head that
 `plan` checked out is the one looked at); the pushes of the workflow's own
 token start no workflow in any case, so there is no loop. For the same reason no `pull_request` check runs on the two
@@ -134,13 +139,15 @@ cannot meet.
 - **A registry refused.** As for a pre-release: `publish` and `release` fail, the other registry has the version. Run the
   failed jobs of the `release.yml` run again; the registry that has the version skips it, and the GitHub release is updated, not duplicated.
 - **The sync conflicts.** The `release.yml` run fails after publication, its summary lists the conflicting files, and the pull request
-  `chore: sync version` stays open. The usual one is `release-notes/next.md`: `main` emptied it, and `develop` still has
+  `chore: sync version` stays open. When you run the failed jobs again, an open sync pull request whose head holds the
+  release commit is used, and its own head is checked, so a conflict resolved on its branch counts; the pre-release is
+  started only by the attempt that merges. The usual one is `release-notes/next.md`: `main` emptied it, and `develop` still has
   lines that are now in the release's notes. Resolve it in the pull request keeping only what `develop` added after the
   merge to `main`, and merge it. Nothing is published again.
 - **`prepare` failed half way.** Run its failed jobs again: if `release/X.Y.Z` holds this run's release commit (its
-  subject is `chore(release): X.Y.Z` and its parent is the commit that was planned), it is reused, with its pull request
-  and an existing tag.
-- **`release/X.Y.Z` already exists** and is not this run's. A new run for that version fails at once and says so. The
+  subject is `chore(release): X.Y.Z`, its parent is the commit that was planned and its `Release-Run:` trailer is this
+  run's id), it is reused, with its pull request and an existing tag. A new run finds another run's id and fails, naming it.
+- **`release/X.Y.Z` already exists** and is not this run's ("exists from run N"). A new run for that version fails at once and says so. The
   branch is left in place on purpose after a release. If it is from a run that stopped before the merge, look at its pull
   request, close it, delete the branch and run again. If the merge happened but the tag was not pushed, push the tag by
   hand on the release commit (the manual path below), which starts `release.yml`.

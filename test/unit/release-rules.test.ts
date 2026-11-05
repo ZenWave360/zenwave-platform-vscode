@@ -623,6 +623,11 @@ test('nextStableVersion: a milestone is asked for with a Release trailer', () =>
   assert.throws(() => on('Release: v0.5.0'), /not above the stable release 0\.7\.2/);
 });
 
+test('nextStableVersion: the Release-Run trailer of a release commit is not a Release trailer (spec:release#r-r15)', () => {
+  assert.deepEqual(nextOf(['v0.2.0'], ['chore(release): 0.3.0\n\nRelease-Run: 123']), { version: null, base: '0.2.0', decidedBy: [] });
+  assert.equal(nextOf(['v0.2.0'], ['fix: x\n\nRelease-Run: major\nSigned-off-by: a <a@b.c>']).version, '0.2.1');
+});
+
 test('nextStableVersion: breaking is not major', () => {
   assert.equal(nextOf(['v0.2.0'], ['feat!: drop a setting']).version, '0.3.0');
   assert.equal(nextOf(['v0.2.0'], ['feat(x)!: drop a setting\n\nBREAKING CHANGE: gone']).version, '0.3.0');

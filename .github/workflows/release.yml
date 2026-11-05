@@ -27,7 +27,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release
+  # One group per tag, so a tag never replaces the pending run of another; release-on-main starts the next release only
+  # when no run is left. A ref that is not a tag does nothing, and has a group of its own.
+  group: ${{ github.ref_type == 'tag' && format('release-{0}', github.ref_name) || format('release-rejected-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions: {}
@@ -287,41 +289,61 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # What goes to develop is the release commit, the tag's commit: from release/X.Y.Z when release-on-main made it and it
-      # still ends there, else from a branch sync/X.Y.Z made here (a tag pushed by hand). Nothing is published here, and a
-      # conflict leaves the pull request open for someone to resolve.
+      # What goes to develop is the release commit, the tag's commit. An open `chore: sync version` pull request whose head
+      # holds it is used as it is, with whatever was done on its branch to resolve a conflict; else a pull request is made from
+      # release/X.Y.Z when that branch ends at the tag (release-on-main made it), else from sync/X.Y.Z, made here from the tag
+      # (a tag pushed by hand). Nothing is published here, and a conflict leaves the pull request open to be resolved.
       - name: Merge the release commit into develop
+        id: sync
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          echo "merged=false" >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/develop; then
             echo "develop already holds the release commit; nothing to merge." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          head="sync/$VERSION"
-          if [ "$(git rev-parse --verify --quiet "refs/remotes/origin/release/$VERSION" || true)" = "$GITHUB_SHA" ]; then
-            head="release/$VERSION"
-          elif ! git rev-parse --verify --quiet "refs/remotes/origin/sync/$VERSION" > /dev/null; then
-            ASKPASS="$(mktemp)"
-            trap 'rm -f "$ASKPASS"' EXIT
-            printf '#!/bin/sh\nprintf %%s "${GITHUB_TOKEN}"\n' > "$ASKPASS"
-            chmod 700 "$ASKPASS"
-            GIT_ASKPASS="$ASKPASS" git push "https://x-access-token@github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA:refs/heads/sync/$VERSION"
-          fi
-          number=$(gh pr list --base develop --head "$head" --state open --json number --jq '.[0].number // empty')
+          number=''
+          head_sha=''
+          while read -r candidate oid; do
+            [ -n "$candidate" ] || continue
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$oid" 2> /dev/null; then
+              number="$candidate"
+              head_sha="$oid"
+              break
+            fi
+          done < <(gh pr list --base develop --state open --json number,title,headRefOid \
+            --jq '.[] | select(.title == "chore: sync version") | "\(.number) \(.headRefOid)"')
           if [ -z "$number" ]; then
+            if [ "$(git rev-parse --verify --quiet "refs/remotes/origin/release/$VERSION" || true)" = "$GITHUB_SHA" ]; then
+              head="release/$VERSION"
+            else
+              head="sync/$VERSION"
+              if git rev-parse --verify --quiet "refs/remotes/origin/$head" > /dev/null; then
+                git merge-base --is-ancestor "$GITHUB_SHA" "origin/$head" ||
+                  { echo "::error::Branch $head exists and does not hold the release commit $GITHUB_SHA. Look at it and delete it, then run the failed jobs again."; exit 1; }
+              else
+                ASKPASS="$(mktemp)"
+                trap 'rm -f "$ASKPASS"' EXIT
+                printf '#!/bin/sh\nprintf %%s "${GITHUB_TOKEN}"\n' > "$ASKPASS"
+                chmod 700 "$ASKPASS"
+                GIT_ASKPASS="$ASKPASS" git push "https://x-access-token@github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA:refs/heads/$head"
+              fi
+            fi
             url=$(gh pr create --base develop --head "$head" \
               --title "chore: sync version" \
               --body "The release commit of v$VERSION, so develop carries its major.minor and its pre-releases stay above the release.")
             number="${url##*/}"
+            head_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$head" || echo "$GITHUB_SHA")
           fi
-          if ! merged=$(git merge-tree --write-tree --name-only --no-messages origin/develop "$GITHUB_SHA"); then
+          # The head of the pull request as it is now, not the tag: a conflict resolved on its branch counts.
+          if ! merged=$(git merge-tree --write-tree --name-only --no-messages origin/develop "$head_sha"); then
             conflicts=$(printf '%s\n' "$merged" | tail -n +2)
             {
               echo "## Sync to develop needs a hand"
               echo
-              echo "The release commit conflicts with develop in these files. Pull request #$number is open; resolve it there. Nothing is published again."
+              echo "The release commit conflicts with develop in these files. Pull request #$number is open; resolve it there and run the failed jobs again. Nothing is published again."
               echo
               printf '%s\n' "$conflicts" | sed 's/.*/- `&`/'
               echo
@@ -332,11 +354,14 @@ jobs:
           fi
           gh pr merge "$number" --merge --subject "chore: sync version"
           [ "$(gh pr view "$number" --json state --jq '.state')" = MERGED ]
+          echo "merged=true" >> "$GITHUB_OUTPUT"
           echo "develop holds the release commit of v$VERSION (pull request #$number)." >> "$GITHUB_STEP_SUMMARY"
 
       # The token's merge starts no workflow, and a develop push between the tag and this merge failed the pre-release
-      # check for the old minor (spec:release#r-r8), so the pre-release is asked for here. It runs on develop only.
+      # check for the old minor (spec:release#r-r8), so the pre-release is asked for here, once, when this attempt merged.
+      # It runs on develop only.
       - name: Start the pre-release run on develop
+        if: steps.sync.outputs.merged == 'true'
         run: |
           set -euo pipefail
           gh workflow run pre-release.yml --ref develop

@@ -66,7 +66,7 @@ test('R-R15 plan reads the current head of main and passes that sha on, not gith
 });
 
 test('R-R15 only prepare writes before publication, dispatch only starts a workflow, and no secret is read', () => {
-  assert.deepEqual(main.jobs.plan?.permissions, { contents: 'read' });
+  assert.deepEqual(main.jobs.plan?.permissions, { contents: 'read', actions: 'read' });
   assert.deepEqual(main.jobs.prepare?.permissions, { contents: 'write', 'pull-requests': 'write' });
   assert.deepEqual(main.jobs.dispatch?.permissions, { actions: 'write' });
   for (const name of Object.keys(main.jobs)) {
@@ -99,8 +99,10 @@ test('R-R15 dry_run stops after plan, and the order inside prepare keeps the tag
 
 test('R-R15 a re-run of the same run resumes its release branch, and any other existing branch fails', () => {
   const prepare = jobText(mainText, 'prepare');
-  assert.match(prepare, /\[ "\$subject" = "chore\(release\): \$VERSION" \] && \[ "\$parents" = "\$PLAN_SHA" \]/);
-  assert.match(prepare, /already exists on origin and is not the release commit of this run/);
+  assert.match(prepare, /\[ "\$subject" = "chore\(release\): \$VERSION" \] && \[ "\$parents" = "\$PLAN_SHA" \] && \[ "\$run" = "\$RUN_ID" \]/);
+  assert.match(prepare, /RUN_ID: \$\{\{ github\.run_id \}\}/);
+  assert.match(prepare, /git commit -m "chore\(release\): \$VERSION" -m "Release-Run: \$RUN_ID"/);
+  assert.match(prepare, /already exists from run/);
   // The commit and the push are skipped on a resume; the pull request and the tag are looked up, not created twice.
   assert.equal(prepare.split("if: steps.branch.outputs.release_sha == ''").length, 3);
   assert.match(prepare, /gh pr list --base main --head "release\/\$VERSION" --state all/);
@@ -138,11 +140,33 @@ test('R-R15 sync is titled and merged as chore: sync version, lists the files th
   assert.match(sync, /gh pr merge "\$number" --merge --subject "chore: sync version"/);
   assert.match(sync, /git merge-tree --write-tree --name-only/);
   assert.match(sync, /sync\/\$VERSION/);
-  assert.match(sync, /gh pr list --base develop --head "\$head" --state open/);
+  // An open pull request whose head holds the release commit is reused and checked at its own head.
+  assert.match(sync, /gh pr list --base develop --state open --json number,title,headRefOid/);
+  assert.match(sync, /git merge-tree --write-tree --name-only --no-messages origin\/develop "\$head_sha"/);
+  assert.match(sync, /exists and does not hold the release commit/);
+  assert.match(sync, /if: steps\.sync\.outputs\.merged == 'true'/);
   assert.match(sync, /gh workflow run pre-release\.yml --ref develop/);
 });
 
 test('R-R15 pre-release.yml accepts a dispatch on develop and runs nothing for another ref', () => {
   assert.ok('workflow_dispatch' in pre.on);
   assert.equal(pre.jobs.verify?.if, "github.ref == 'refs/heads/develop'");
+});
+
+test('R-R15 a release is not planned while the last one is unfinished', () => {
+  const plan = jobText(mainText, 'plan');
+  assert.match(plan, /gh run list --workflow release\.yml --limit 100 --json status,headBranch/);
+  assert.match(plan, /gh release view "\$last"/);
+  assert.match(plan, /is not finished: approve, re-run or finish it first/);
+  assert.ok(plan.indexOf('Refuse while a release is not finished') < plan.indexOf('Compute the next version'));
+  // Starting release.yml twice for one tag is refused, not repeated.
+  assert.match(jobText(mainText, 'dispatch'), /gh run list --workflow release\.yml --branch "v\$VERSION" --limit 1/);
+});
+
+test('R-R15 concurrency groups: a tag never evicts another tag, and a rejected ref never evicts a real run', () => {
+  const group = (text: string) => (load(text) as { concurrency: { group: string; 'cancel-in-progress': boolean } }).concurrency;
+  assert.match(group(releaseText).group, /github\.ref_type == 'tag' && format\('release-\{0\}', github\.ref_name\) \|\| format\('release-rejected-\{0\}', github\.run_id\)/);
+  assert.match(group(preText).group, /github\.ref == 'refs\/heads\/develop' && 'pre-release' \|\| format\('pre-release-rejected-\{0\}', github\.run_id\)/);
+  assert.equal(group(releaseText)['cancel-in-progress'], false);
+  assert.equal(group(preText)['cancel-in-progress'], false);
 });

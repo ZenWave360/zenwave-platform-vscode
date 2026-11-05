@@ -34,7 +34,9 @@ on:
 # One publication at a time. A run that is already publishing is never cancelled; of the runs waiting behind it, only the
 # newest stays, so the newest commit ends up as the highest version and one in between may be skipped.
 concurrency:
-  group: pre-release
+  # Only a run on develop waits in the publishing group; a dispatch on another ref, which its job skips, must not replace a
+  # pending run of develop there.
+  group: ${{ github.ref == 'refs/heads/develop' && 'pre-release' || format('pre-release-rejected-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions: {}
