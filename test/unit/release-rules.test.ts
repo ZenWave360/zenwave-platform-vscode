@@ -10,6 +10,7 @@ import { raisePins, raisePinsText } from '../../scripts/raise-pins.mjs';
 import {
   buildChangelog,
   latestStable,
+  nextStableVersion,
   notesProblems,
   parseExtensionVersion,
   pinProblems,
@@ -561,4 +562,123 @@ test('R-R9 raising refuses a package the extension does not use, and a version t
     /Not a dependency of the extension: @zenwave360\/nope/,
   );
   assert.throws(() => raisePinsText(SOURCE, { '@zenwave360/lsp-js': 'next' }), /not an exact version/);
+});
+
+const commit = (message: string, merge = false, sha = `${Math.random().toString(16).slice(2, 9)}0000000000000000000000000000000`) => ({ sha, message, merge });
+const nextOf = (tags: string[], messages: string[]) => nextStableVersion({ tags, commits: messages.map((message) => commit(message)) });
+
+test('nextStableVersion: a fix gives a patch (spec:release#r-r14)', () => {
+  const result = nextOf(['v0.2.0'], ['fix: x', 'chore: y']);
+  assert.equal(result.version, '0.2.1');
+  assert.equal(result.base, '0.2.0');
+  assert.deepEqual(result.decidedBy.map(({ subject, effect }) => [subject, effect]), [['fix: x', 'fix']]);
+});
+
+test('nextStableVersion: a feature gives a minor, with or without a scope', () => {
+  assert.equal(nextOf(['v0.2.0'], ['fix: x', 'chore: y', 'feat(eventflow): z']).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.0'], ['feat: z']).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.4'], ['fix(preview): z']).version, '0.2.5');
+  assert.equal(nextOf(['v0.2.0'], ['feat(eventflow): z']).decidedBy[0].subject, 'feat(eventflow): z');
+});
+
+test('nextStableVersion: only other types release nothing', () => {
+  const messages = ['chore: a', 'docs: b', 'test: c', 'refactor: d', 'perf: e', 'ci: f', 'build: g', 'style: h', 'Update the readme'];
+  assert.deepEqual(nextOf(['v0.2.0'], messages), { version: null, base: '0.2.0', decidedBy: [] });
+});
+
+test('nextStableVersion: a milestone is asked for with a Release trailer', () => {
+  const on = (trailer: string) => nextOf(['v0.7.2'], [`chore: milestone\n\nBody.\n\n${trailer}`]);
+  assert.equal(on('Release: major').version, '1.0.0');
+  assert.equal(on('Release: v1.0.0').version, '1.0.0');
+  assert.equal(on('Release: 1.0.0').version, '1.0.0');
+  assert.deepEqual(on('Release: major').decidedBy.map(({ effect }) => effect), ['Release: major']);
+  assert.throws(() => on('Release: v0.5.0'), /not above the stable release 0\.7\.2/);
+});
+
+test('nextStableVersion: breaking is not major', () => {
+  assert.equal(nextOf(['v0.2.0'], ['feat!: drop a setting']).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.0'], ['feat(x)!: drop a setting\n\nBREAKING CHANGE: gone']).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.0'], ['fix!: drop a setting']).version, '0.2.1');
+  assert.equal(nextOf(['v0.2.0'], ['chore!: drop a setting\n\nBREAKING CHANGE: gone']).version, null);
+});
+
+test('nextStableVersion: before the first stable the base is 0.0.0', () => {
+  assert.equal(nextOf([], ['feat: a']).version, '0.1.0');
+  assert.equal(nextOf([], ['feat: a']).base, '0.0.0');
+  assert.equal(nextOf([], ['fix: a']).version, '0.0.1');
+  assert.equal(nextOf([], ['chore: m\n\nRelease: major']).version, '1.0.0');
+});
+
+test('nextStableVersion: a mistyped trailer fails and names the commit', () => {
+  const commits = [commit('feat: fine'), commit('chore: milestone\n\nRelease: mayor', false, 'abcdef0123456789')];
+  assert.throws(() => nextStableVersion({ tags: ['v0.2.0'], commits }), /abcdef0 "chore: milestone".*"Release: mayor"/);
+  assert.throws(() => nextOf(['v0.2.0'], ['chore: m\n\nRelease: ']), /neither "major" nor a version/);
+  assert.throws(() => nextOf(['v0.2.0'], ['chore: m\n\nRelease: v1.0']), /neither "major" nor a version/);
+});
+
+test('nextStableVersion: several results, the highest wins, and the deciding commits are those that gave it', () => {
+  const result = nextOf(['v0.7.2'], ['feat: a', 'fix: b', 'chore: c\n\nRelease: v0.9.0', 'chore: d\n\nRelease: v0.8.0', 'feat: e\n\nRelease: 0.9.0']);
+  assert.equal(result.version, '0.9.0');
+  assert.deepEqual(result.decidedBy.map(({ subject }) => subject), ['chore: c', 'feat: e']);
+  assert.equal(nextOf(['v0.7.2'], ['feat: a', 'chore: c\n\nRelease: major', 'chore: d\n\nRelease: v1.0.0']).version, '1.0.0');
+  assert.equal(nextOf(['v0.7.2'], ['fix: a\n\nRelease: v0.7.9']).version, '0.7.9');
+  // A trailer below what the commits give does not lower it: the feature is still 0.8.0.
+  assert.equal(nextOf(['v0.7.2'], ['feat: a\n\nRelease: v0.7.9']).version, '0.8.0');
+});
+
+test('nextStableVersion: a trailer releases even when everything else is a chore', () => {
+  assert.equal(nextOf(['v0.2.0'], ['chore: a', 'docs: b\n\nRelease: v0.2.1']).version, '0.2.1');
+});
+
+test('nextStableVersion: a merge commit that is not conventional is ignored, trailers included', () => {
+  const merge = (message: string) => commit(message, true);
+  assert.equal(nextStableVersion({ tags: ['v0.2.0'], commits: [merge('Merge branch develop into main'), commit('fix: a')] }).version, '0.2.1');
+  assert.equal(nextStableVersion({ tags: ['v0.2.0'], commits: [merge('Merge pull request #4\n\nRelease: mayor'), commit('chore: a')] }).version, null);
+  assert.equal(nextStableVersion({ tags: ['v0.2.0'], commits: [merge('feat: merged feature')] }).version, '0.3.0');
+  // The same subject on an ordinary commit still counts.
+  assert.equal(nextStableVersion({ tags: ['v0.2.0'], commits: [commit('Merge branch develop')] }).version, null);
+});
+
+test('nextStableVersion: pre-release shaped and other tags are not the base', () => {
+  const tags = ['v0.1.0', 'v0.2.0-pre', 'v0.9.1-pre', 'v1.0.0-rc.1', 'vNext', 'v0.1.1'];
+  assert.equal(nextOf(tags, ['fix: a']).base, '0.1.1');
+  assert.equal(nextOf(tags, ['fix: a']).version, '0.1.2');
+  assert.equal(nextOf(['v0.9.0', 'v0.10.0'], ['fix: a']).version, '0.10.1');
+});
+
+test('nextStableVersion: an explicit version equal to the base fails', () => {
+  assert.throws(() => nextOf(['v0.7.2'], ['chore: m\n\nRelease: v0.7.2']), /not above the stable release 0\.7\.2/);
+  assert.throws(() => nextOf([], ['chore: m\n\nRelease: 0.0.0']), /not above 0\.0\.0/);
+});
+
+test('nextStableVersion: CRLF messages and a trailer only after the subject', () => {
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\r\n\r\nBody\r\n\r\nRelease: major\r\n']).version, '1.0.0');
+  assert.equal(nextOf(['v0.7.2'], ['Release: major']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['chore: a\n\nThe Release: mayor line inside a sentence']).version, null);
+});
+
+test('nextStableVersion: Release is read only in the footer, the last paragraph made of trailers', () => {
+  const fence = '```\nRelease: major\n```';
+  assert.equal(nextOf(['v0.7.2'], [`docs: explain it\n\nExample:\n\n${fence}`]).version, null);
+  assert.equal(nextOf(['v0.7.2'], [`docs: explain it\n\n${fence}\n\nMore text.`]).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['docs: explain it\n\nExample:\n\nRelease: mayor\n\nMore text.']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['docs: explain it\n\nRelease: mayor\nand some prose\n\nMore text.']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nBody.\n\nSigned-off-by: A <a@b.c>\nRelease: major']).version, '1.0.0');
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nRelease: v0.9.0\nRefs #12\nCo-authored-by: A <a@b.c>\n  and more']).version, '0.9.0');
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nSome prose.\nRelease: major']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\n\nRelease: major\nSome prose.']).version, null);
+  assert.equal(nextOf(['v0.7.2'], ['chore: m\nRelease: major']).version, null);
+});
+
+test('nextStableVersion: an explicit version has real dots', () => {
+  assert.throws(() => nextOf(['v0.7.2'], ['chore: m\n\nRelease: v1x0x0']), /neither "major" nor a version/);
+  assert.throws(() => nextOf(['v0.7.2'], ['chore: m\n\nRelease: 1-0-0']), /neither "major" nor a version/);
+  assert.throws(() => nextOf(['v0.7.2'], ['chore: m\n\nRelease: 01.0.0']), /neither "major" nor a version/);
+});
+
+test('nextStableVersion: types are matched in any case', () => {
+  assert.equal(nextOf(['v0.2.0'], ['FEAT: x']).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.0'], ['Fix(scope): y']).version, '0.2.1');
+  assert.equal(nextStableVersion({ tags: ['v0.2.0'], commits: [commit('Feat: merged', true)] }).version, '0.3.0');
+  assert.equal(nextOf(['v0.2.0'], ['CHORE: z']).version, null);
 });

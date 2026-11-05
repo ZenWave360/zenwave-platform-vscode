@@ -259,3 +259,94 @@ export function setLockVersion(lockText, version) {
   if (!pattern.test(lockText)) throw new Error('package-lock.json has no root package entry with a version');
   return lockText.replace(pattern, `$1${version}$2`).replace(/^(  "version": ")[^"]*(")/m, `$1${version}$2`);
 }
+
+/** A conventional subject: `type`, an optional `(scope)`, an optional `!`, then `: `. The `!` has no effect (spec:release#r-r14). */
+const CONVENTIONAL_SUBJECT = /^([a-z]+)(?:\([^)]*\))?!?: \S/i;
+/** A `Release:` footer line; the value is whatever follows on that line. */
+const RELEASE_TRAILER = /^Release:[ \t]*(.*?)[ \t]*$/;
+/** A git trailer line, `Token: value` or `Token #value`, and the continuation of one. */
+const TRAILER_LINE = /^[A-Za-z][A-Za-z0-9-]*(?::(?:[ \t]|$)|[ \t]#)/;
+const CONTINUATION_LINE = /^[ \t]+\S/;
+const EXPLICIT_VERSION = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+/**
+ * The trailer lines of a message: the last paragraph, when it is not the subject's and every line of it is a trailer or
+ * the continuation of one. Anything else, a code fence or prose in the last paragraph included, means no trailers.
+ */
+function footerLines(lines) {
+  const paragraphs = [[]];
+  for (const line of lines) {
+    if (line.trim() === '') {
+      if (paragraphs.at(-1).length > 0) paragraphs.push([]);
+    } else {
+      paragraphs.at(-1).push(line);
+    }
+  }
+  if (paragraphs.at(-1).length === 0) paragraphs.pop();
+  if (paragraphs.length < 2) return [];
+  const footer = paragraphs.at(-1);
+  const shaped = footer.every((line, index) => TRAILER_LINE.test(line) || (index > 0 && CONTINUATION_LINE.test(line)));
+  return shaped ? footer : [];
+}
+const shortSha = (sha) => String(sha).slice(0, 7);
+
+/**
+ * spec:release#r-r14. The next stable version, from the tags and the commits since the highest stable tag.
+ * `commits` are `{ sha, message, merge? }` with the whole message (subject, body, footers). The base is the highest
+ * stable-shaped tag (`STABLE_TAG`), `0.0.0` before the first. A merge commit with a subject that is not conventional is
+ * ignored altogether, trailers included. A `Release:` trailer is a line `Release: <value>` in the footer, the last
+ * paragraph of the message when it is made only of git trailers, in any commit that is not ignored. Types are matched
+ * in any case. Returns `{ version, base, decidedBy }`: `version` is null when nothing is to be released,
+ * and `decidedBy` lists the commits that gave the version, each with its `effect`. Throws an Error naming the commit for
+ * a trailer that is neither `major` nor a version, or a version not above the base tag.
+ */
+export function nextStableVersion({ tags, commits }) {
+  const baseVersion = latestStable(tags) ?? { major: 0, minor: 0, patch: 0 };
+  const base = formatVersion(baseVersion);
+  const hasTag = latestStable(tags) !== undefined;
+  const bump = {
+    major: { effect: 'Release: major', version: { major: baseVersion.major + 1, minor: 0, patch: 0 } },
+    minor: { effect: 'feat', version: { major: baseVersion.major, minor: baseVersion.minor + 1, patch: 0 } },
+    patch: { effect: 'fix', version: { major: baseVersion.major, minor: baseVersion.minor, patch: baseVersion.patch + 1 } },
+  };
+  const decisions = [];
+  for (const { sha, message, merge = false } of commits) {
+    const lines = String(message).split(/\r?\n/);
+    const subject = lines[0].trim();
+    const type = CONVENTIONAL_SUBJECT.exec(subject)?.[1]?.toLowerCase();
+    if (merge && !type) continue;
+    const candidates = [];
+    for (const line of footerLines(lines)) {
+      const value = RELEASE_TRAILER.exec(line)?.[1];
+      if (value === undefined) continue;
+      const explicit = EXPLICIT_VERSION.exec(value);
+      if (value === 'major') {
+        candidates.push(bump.major);
+      } else if (explicit) {
+        const version = { major: Number(explicit[1]), minor: Number(explicit[2]), patch: Number(explicit[3]) };
+        if (compareVersions(version, baseVersion) <= 0) {
+          throw new Error(
+            `Commit ${shortSha(sha)} "${subject}": Release: ${value} is not above ${hasTag ? `the stable release ${base}` : `${base}`}`,
+          );
+        }
+        candidates.push({ effect: `Release: ${formatVersion(version)}`, version });
+      } else {
+        throw new Error(`Commit ${shortSha(sha)} "${subject}": "Release: ${value}" is neither "major" nor a version X.Y.Z`);
+      }
+    }
+    if (type === 'feat') candidates.push(bump.minor);
+    else if (type === 'fix') candidates.push(bump.patch);
+    if (candidates.length === 0) continue;
+    const best = candidates.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
+    decisions.push({ sha, subject, effect: best.effect, version: best.version });
+  }
+  if (decisions.length === 0) return { version: null, base, decidedBy: [] };
+  const winner = decisions.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a)).version;
+  return {
+    version: formatVersion(winner),
+    base,
+    decidedBy: decisions
+      .filter(({ version }) => compareVersions(version, winner) === 0)
+      .map(({ sha, subject, effect }) => ({ sha, subject, effect })),
+  };
+}
