@@ -327,7 +327,7 @@ test('R-R11 prepare sets the version and the notes, refusing a version that is n
   assert.match(prepareProblems('0.1.0', [], { targetExists: true })[0], /release-notes\.v0\.1\.0\.md already exists/);
   assert.match(prepareProblems('0.1', [])[0], /not major.minor.patch/);
   const lock = (version: string) =>
-    `{\n  "packages": {\n    "": {\n      "name": "z",\n      "version": "${version}",\n      "dependencies": { "a": "1.0.0" }\n    }\n  }\n}\n`;
+    `{\n  "name": "z",\n  "version": "${version}",\n  "packages": {\n    "": {\n      "name": "z",\n      "version": "${version}",\n      "dependencies": { "a": "1.0.0" }\n    }\n  }\n}\n`;
   assert.equal(setLockVersion(lock('0.0.0'), '0.2.0'), lock('0.2.0'));
   assert.throws(() => setLockVersion('{ "packages": {} }', '0.2.0'), /no root package entry/);
   assert.match(prepareProblems('0.2.0', [], { nextExists: false })[0], /release-notes\/next\.md is missing/);
