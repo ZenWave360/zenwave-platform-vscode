@@ -133,7 +133,20 @@ export function notesProblems({ channel, version, notes = {} }) {
   if (channel !== 'stable') return [];
   const file = `release-notes/${releaseNotesFile(version)}`;
   if (notes.release === undefined) return [`${file} is missing: run "npm run release:prepare -- ${version}" on main`];
-  const lines = notes.release.split(/\r?\n/).filter((line) => line.trim() !== '');
+  return noteContentProblems(file, notes.release);
+}
+
+/**
+ * spec:release#r-r15. The notes check of the plan job: `release-notes/next.md`, which `prepare` will turn into the
+ * release's notes, must exist and pass the content rules of r-r11, so a bad note fails before anything is changed.
+ */
+export function nextNotesProblems(text) {
+  const file = `release-notes/${NEXT_NOTES}`;
+  return text === undefined ? [`${file} is missing`] : noteContentProblems(file, text);
+}
+
+function noteContentProblems(file, text) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
   if (!lines.some((line) => !HEADING.test(line))) return [`${file} is empty: it needs a line that is not a heading`];
   // Only the first heading and the first line that is not a heading say whether the file is a draft; a later line may use the word.
   const marked = [lines.find((line) => HEADING.test(line)), lines.find((line) => !HEADING.test(line))].find((line) => line !== undefined && DRAFT.test(line));

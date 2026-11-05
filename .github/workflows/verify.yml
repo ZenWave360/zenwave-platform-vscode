@@ -18,6 +18,10 @@ on:
         description: The calling workflow's run number, which becomes the patch of a pre-release
         type: string
         default: ''
+      tag:
+        description: A stable tag to build, when the calling workflow's own ref is not that tag (release-on-main.yml)
+        type: string
+        default: ''
     outputs:
       version:
         description: The version of the verified VSIX
@@ -35,11 +39,12 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     env:
-      ZENWAVE_BUILD_COMMIT: ${{ github.sha }}
       ZENWAVE_USE_LOCAL_DEPENDENCIES: 'false'
       CHANNEL: ${{ inputs.channel }}
       RUN_NUMBER: ${{ inputs.run-number }}
-      REF_NAME: ${{ github.ref_name }}
+      TAG_INPUT: ${{ inputs.tag }}
+      # The tag being released: the pushed tag, or the one release-on-main.yml passes (its own ref is main).
+      REF_NAME: ${{ inputs.tag || github.ref_name }}
       SCRIPTS: scripts
 
     steps:
@@ -49,13 +54,27 @@ jobs:
             development | pre-release | stable) ;;
             *) echo "::error::Unknown channel $CHANNEL"; exit 1 ;;
           esac
+          tag_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [ -n "$TAG_INPUT" ] && { [ "$CHANNEL" != stable ] || [[ ! "$TAG_INPUT" =~ $tag_re ]]; }; then
+            echo "::error::A tag input is only for the stable channel and has to be vMAJOR.MINOR.PATCH."
+            exit 1
+          fi
 
       - name: Check out the commit
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          # The tag, when the caller is not running on it: its commit is what is built, verified and published.
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || '' }}
           # All branches and tags: a stable tag must be on main, and a pre-release must be above the latest stable tag.
           fetch-depth: 0
           persist-credentials: false
+
+      # The commit being built: the caller's github.sha is main's head when release-on-main.yml passes a tag.
+      - name: Name the commit
+        run: |
+          commit=$(git rev-parse HEAD)
+          echo "COMMIT=$commit" >> "$GITHUB_ENV"
+          echo "ZENWAVE_BUILD_COMMIT=$commit" >> "$GITHUB_ENV"
 
       - name: Use Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -66,7 +85,7 @@ jobs:
       - name: Check the tag is on main
         if: inputs.channel == 'stable'
         run: |
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
+          git merge-base --is-ancestor "$COMMIT" origin/main ||
             { echo "::error::$REF_NAME is not on main, so it publishes nothing"; exit 1; }
 
       - name: Check the release rules
@@ -146,7 +165,7 @@ jobs:
         run: npm run package -- --out "$VSIX"
         env:
           ZENWAVE_RELEASE_CHANNEL: ${{ inputs.channel == 'pre-release' && 'pre-release' || '' }}
-          ZENWAVE_RELEASE_TAG: ${{ inputs.channel == 'stable' && github.ref_name || '' }}
+          ZENWAVE_RELEASE_TAG: ${{ inputs.channel == 'stable' && env.REF_NAME || '' }}
 
       - name: Verify package contents and build identity
         run: |
@@ -154,7 +173,7 @@ jobs:
           [ "$CHANNEL" = development ] || channel=(--channel "$CHANNEL")
           npm run verify:vsix -- "$VSIX" "${channel[@]}"
         env:
-          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_COMMIT: ${{ env.COMMIT }}
 
       - name: Prepare the packaged browser extension
         run: |
@@ -182,7 +201,7 @@ jobs:
           npm run verify:vsix -- "$VSIX" --compare artifacts/rebuilt.vsix
         env:
           ZENWAVE_RELEASE_CHANNEL: ${{ inputs.channel == 'pre-release' && 'pre-release' || '' }}
-          ZENWAVE_RELEASE_TAG: ${{ inputs.channel == 'stable' && github.ref_name || '' }}
+          ZENWAVE_RELEASE_TAG: ${{ inputs.channel == 'stable' && env.REF_NAME || '' }}
 
       - name: Describe the verified VSIX
         run: |
@@ -196,7 +215,7 @@ jobs:
             [ "$CHANNEL" != pre-release ] || [ "$GITHUB_EVENT_NAME" != pull_request ] ||
               echo "This is a dry run on a pull request: nothing is published, and the patch is this workflow's run number, not the pre-release workflow's."
             echo
-            echo "Commit \`$GITHUB_SHA\`, $(stat --format=%s "$VSIX") bytes."
+            echo "Commit \`$COMMIT\`,$(stat --format=%s "$VSIX") bytes."
             echo
             echo '| Package | Version in the VSIX |'
             echo '| --- | --- |'

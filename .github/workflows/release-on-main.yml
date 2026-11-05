@@ -1,0 +1,403 @@
+name: Release on main
+
+# A push to main with something to release prepares, tags, publishes and syncs (spec:release#r-r15), as release-gradle.yml
+# of ZenWave360/release-workflows does for the Gradle projects. A tag pushed by hand still starts release.yml on its own.
+#
+#   plan      no credential: the next version from the commits (r-r14) and the notes check on release-notes/next.md.
+#             No version, no change: the run ends green. dry_run stops here.
+#   prepare   the only job that writes before publication: release/X.Y.Z from the planned commit, the release commit,
+#             a pull request merged with a merge commit, then the tag vX.Y.Z on the release commit
+#   publish   release.yml, called with the tag: its checks, the vscode-release approval and its credential isolation
+#   release   the GitHub release for the tag, once the registries were tried
+#   sync      the release commit into develop through a pull request, so develop carries the new major.minor (r-r8)
+#
+# The workflow's own token starts no workflow: neither the merge into main, nor the tag, nor the pull requests start
+# anything, which is what keeps this from looping and why publish is a job here and not a reaction to the tag.
+# The repository must allow GitHub Actions to create pull requests, and neither main nor develop may require status checks
+# or reviews that a pull request opened with this token cannot get: no pull_request workflow runs for it, and the build
+# that counts is the one publish runs on the tag.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the version and the notes check, then stop; nothing is changed
+        type: boolean
+        default: false
+
+# One release at a time, never cancelled. GitHub keeps one waiting run per group, the newest, which plans from a main
+# that already holds the older commits.
+concurrency:
+  group: release-on-main
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  plan:
+    # The release commit and the sync merge have these messages (the merges are given them below), so they do nothing even if
+    # something else starts a run for them. A manual run has no head commit and goes on, but only on main.
+    if: >-
+      github.ref == 'refs/heads/main'
+      && !startsWith(github.event.head_commit.message, 'chore(release)')
+      && !startsWith(github.event.head_commit.message, 'chore: sync version')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      # The commit this run was started for, not whatever main is by the time a later job starts.
+      - name: Check out the full history and tags
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Compute the next version from the commits
+        id: plan
+        run: |
+          set -euo pipefail
+          node scripts/release.mjs plan --json > "$RUNNER_TEMP/plan.json"
+          version=$(jq -r '.version // empty' "$RUNNER_TEMP/plan.json")
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [ -n "$version" ] && [[ ! "$version" =~ $version_re ]]; then
+            echo "::error::plan gave \"$version\", which is not major.minor.patch with no leading zeros."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Release plan"
+            echo
+            echo "Commit \`$(git rev-parse HEAD)\`, base $(jq -r .base "$RUNNER_TEMP/plan.json")."
+            echo
+            if [ -n "$version" ]; then
+              echo "Next version: **$version**. Decided by:"
+              echo
+              jq -r '.decidedBy[] | "- `\(.sha[0:7])` [\(.effect)] \(.subject)"' "$RUNNER_TEMP/plan.json"
+            else
+              echo "Nothing to release: no commit asks for a version."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Before anything is changed: a missing, empty or draft note fails here (spec:release#r-r11).
+      - name: Check the release notes
+        if: steps.plan.outputs.version != ''
+        run: node scripts/release.mjs check-next-notes
+
+      - name: Say that this was a dry run
+        if: steps.plan.outputs.version != '' && inputs.dry_run
+        run: |
+          echo "Dry run: the notes check passed, and nothing was changed, tagged or published." >> "$GITHUB_STEP_SUMMARY"
+
+  prepare:
+    needs: plan
+    if: needs.plan.outputs.version != '' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # push the release branch and the tag
+      pull-requests: write # open and merge the release pull request
+    outputs:
+      tag: ${{ steps.commit.outputs.tag }}
+      release_sha: ${{ steps.commit.outputs.release_sha }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check the version is major.minor.patch
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::The version from plan is not major.minor.patch with no leading zeros, so this job stops."
+            exit 1
+          fi
+
+      - name: Check out the planned commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # A leftover branch is a release that half happened: it is looked at, not overwritten.
+      - name: Refuse a stale release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export BRANCH_REF="refs/heads/release/$VERSION"
+          existing=$(gh api "repos/$GH_REPO/git/matching-refs/heads/release/$VERSION" --jq '.[] | select(.ref == $ENV.BRANCH_REF) | .ref')
+          if [ -n "$existing" ]; then
+            echo "::error::Branch release/$VERSION already exists on origin (a release that did not finish, or one that did). Look at it and delete it before running again."
+            exit 1
+          fi
+
+      - name: Set the version and create the release commit
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "release/$VERSION"
+          node scripts/release.mjs prepare "$VERSION"
+          git add -A
+          # Only the manifest, the lockfile and the release notes files may change; anything else aborts the release.
+          unexpected=$(git diff --cached --no-renames --name-only |
+            grep -vxF -e package.json -e package-lock.json -e release-notes/next.md -e "release-notes/release-notes.v$VERSION.md" || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::prepare changed files it may not change:"
+            echo "$unexpected"
+            exit 1
+          fi
+          git --no-pager diff --cached --stat
+          git commit -m "chore(release): $VERSION"
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # The token is only in the environment of the steps that push; it is never written to the checkout.
+      - name: Push the release branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ASKPASS="$(mktemp)"
+          trap 'rm -f "$ASKPASS"' EXIT
+          printf '#!/bin/sh\nprintf %%s "${GITHUB_TOKEN}"\n' > "$ASKPASS"
+          chmod 700 "$ASKPASS"
+          GIT_ASKPASS="$ASKPASS" git push "https://x-access-token@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/release/$VERSION"
+
+      # A pull request needs no bypass of the ruleset of main, which a direct push would. The merge commit is given the
+      # release subject, so a run started for it would do nothing (see the guard of plan).
+      - name: Open and merge the release pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url=$(gh pr create --base main --head "release/$VERSION" \
+            --title "chore(release): $VERSION" \
+            --body "The release commit for v$VERSION, made by the release workflow. It is merged at once; the tag follows.")
+          number="${url##*/}"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          # A refusal is looked at below, where a conflict is told from a rule that holds the merge back.
+          gh pr merge "$number" --merge --subject "chore(release): $VERSION" ||
+            echo "::warning::The merge of pull request #$number was refused; looking at why."
+
+      - name: Wait until the release pull request is merged
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          elapsed=0
+          while true; do
+            state=$(gh pr view "$NUMBER" --json state --jq '.state')
+            [ "$state" = MERGED ] && break
+            if [ "$state" = CLOSED ]; then
+              echo "::error::Pull request #$NUMBER was closed without merging."
+              exit 1
+            fi
+            if [ "$(gh pr view "$NUMBER" --json mergeable --jq '.mergeable')" = CONFLICTING ]; then
+              echo "::error::Pull request #$NUMBER conflicts with main: main changed the manifest, the lockfile or the notes after this run was planned. Resolve it by hand, or delete release/$VERSION and run again. No tag was pushed."
+              exit 1
+            fi
+            if [ "$elapsed" -ge 600 ]; then
+              echo "::error::Pull request #$NUMBER was not merged in ten minutes (state $state). Check the rules of main. No tag was pushed."
+              exit 1
+            fi
+            sleep 15
+            elapsed=$((elapsed + 15))
+          done
+
+      # Only after the merge is confirmed, so the tag never names a commit that main does not hold. The release commit
+      # is the one on the branch, and the merge commit contains it. A re-run finds the tag where it was put.
+      - name: Push the tag on the release commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.commit.outputs.release_sha }}
+          TAG: ${{ steps.commit.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ASKPASS="$(mktemp)"
+          trap 'rm -f "$ASKPASS"' EXIT
+          printf '#!/bin/sh\nprintf %%s "${GITHUB_TOKEN}"\n' > "$ASKPASS"
+          chmod 700 "$ASKPASS"
+          remote="https://x-access-token@github.com/${GITHUB_REPOSITORY}.git"
+          GIT_ASKPASS="$ASKPASS" git fetch "$remote" main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main ||
+            { echo "::error::The release commit $RELEASE_SHA is not on main, so it is not tagged."; exit 1; }
+          export TAG_REF="refs/tags/$TAG"
+          existing=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq '.[] | select(.ref == $ENV.TAG_REF) | .object.sha')
+          if [ -n "$existing" ] && [ "$existing" != "$RELEASE_SHA" ]; then
+            echo "::error::$TAG already points at $existing, not at the release commit $RELEASE_SHA."
+            exit 1
+          fi
+          if [ -z "$existing" ]; then
+            git tag "$TAG" "$RELEASE_SHA"
+            GIT_ASKPASS="$ASKPASS" git push "$remote" "refs/tags/$TAG"
+          fi
+          echo "Release commit \`$RELEASE_SHA\` is on main and tagged \`$TAG\`." >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs:
+      - plan
+      - prepare
+    # The stable workflow of spec:release#r-r11 with the tag as input. No secret is passed: it names the vscode-release
+    # environment itself, where the reviewer approves, and the registry credentials are that environment's secrets. This
+    # job may grant what release.yml's publish job asks for, and no more.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+
+  release:
+    needs:
+      - plan
+      - prepare
+      - publish
+    # After the registries were tried, whichever way they went. When publish never started (the reviewer refused, or verify
+    # failed) its outputs are empty and no GitHub release is made. It fails when a registry did, so the run is not reported
+    # as a success, and running the failed jobs again brings the release up to date.
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.publish.outputs.marketplace != '' && needs.publish.outputs.marketplace != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the GitHub release for the existing tag
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+      MARKETPLACE: ${{ needs.publish.outputs.marketplace }}
+      OPENVSX: ${{ needs.publish.outputs.openvsx }}
+    steps:
+      - name: Check the version is major.minor.patch
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::The version from plan is not major.minor.patch with no leading zeros, so this job stops."
+            exit 1
+          fi
+
+      # The notes and the VSIX are only read as data, from the build that publish used.
+      - name: Download the verified VSIX
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-vsix
+          path: artifacts
+
+      - name: Create the GitHub release
+        run: |
+          set -euo pipefail
+          [ "$TAG" = "v$VERSION" ]
+          vsix=$(ls artifacts/zenwave-platform-*.vsix)
+          {
+            cat artifacts/release-notes.md
+            echo
+            echo "Built from $RELEASE_SHA. VS Code Marketplace: $MARKETPLACE. Open VSX: $OPENVSX."
+          } > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # A re-run: one release, and the VSIX stays the file first attached.
+            gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "$(basename "$vsix")" ||
+              gh release upload "$TAG" "$vsix"
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" "$vsix" --verify-tag --title "ZenWave Platform $VERSION" --notes-file notes.md
+          fi
+          echo "GitHub release: $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Do not report success when a registry failed
+        if: ${{ needs.publish.result != 'success' }}
+        run: |
+          echo "::error::A registry did not take $VERSION, so this run is a failure; the release records the build. Run the failed jobs again to finish publishing."
+          exit 1
+
+  sync:
+    needs:
+      - plan
+      - prepare
+      - release
+    # Only after the release, so a refused approval or a failed registry leaves develop as it is until the run is finished.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # merge the sync pull request
+      pull-requests: write # open it
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check the version is major.minor.patch
+        run: |
+          set -euo pipefail
+          version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $version_re ]]; then
+            echo "::error::The version from plan is not major.minor.patch with no leading zeros, so this job stops."
+            exit 1
+          fi
+
+      - name: Check out the history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The release commit alone goes to develop, from the branch the release made: the version, the lockfile entry and the
+      # notes. Nothing is published here, and a conflict leaves the pull request open for someone to resolve.
+      - name: Merge the release commit into develop
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/develop && {
+            echo "develop already holds the release commit; nothing to sync." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          number=$(gh pr list --base develop --head "release/$VERSION" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            url=$(gh pr create --base develop --head "release/$VERSION" \
+              --title "chore: sync version" \
+              --body "The release commit of v$VERSION, so develop carries its major.minor and its pre-releases stay above the release.")
+            number="${url##*/}"
+          fi
+          if ! merged=$(git merge-tree --write-tree --name-only --no-messages origin/develop "$RELEASE_SHA"); then
+            conflicts=$(printf '%s\n' "$merged" | tail -n +2)
+            {
+              echo "## Sync to develop needs a hand"
+              echo
+              echo "The release commit conflicts with develop in these files. Pull request #$number is open; resolve it there. Nothing is published again."
+              echo
+              printf '%s\n' "$conflicts" | sed 's/.*/- `&`/'
+              echo
+              echo "release-notes/next.md is the usual one: keep only what develop added after the merge to main, and none of what is in the release's notes."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Pull request #$number conflicts with develop in: $(printf '%s' "$conflicts" | tr '\n' ' ')"
+            exit 1
+          fi
+          gh pr merge "$number" --merge --subject "chore: sync version"
+          [ "$(gh pr view "$number" --json state --jq '.state')" = MERGED ]
+          echo "develop holds the release commit of v$VERSION (pull request #$number)." >> "$GITHUB_STEP_SUMMARY"
