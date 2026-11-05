@@ -6,18 +6,21 @@
 //   node scripts/release.mjs prepare <version>
 //   node scripts/release.mjs notes --channel development|pre-release|stable
 //   node scripts/release.mjs info <file.vsix>
+//   node scripts/release.mjs plan [--json]
 //
 // `check` prints every problem and exits 1; `--run-number` also checks the version the stamp will give, and
 // `--git-tags` the tags of the repository. `stamp` sets the patch of the version in this checkout and commits
 // nothing. `notes` prints the text of the GitHub release, from the notes file of the channel. `prepare`, on main, sets the
 // manifest version, and the extension's entry of package-lock.json, and turns `release-notes/next.md` into
 // `release-notes.v<version>.md`, leaving an empty `next.md`; it commits nothing. `info` prints what a VSIX says about
-// itself as JSON.
+// itself as JSON. `plan` computes the next stable version from the conventional commits since the highest stable tag
+// (spec:release#r-r14): it prints the base, the version or "nothing to release" and the commits that decided it, or one
+// JSON object with `--json`; it exits 0 when there is nothing to release, and 1 with `error: ...` when the commits are invalid.
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareProblems, releaseNotesFile, releaseNotesText, releaseProblems, setLockVersion, setVersion, stampVersion, NEXT_NOTES } from './release-rules.mjs';
+import { formatVersion, latestStable, nextStableVersion, prepareProblems, releaseNotesFile, releaseNotesText, releaseProblems, setLockVersion, setVersion, stampVersion, NEXT_NOTES } from './release-rules.mjs';
 import { notesDirectory, readNotes } from './release-notes.mjs';
 import { linkedSiblings } from './siblings.mjs';
 
@@ -38,6 +41,38 @@ function gitTags() {
   const result = spawnSync('git', ['tag', '--list', 'v*'], { cwd: repositoryRoot, encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`git tag --list failed: ${result.stderr || result.error?.message}`);
   return result.stdout.split(/\r?\n/).filter(Boolean);
+}
+
+/** The commits reachable from HEAD and not from the base tag (all of HEAD before the first stable), with whole messages. */
+function gitCommits(baseTag) {
+  const range = baseTag ? [`${baseTag}..HEAD`] : ['HEAD'];
+  // Records end in NUL; inside one, sha, parents and message are separated by 0x1f, so any message text is safe.
+  const result = spawnSync('git', ['log', '-z', '--format=%H%x1f%P%x1f%B', ...range], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`git log failed: ${result.stderr || result.error?.message}`);
+  return result.stdout
+    .split('\0')
+    .filter((record) => record.trim() !== '')
+    .map((record) => {
+      const [sha, parents, message] = record.replace(/^\n/, '').split('\x1f');
+      return { sha, merge: parents.trim().split(/\s+/).filter(Boolean).length > 1, message: message ?? '' };
+    });
+}
+
+function plan() {
+  const tags = gitTags();
+  const stable = latestStable(tags);
+  const result = nextStableVersion({ tags, commits: gitCommits(stable ? `v${formatVersion(stable)}` : undefined) });
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  console.log(`Base: ${result.base}${stable ? '' : ' (no stable release yet)'}`);
+  console.log(result.version ? `Next version: ${result.version}` : 'Nothing to release.');
+  for (const { sha, subject, effect } of result.decidedBy) console.log(`  ${sha.slice(0, 7)} [${effect}] ${subject}`);
 }
 
 function check() {
@@ -114,8 +149,8 @@ async function info() {
 }
 
 try {
-  const commands = { check, stamp, prepare, notes, info };
-  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|prepare|notes|info ...');
+  const commands = { check, stamp, prepare, notes, info, plan };
+  if (!commands[command]) throw new Error('Usage: node scripts/release.mjs check|stamp|prepare|notes|info|plan ...');
   await commands[command]();
 } catch (error) {
   console.error(`error: ${error.message}`);
