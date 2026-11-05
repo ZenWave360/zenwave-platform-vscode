@@ -21,22 +21,27 @@ const READY = { type: 'webviewReady', payload: { protocol: EVENTFLOW_PROTOCOL, p
 const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI, flowVariants = false, savedPositions = false) {
-  const positionsFile = { file: { exists: false } as PositionsFile, written: [] as string[], removed: 0, readOnly: false, fail: undefined as Error | undefined };
+  const positionsFile = { file: { exists: false } as PositionsFile, written: [] as string[], removed: 0, readOnly: false, fail: undefined as Error | undefined, readError: undefined as Error | undefined };
   const posted: OutboundMessage[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
   const warnings: string[] = [];
   const existChanges: boolean[] = [];
   const asked: unknown[] = [];
+  const document = { version: undefined as number | undefined };
   const requests = new ZenwaveRequests({ request: async (_method, params) => { asked.push(params); return answer(); } });
   const session = new DiagramSession({
     documentUri,
+    documentVersion: () => document.version,
     fileName: 'place-order-flow.zfl',
     eventFlowViews: (uri, variant, positions) => requests.eventFlowViews(uri, variant, positions),
     flowVariants: () => flowVariants,
     savedPositions: () => savedPositions,
     positionsFile: {
-      read: async () => positionsFile.file,
+      read: async () => {
+        if (positionsFile.readError) throw positionsFile.readError;
+        return positionsFile.file;
+      },
       write: async (positions) => {
         if (positionsFile.fail) throw positionsFile.fail;
         if (positionsFile.readOnly) return 'read-only';
@@ -53,7 +58,7 @@ function harness(answer: () => RequestResult | Promise<RequestResult>, initial =
     positionsExistChanged: () => { existChanges.push(true); },
   }, initial);
   const ofType = <T extends OutboundMessage['type']>(type: T) => posted.filter((message): message is Extract<OutboundMessage, { type: T }> => message.type === type);
-  return { session, posted, logs, commands, ofType, asked, positionsFile, warnings, existChanges };
+  return { session, posted, logs, commands, ofType, asked, positionsFile, warnings, existChanges, document };
 }
 
 const failure = (kind: string, extra: Record<string, unknown> = {}): RequestResult =>
@@ -322,11 +327,12 @@ test('the manifest registers an optional diagram editor for .zfl and offers it f
   for (const item of title.filter((entry) => entry.command?.startsWith('zenwave.eventflow.'))) {
     assert.match(item.when, /^activeCustomEditorId == zenwave\.eventflow && /, `${item.command} is not scoped to the diagram editor`);
   }
-  const toggles = Object.fromEntries(title.filter((entry) => entry.command).map((entry) => [entry.command, entry.when]));
-  assert.ok(toggles['zenwave.eventflow.showServiceView']?.endsWith('zenwave.eventflowViewMode == flow'));
-  assert.ok(toggles['zenwave.eventflow.showFlowView']?.endsWith('zenwave.eventflowViewMode == services'));
-  assert.ok(toggles['zenwave.eventflow.showLabelsAsWritten']?.endsWith('&& zenwave.eventflowHumanizeLabels'));
-  assert.ok(toggles['zenwave.eventflow.showHumanizedLabels']?.endsWith('&& !zenwave.eventflowHumanizeLabels'));
+  const toggles = ['showServiceView', 'showFlowView', 'showLabelsAsWritten', 'showHumanizedLabels'].map((name) => `zenwave.eventflow.${name}`);
+  for (const command of toggles) {
+    assert.ok(!title.some((entry) => entry.command === command), `${command} is absent from the title bar (EF-R22)`);
+    assert.ok(contributes.commands.some((entry: { command: string }) => entry.command === command));
+    assert.ok(contributes.menus.commandPalette.some((entry: { command: string }) => entry.command === command));
+  }
   const palette = Object.fromEntries((contributes.menus.commandPalette as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
   assert.match(palette['zenwave.eventflow.open'] ?? '', /resourceExtname == \.zfl/);
   assert.match(palette['zenwave.eventflow.openToSide'] ?? '', /resourceExtname == \.zfl/);
@@ -335,6 +341,117 @@ test('the manifest registers an optional diagram editor for .zfl and offers it f
 });
 
 const VARIANTS = [{ id: 'happy', title: 'Happy path' }, { id: 'out-of-stock', title: 'Out of stock' }];
+
+test('labelsChanged validates a boolean and uses the palette display-settings path per diagram (EF-R22)', async () => {
+  const answer = () => ({ kind: 'ok' as const, value: { flowGraph: {}, serviceGraph: {} } });
+  const one = harness(answer);
+  const two = harness(answer);
+  for (const h of [one, two]) { h.session.receive(READY); await h.session.refresh(); }
+  const message = { type: 'labelsChanged', payload: { humanize: false } };
+  assert.deepEqual(inboundMessage(message), message);
+  one.session.receive(message);
+  assert.equal(one.session.displaySettings.humanizeLabels, false);
+  assert.equal(two.session.displaySettings.humanizeLabels, true);
+  assert.deepEqual(one.ofType('setDisplaySettings').map((message) => message.payload), [{ displaySettings: { humanizeLabels: false } }]);
+  one.session.receive(message);
+  assert.equal(one.ofType('setDisplaySettings').length, 1, 'an echoed choice does not redraw twice');
+  await one.session.refresh();
+  assert.equal(one.session.lastRenderBundle?.displaySettings.humanizeLabels, false);
+  one.session.receive({ type: 'labelsChanged', payload: { humanize: true } });
+  assert.equal(one.session.displaySettings.humanizeLabels, true);
+  for (const payload of [undefined, null, {}, { humanize: 'false' }, { humanize: 0 }, { humanizeLabels: false }]) {
+    assert.equal(inboundMessage({ type: 'labelsChanged', payload }), undefined);
+  }
+});
+
+test('unchanged open, focus and save refreshes do not request or resend a layout (EF-R23)', async () => {
+  const h = harness(() => ({ kind: 'ok', value: { flowGraph: {}, serviceGraph: {} } }), undefined, URI, true, true);
+  h.document.version = 1;
+  h.session.receive(READY);
+  await h.session.refresh();
+  for (let trigger = 0; trigger < 4; trigger++) await h.session.refresh();
+  assert.equal(h.asked.length, 1);
+  assert.equal(h.ofType('renderBundle').length, 1);
+  h.session.invalidateRefresh();
+  await h.session.refresh();
+  assert.equal(h.asked.length, 2, 'a server restart retries unchanged inputs');
+});
+
+test('a changed document, variant, view, labels or positions state still refreshes (EF-R23)', async () => {
+  const h = harness(() => ({ kind: 'ok', value: { flowGraph: {}, serviceGraph: {}, variants: VARIANTS } }), undefined, URI, true, true);
+  h.document.version = 1;
+  h.session.receive(READY);
+  await h.session.refresh();
+  const changes = [
+    () => { h.document.version = 2; },
+    () => h.session.setViewMode('services'),
+    () => h.session.receive({ type: 'labelsChanged', payload: { humanize: false } }),
+    () => { h.positionsFile.file = { exists: true, positions: { a: { x: 1, y: 2 } } }; },
+    () => { h.positionsFile.file = { exists: true, positions: { a: { x: 3, y: 2 } } }; },
+    () => { h.positionsFile.file = { exists: false }; },
+    () => { h.positionsFile.file = { exists: true, why: 'invalid schema' }; },
+  ];
+  for (const change of changes) {
+    const before = h.asked.length;
+    change();
+    await h.session.refresh();
+    assert.equal(h.asked.length, before + 1);
+    await h.session.refresh();
+    assert.equal(h.asked.length, before + 1, 'the changed state is remembered');
+  }
+  const before = h.asked.length;
+  h.session.receive({ type: 'variantChanged', payload: { variant: 'happy' } });
+  await settle();
+  assert.equal(h.asked.length, before + 1);
+  await h.session.refresh();
+  assert.equal(h.asked.length, before + 1);
+  h.session.receive({ type: 'variantChanged', payload: { variant: null } });
+  await settle();
+  assert.equal(h.asked.length, before + 2);
+});
+
+test('failed requests and unavailable document versions are retried, and overtaken answers cannot restore the skip key', async () => {
+  let answer: RequestResult = { kind: 'failed', reason: 'retry', code: -32803 };
+  const h = harness(() => answer);
+  h.document.version = 1;
+  await h.session.refresh();
+  await h.session.refresh();
+  assert.equal(h.asked.length, 2);
+  answer = { kind: 'ok', value: { flowGraph: {}, serviceGraph: {} } };
+  await h.session.refresh();
+  await h.session.refresh();
+  assert.equal(h.asked.length, 3);
+  h.document.version = undefined;
+  await h.session.refresh();
+  await h.session.refresh();
+  assert.equal(h.asked.length, 5);
+
+  let resolve!: (answer: RequestResult) => void;
+  const pending = harness(() => new Promise((done) => { resolve = done; }));
+  pending.document.version = 1;
+  const first = pending.session.refresh();
+  pending.session.invalidateRefresh();
+  resolve(answer);
+  await first;
+  const second = pending.session.refresh();
+  assert.equal(pending.asked.length, 2, 'the pre-restart answer did not populate the skip key');
+  resolve(answer);
+  await second;
+});
+
+test('unreadable positions are retried rather than cached as an absent file (EF-R23)', async () => {
+  const h = harness(() => ({ kind: 'ok', value: { flowGraph: {}, serviceGraph: {} } }), undefined, URI, false, true);
+  h.document.version = 1;
+  await h.session.refresh();
+  h.positionsFile.readError = new Error('temporarily unavailable');
+  await h.session.refresh();
+  await h.session.refresh();
+  assert.equal(h.asked.length, 3);
+  h.positionsFile.readError = undefined;
+  await h.session.refresh();
+  await h.session.refresh();
+  assert.equal(h.asked.length, 4, 'the recovered file state can be remembered again');
+});
 const withVariants = (flowGraph: object = { schema: 'full' }): RequestResult =>
   ({ kind: 'ok', value: { flowGraph: { schema: 'g', ...flowGraph }, serviceGraph: { schema: 's' }, variants: VARIANTS } });
 const invalidVariant: RequestResult = { kind: 'failed', reason: 'unknown variant', code: -32602 };
@@ -575,4 +692,16 @@ test('a failed write tells the user the positions were not saved, and why', asyn
   await settle();
   assert.equal(h.warnings.length, 1);
   assert.match(h.warnings[0]!, /not saved: EACCES/);
+});
+
+test('a failed write also tells the page, so its status bar shows why (EF-R22)', async () => {
+  const h = positionsHarness();
+  h.positionsFile.fail = new Error('EACCES');
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.equal(h.ofType('savePositionsFailed').length, 0);
+  h.session.receive({ type: 'savePositions', payload: { positions: SAVED } });
+  await settle();
+  assert.deepEqual(h.ofType('savePositionsFailed').map((message) => message.payload), [{ message: 'EACCES' }]);
+  assert.equal(h.warnings.length, 1, 'the notification stays');
 });

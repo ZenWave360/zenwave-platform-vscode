@@ -47,7 +47,9 @@ export type PageMessage =
   }
   | { readonly type: 'setViewMode'; readonly payload: { readonly viewMode: ViewMode } }
   | { readonly type: 'setDisplaySettings'; readonly payload: { readonly displaySettings: DisplaySettings } }
-  | { readonly type: 'highlightNode'; readonly payload: { readonly nodeId: string | null } };
+  | { readonly type: 'highlightNode'; readonly payload: { readonly nodeId: string | null } }
+  /** The positions could not be written; the toolbar page shows the message in its status bar (EF-R22). */
+  | { readonly type: 'savePositionsFailed'; readonly payload: { readonly message: string } };
 
 /** Host → host script. */
 export type HostMessage =
@@ -119,6 +121,7 @@ export function readiness(payload: unknown): Readiness {
 export type InboundMessage =
   | { readonly type: 'viewModeChanged'; readonly payload: { readonly viewMode: ViewMode } }
   | { readonly type: 'variantChanged'; readonly payload: { readonly variant: string | null } }
+  | { readonly type: 'labelsChanged'; readonly payload: { readonly humanize: boolean } }
   | { readonly type: 'savePositions'; readonly payload: { readonly positions: Positions } }
   | { readonly type: 'webviewReady'; readonly payload?: unknown }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
@@ -137,6 +140,8 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
       return object?.viewMode === 'flow' || object?.viewMode === 'services' ? { type, payload: { viewMode: object.viewMode } } : undefined;
     case 'variantChanged':
       return typeof object?.variant === 'string' || object?.variant === null ? { type, payload: { variant: object.variant } } : undefined;
+    case 'labelsChanged':
+      return typeof object?.humanize === 'boolean' ? { type, payload: { humanize: object.humanize } } : undefined;
     case 'savePositions': {
       const positions = validatePositions(object?.positions);
       return positions ? { type, payload: { positions } } : undefined;

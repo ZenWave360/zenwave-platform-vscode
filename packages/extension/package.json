@@ -586,7 +586,7 @@
         },
         {
           "command": "zenwave.preview.openToSide",
-          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId =~ /^(zdl|zw|zfl)$/ || resourceExtname =~ /^\\.(zdl|zw|zfl)$/) && (activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs) && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.open",
@@ -606,7 +606,7 @@
         },
         {
           "command": "zenwave.preview.openSequenceDiagrams",
-          "when": "(editorLangId == zfl || resourceExtname == .zfl) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId == zfl || resourceExtname == .zfl) && (activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs) && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.openModelDocs",
@@ -618,23 +618,23 @@
         },
         {
           "command": "zenwave.preview.openScriptsDocs",
-          "when": "(editorLangId == zw || resourceExtname == .zw) && activeCustomEditorId != zenwave.preview && !isInDiffEditor"
+          "when": "(editorLangId == zw || resourceExtname == .zw) && (activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs) && !isInDiffEditor"
         },
         {
           "command": "zenwave.preview.showText",
-          "when": "activeCustomEditorId == zenwave.preview"
+          "when": "(activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs)"
         },
         {
           "command": "zenwave.preview.selectDiagram",
-          "when": "activeCustomEditorId == zenwave.preview || activeWebviewPanelId == zenwave.previewFollowing"
+          "when": "(activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs) || activeWebviewPanelId == zenwave.previewFollowing"
         },
         {
           "command": "zenwave.preview.selectRenderMode",
-          "when": "(activeCustomEditorId == zenwave.preview && resourceExtname == .zfl) || activeWebviewPanelId == zenwave.previewFollowing"
+          "when": "((activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs) && resourceExtname == .zfl) || activeWebviewPanelId == zenwave.previewFollowing"
         },
         {
           "command": "zenwave.preview.copyMarkdown",
-          "when": "(activeCustomEditorId == zenwave.preview || activeWebviewPanelId == zenwave.previewFollowing) && zenwave.previewMarkdownAvailable"
+          "when": "((activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs) || activeWebviewPanelId == zenwave.previewFollowing) && zenwave.previewMarkdownAvailable"
         },
         {
           "command": "zenwave.preview.openFollowing",
@@ -708,28 +708,8 @@
           "group": "navigation@90"
         },
         {
-          "command": "zenwave.eventflow.showServiceView",
-          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowViewMode == flow",
-          "group": "navigation@80"
-        },
-        {
-          "command": "zenwave.eventflow.showFlowView",
-          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowViewMode == services",
-          "group": "navigation@80"
-        },
-        {
-          "command": "zenwave.eventflow.showLabelsAsWritten",
-          "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowHumanizeLabels",
-          "group": "navigation@81"
-        },
-        {
-          "command": "zenwave.eventflow.showHumanizedLabels",
-          "when": "activeCustomEditorId == zenwave.eventflow && !zenwave.eventflowHumanizeLabels",
-          "group": "navigation@81"
-        },
-        {
           "command": "zenwave.preview.copyMarkdown",
-          "when": "(activeCustomEditorId == zenwave.preview || activeWebviewPanelId == zenwave.previewFollowing) && zenwave.previewMarkdownAvailable",
+          "when": "((activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs) || activeWebviewPanelId == zenwave.previewFollowing) && zenwave.previewMarkdownAvailable",
           "group": "navigation@100"
         },
         {
@@ -761,24 +741,24 @@
         },
         {
           "command": "zenwave.preview.showText",
-          "when": "activeCustomEditorId == zenwave.preview",
+          "when": "(activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs)",
           "group": "0_text@2"
         },
         {
           "command": "zenwave.preview.openSequenceDiagrams",
-          "when": "activeCustomEditorId != zenwave.preview",
+          "when": "(activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs)",
           "group": "2_preview@1"
         },
         {
           "command": "zenwave.preview.openSequenceDiagramsToSide",
-          "when": "activeCustomEditorId != zenwave.preview",
+          "when": "(activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs)",
           "group": "2_preview@2"
         }
       ],
       "zenwave.zdlViews": [
         {
           "command": "zenwave.preview.showText",
-          "when": "activeCustomEditorId == zenwave.preview",
+          "when": "(activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs)",
           "group": "0_text@2"
         },
         {
@@ -792,24 +772,24 @@
         },
         {
           "command": "zenwave.preview.openModelDocsToSide",
-          "when": "activeCustomEditorId != zenwave.preview",
+          "when": "(activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs)",
           "group": "2_preview@3"
         }
       ],
       "zenwave.zwViews": [
         {
           "command": "zenwave.preview.showText",
-          "when": "activeCustomEditorId == zenwave.preview",
+          "when": "(activeCustomEditorId == zenwave.preview || activeCustomEditorId == zenwave.preview.modelDocs || activeCustomEditorId == zenwave.preview.scriptsDocs)",
           "group": "0_text@2"
         },
         {
           "command": "zenwave.preview.openScriptsDocs",
-          "when": "activeCustomEditorId != zenwave.preview",
+          "when": "(activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs)",
           "group": "2_preview@1"
         },
         {
           "command": "zenwave.preview.openScriptsDocsToSide",
-          "when": "activeCustomEditorId != zenwave.preview",
+          "when": "(activeCustomEditorId != zenwave.preview && activeCustomEditorId != zenwave.preview.modelDocs && activeCustomEditorId != zenwave.preview.scriptsDocs)",
           "group": "2_preview@2"
         }
       ]
@@ -982,13 +962,13 @@
           ],
           "default": "flow",
           "scope": "resource",
-          "description": "Which view an EventFlow diagram opens on. Each open diagram can be switched from its title bar afterwards."
+          "description": "Which view an EventFlow diagram opens on. Each open diagram can be switched from the page or the command palette afterwards."
         },
         "zenwave.eventflow.humanizeLabels": {
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "description": "Whether an EventFlow diagram opens with humanized labels (CheckoutStarted shown as \"Checkout Started\"). Each open diagram can be switched from its title bar afterwards."
+          "description": "Whether an EventFlow diagram opens with humanized labels (CheckoutStarted shown as \"Checkout Started\"). Each open diagram can be switched from the page or the command palette afterwards."
         }
       }
     },
@@ -1005,16 +985,30 @@
       },
       {
         "viewType": "zenwave.preview",
-        "displayName": "ZenWave Preview",
+        "displayName": "ZenWave Sequence Diagrams",
+        "selector": [
+          {
+            "filenamePattern": "*.zfl"
+          }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "zenwave.preview.modelDocs",
+        "displayName": "ZenWave Model Docs",
         "selector": [
           {
             "filenamePattern": "*.zdl"
-          },
+          }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "zenwave.preview.scriptsDocs",
+        "displayName": "ZenWave Scripts Docs",
+        "selector": [
           {
             "filenamePattern": "*.zw"
-          },
-          {
-            "filenamePattern": "*.zfl"
           }
         ],
         "priority": "option"

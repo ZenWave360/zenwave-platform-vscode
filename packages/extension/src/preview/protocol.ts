@@ -7,8 +7,25 @@
  */
 import type { StatePresentation } from '../eventflow/protocol.js';
 
-/** The custom editor's view type. */
+/** The Sequence Diagrams view type, retained for existing editor associations. */
 export const PREVIEW_VIEW_TYPE = 'zenwave.preview';
+export const PREVIEW_VIEW_TYPES = {
+  zfl: PREVIEW_VIEW_TYPE,
+  zdl: 'zenwave.preview.modelDocs',
+  zw: 'zenwave.preview.scriptsDocs',
+} as const;
+
+export function isPreviewViewType(viewType: string): boolean {
+  return Object.values(PREVIEW_VIEW_TYPES).some((candidate) => candidate === viewType);
+}
+
+/** The legacy type remains registered and can still open every supported file through saved associations. */
+export function previewViewType(path: string): string {
+  if (/\.zdl$/i.test(path)) return PREVIEW_VIEW_TYPES.zdl;
+  if (/\.zw$/i.test(path)) return PREVIEW_VIEW_TYPES.zw;
+  return PREVIEW_VIEW_TYPES.zfl;
+}
+
 /** The following preview's panel type (MP-R31). */
 export const FOLLOWING_VIEW_TYPE = 'zenwave.previewFollowing';
 
