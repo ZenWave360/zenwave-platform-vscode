@@ -144,7 +144,9 @@ test('R-R15 sync is titled and merged as chore: sync version, lists the files th
   assert.match(sync, /gh pr list --base develop --state open --json number,title,headRefOid/);
   assert.match(sync, /git merge-tree --write-tree --name-only --no-messages origin\/develop "\$head_sha"/);
   assert.match(sync, /exists and does not hold the release commit/);
-  assert.match(sync, /if: steps\.sync\.outputs\.merged == 'true'/);
+  const dispatchStep = sync.slice(sync.indexOf('- name: Start the pre-release run on develop'));
+  assert.ok(!/\bif:/.test(dispatchStep), 'the pre-release is asked for whenever sync ends, merged now or before');
+  assert.match(dispatchStep, /gh workflow run pre-release\.yml --ref develop/);
   assert.match(sync, /gh workflow run pre-release\.yml --ref develop/);
 });
 
@@ -156,7 +158,7 @@ test('R-R15 pre-release.yml accepts a dispatch on develop and runs nothing for a
 test('R-R15 a release is not planned while the last one is unfinished', () => {
   const plan = jobText(mainText, 'plan');
   assert.match(plan, /gh run list --workflow release\.yml --limit 100 --json status,headBranch/);
-  assert.match(plan, /gh release view "\$last"/);
+  assert.ok(!plan.includes('gh release view'), 'a finished failed or refused release does not block');
   assert.match(plan, /is not finished: approve, re-run or finish it first/);
   assert.ok(plan.indexOf('Refuse while a release is not finished') < plan.indexOf('Compute the next version'));
   // Starting release.yml twice for one tag is refused, not repeated.
@@ -165,7 +167,7 @@ test('R-R15 a release is not planned while the last one is unfinished', () => {
 
 test('R-R15 concurrency groups: a tag never evicts another tag, and a rejected ref never evicts a real run', () => {
   const group = (text: string) => (load(text) as { concurrency: { group: string; 'cancel-in-progress': boolean } }).concurrency;
-  assert.match(group(releaseText).group, /github\.ref_type == 'tag' && format\('release-\{0\}', github\.ref_name\) \|\| format\('release-rejected-\{0\}', github\.run_id\)/);
+  assert.match(group(releaseText).group, /github\.ref_type == 'tag' && 'release' \|\| format\('release-rejected-\{0\}', github\.run_id\)/);
   assert.match(group(preText).group, /github\.ref == 'refs\/heads\/develop' && 'pre-release' \|\| format\('pre-release-rejected-\{0\}', github\.run_id\)/);
   assert.equal(group(releaseText)['cancel-in-progress'], false);
   assert.equal(group(preText)['cancel-in-progress'], false);

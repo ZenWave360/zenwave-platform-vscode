@@ -117,11 +117,14 @@ To see what a merge would release without changing anything, run the workflow by
 workflow, `dry_run` on): it prints the version, the commits that decided it and the notes check, and stops.
 
 Runs are one at a time and never cancelled, and a release is one unit from the plan to the sync: `plan` stops with
-"release vA.B.C is not finished: approve, re-run or finish it first" while the highest stable tag has no GitHub release or
-a `release.yml` run is queued, waiting or running (before the first stable release there is nothing to wait for). Approve,
-re-run or finish that release, then run `release-on-main` again. `release.yml` has one concurrency group per tag, so a
-tag never replaces the pending run of another, and `release.yml` and `pre-release.yml` give a ref they do not accept (a
-branch, or any branch but `develop`) a group of its own, so it cannot replace a real pending run. The release commit and the sync merge have a `chore(release)` or
+"release vA.B.C is not finished: approve, re-run or finish it first" while a `release.yml` run on a stable tag is queued,
+waiting or running. Approve or finish that run, then run `release-on-main` again. A failed or refused release does not
+block: it is abandoned as soon as a newer release starts, because the next plan computes above its tag and running the
+old run again fails the "above every other stable tag" check. To finish it instead, re-run it before merging anything
+else to `main`. `release.yml` has one concurrency group for stable tags, so manual and dispatched runs are serialized
+(GitHub keeps only the newest pending run, which the gate allows only for tags pushed by hand), and `release.yml` and
+`pre-release.yml` give a ref they do not accept (a branch, or any branch but `develop`) a group of its own, so it cannot
+replace a real pending run. The release commit and the sync merge have a `chore(release)` or
 `chore: sync version` subject, and a run started for such a head commit does nothing (for a manual run, the head that
 `plan` checked out is the one looked at); the pushes of the workflow's own
 token start no workflow in any case, so there is no loop. For the same reason no `pull_request` check runs on the two
@@ -141,7 +144,8 @@ cannot meet.
 - **The sync conflicts.** The `release.yml` run fails after publication, its summary lists the conflicting files, and the pull request
   `chore: sync version` stays open. When you run the failed jobs again, an open sync pull request whose head holds the
   release commit is used, and its own head is checked, so a conflict resolved on its branch counts; the pre-release is
-  started only by the attempt that merges. The usual one is `release-notes/next.md`: `main` emptied it, and `develop` still has
+  started whenever the job ends with `develop` holding the release commit, so a retry after a failed dispatch recovers
+  (a re-run may start a duplicate pre-release, which is accepted). The usual one is `release-notes/next.md`: `main` emptied it, and `develop` still has
   lines that are now in the release's notes. Resolve it in the pull request keeping only what `develop` added after the
   merge to `main`, and merge it. Nothing is published again.
 - **`prepare` failed half way.** Run its failed jobs again: if `release/X.Y.Z` holds this run's release commit (its

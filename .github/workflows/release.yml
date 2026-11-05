@@ -27,9 +27,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # One group per tag, so a tag never replaces the pending run of another; release-on-main starts the next release only
-  # when no run is left. A ref that is not a tag does nothing, and has a group of its own.
-  group: ${{ github.ref_type == 'tag' && format('release-{0}', github.ref_name) || format('release-rejected-{0}', github.run_id) }}
+  # Stable tags, dispatched or pushed by hand, share one group and are serialized. GitHub keeps only the newest pending run,
+  # which release-on-main's gate makes possible only for tags pushed by hand. A ref that is not a tag does nothing, and
+  # has a group of its own, so it cannot replace a real pending run.
+  group: ${{ github.ref_type == 'tag' && 'release' || format('release-rejected-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions: {}
@@ -294,12 +295,10 @@ jobs:
       # release/X.Y.Z when that branch ends at the tag (release-on-main made it), else from sync/X.Y.Z, made here from the tag
       # (a tag pushed by hand). Nothing is published here, and a conflict leaves the pull request open to be resolved.
       - name: Merge the release commit into develop
-        id: sync
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          echo "merged=false" >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/develop; then
             echo "develop already holds the release commit; nothing to merge." >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -354,14 +353,13 @@ jobs:
           fi
           gh pr merge "$number" --merge --subject "chore: sync version"
           [ "$(gh pr view "$number" --json state --jq '.state')" = MERGED ]
-          echo "merged=true" >> "$GITHUB_OUTPUT"
           echo "develop holds the release commit of v$VERSION (pull request #$number)." >> "$GITHUB_STEP_SUMMARY"
 
       # The token's merge starts no workflow, and a develop push between the tag and this merge failed the pre-release
-      # check for the old minor (spec:release#r-r8), so the pre-release is asked for here, once, when this attempt merged.
-      # It runs on develop only.
+      # check for the old minor (spec:release#r-r8), so the pre-release is asked for here, whenever develop ends up holding the
+      # release commit, merged by this attempt or an earlier one: a retry after a failed dispatch recovers. A re-run may start
+      # a duplicate pre-release, which is accepted. It runs on develop only.
       - name: Start the pre-release run on develop
-        if: steps.sync.outputs.merged == 'true'
         run: |
           set -euo pipefail
           gh workflow run pre-release.yml --ref develop

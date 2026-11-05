@@ -69,9 +69,9 @@ jobs:
           node-version: 24
 
       # release.yml runs on after this workflow ends, waiting for the reviewer. A second release prepared meanwhile would
-      # put a higher tag above the first one, which then fails its own check, so nothing is planned until the last release
-      # is finished: it has a GitHub release, and no release.yml run is queued, waiting or running. Before the first stable
-      # release there is nothing to wait for.
+      # put a higher tag above the first one, which then fails its own check, so nothing is planned while a release.yml run
+      # on a stable tag is queued, waiting or running. A release that ended failed or refused does not block: the next plan
+      # computes above its tag, and running that abandoned run again fails the above-every-other-tag check, as intended.
       - name: Refuse while a release is not finished
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,11 +86,6 @@ jobs:
               exit 1
             fi
           done <<< "$running"
-          last=$(git tag --list 'v*' | grep -E "$stable_re" | sort -V | tail -n 1 || true)
-          if [ -n "$last" ] && ! gh release view "$last" > /dev/null 2>&1; then
-            echo "::error::release $last is not finished: approve, re-run or finish it first."
-            exit 1
-          fi
 
       - name: Compute the next version from the commits
         id: plan
