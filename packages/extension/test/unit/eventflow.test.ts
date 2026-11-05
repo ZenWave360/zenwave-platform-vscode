@@ -693,3 +693,15 @@ test('a failed write tells the user the positions were not saved, and why', asyn
   assert.equal(h.warnings.length, 1);
   assert.match(h.warnings[0]!, /not saved: EACCES/);
 });
+
+test('a failed write also tells the page, so its status bar shows why (EF-R22)', async () => {
+  const h = positionsHarness();
+  h.positionsFile.fail = new Error('EACCES');
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.equal(h.ofType('savePositionsFailed').length, 0);
+  h.session.receive({ type: 'savePositions', payload: { positions: SAVED } });
+  await settle();
+  assert.deepEqual(h.ofType('savePositionsFailed').map((message) => message.payload), [{ message: 'EACCES' }]);
+  assert.equal(h.warnings.length, 1, 'the notification stays');
+});

@@ -4,6 +4,7 @@ import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
 import { commandDocument, isPreviewableDocument, isZdlDocument, isZflDocument } from '../model/active-document.js';
 import { fileName, findTab, replaceInPlace } from '../model/editor-tabs.js';
+import { closeDuplicatePreview, type PreviewTabRef } from './duplicates.js';
 import { createNonce } from '../eventflow/page.js';
 import { buildFailedHtml, buildPreviewHtml } from './page.js';
 import { decidePreviewLink } from './links.js';
@@ -341,6 +342,27 @@ export function registerPreviewEditor(
   const provider: vscode.CustomReadonlyEditorProvider = {
     openCustomDocument: (uri) => ({ uri, dispose: () => undefined }),
     resolveCustomEditor: (document, panel) => {
+      // A document has one preview (MP-R17). VS Code dedups by resource and view type only, so a saved association can
+      // still resolve a second view type: the first preview stays, with its session, and the new tab is closed.
+      const existing = [...editors].find((candidate) => candidate.documentUri === document.uri.toString());
+      if (existing) {
+        logger.info(`Preview of ${fileName(document.uri)} is already open; the second one is closed`);
+        void closeDuplicatePreview<PreviewTabRef & vscode.Tab>(
+          document.uri.toString(),
+          { viewType: panel.viewType, column: panel.viewColumn },
+          { viewType: existing.panel.viewType, column: existing.panel.viewColumn },
+          {
+            tabs: () => vscode.window.tabGroups.all.flatMap((group) => group.tabs.flatMap((tab) =>
+              tab.input instanceof vscode.TabInputCustom
+                ? [Object.assign(tab, { uri: tab.input.uri.toString(), viewType: tab.input.viewType, column: group.viewColumn as number | undefined })]
+                : [])),
+            revealExisting: () => existing.panel.reveal(existing.panel.viewColumn, false),
+            close: (tab) => vscode.window.tabGroups.close(tab),
+          },
+        ).then(undefined, (error: unknown) =>
+          logger.warn(`Preview of ${fileName(document.uri)}: could not close the second preview: ${error instanceof Error ? error.message : String(error)}`));
+        return;
+      }
       const editor = new PreviewEditor(document.uri, panel, {
         context, server, logger,
         onDispose: (closed) => {

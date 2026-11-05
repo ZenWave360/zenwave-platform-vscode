@@ -279,6 +279,7 @@ export class DiagramSession {
       const why = error instanceof Error ? error.message : String(error);
       this.ports.log.warn(`EventFlow diagram for ${this.ports.fileName}: could not save the positions: ${why}`);
       this.ports.warn(`The positions of ${this.ports.fileName} were not saved: ${why}`);
+      this.post({ type: 'savePositionsFailed', payload: { message: why } });
     }
   }
 

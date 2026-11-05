@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Preview, PreviewMode, SequenceRenderMode } from '../../src/lsp/requests.js';
 import type { RequestResult } from '../../src/lsp/supervisor.js';
 import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from '../../src/preview/page.js';
+import { closeDuplicatePreview } from '../../src/preview/duplicates.js';
 import { decidePreviewLink } from '../../src/preview/links.js';
 import { FOLLOWING_VIEW_TYPE, inboundMessage, PREVIEW_VIEW_TYPE, PREVIEW_VIEW_TYPES, isPreviewViewType, previewViewType, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
 import { outcomeOf, reselect } from '../../src/preview/selection.js';
@@ -634,4 +635,44 @@ test('going back to Model Docs asks without a mode and drops the groups', async 
   assert.deepEqual(asked, ['diagrams', undefined]);
   assert.deepEqual(renders().at(-1)?.groups, []);
   assert.equal(renders().at(-1)?.selectedId, zdlAnswer.defaultRepresentationId);
+});
+
+// MP-R17: a saved association can resolve a second view type for a document that already has a preview.
+test('a second preview of a document is closed and the existing one is shown, whatever the view types', async () => {
+  const uri = 'file:///workspace/model.zdl';
+  const tab = (viewType: string, column: number, tabUri = uri) => ({ uri: tabUri, viewType, column });
+  const existing = { viewType: PREVIEW_VIEW_TYPES.zdl, column: 1 };
+
+  for (const created of Object.values(PREVIEW_VIEW_TYPES)) {
+    const first = tab(existing.viewType, 1);
+    const second = tab(created, 2);
+    const other = tab(created, 2, 'file:///workspace/other.zdl');
+    const closed: unknown[] = [];
+    let revealed = 0;
+    const result = await closeDuplicatePreview(uri, { viewType: created, column: 2 }, existing, {
+      tabs: () => [first, other, second],
+      revealExisting: () => { revealed += 1; },
+      close: async (candidate) => { closed.push(candidate); },
+    });
+    assert.equal(result, true, created);
+    assert.deepEqual(closed, [second], `${created}: only the new tab for this document is closed`);
+    assert.equal(revealed, 1, created);
+  }
+});
+
+test('the second preview is found by view type when its column is not known yet, and nothing is closed without one', async () => {
+  const uri = 'file:///workspace/model.zdl';
+  const first = { uri, viewType: PREVIEW_VIEW_TYPE, column: 1 };
+  const second = { uri, viewType: PREVIEW_VIEW_TYPES.zdl, column: 2 };
+  const closed: unknown[] = [];
+  await closeDuplicatePreview(uri, { viewType: PREVIEW_VIEW_TYPES.zdl, column: undefined }, { viewType: PREVIEW_VIEW_TYPE, column: 1 }, {
+    tabs: () => [first, second], revealExisting: () => undefined, close: async (candidate) => { closed.push(candidate); },
+  });
+  assert.deepEqual(closed, [second]);
+
+  let revealed = false;
+  assert.equal(await closeDuplicatePreview(uri, { viewType: PREVIEW_VIEW_TYPE, column: 1 }, { viewType: PREVIEW_VIEW_TYPE, column: 1 }, {
+    tabs: () => [first], revealExisting: () => { revealed = true; }, close: async () => { throw new Error('closed the existing preview'); },
+  }), false);
+  assert.equal(revealed, false);
 });

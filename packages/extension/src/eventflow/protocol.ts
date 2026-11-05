@@ -47,7 +47,9 @@ export type PageMessage =
   }
   | { readonly type: 'setViewMode'; readonly payload: { readonly viewMode: ViewMode } }
   | { readonly type: 'setDisplaySettings'; readonly payload: { readonly displaySettings: DisplaySettings } }
-  | { readonly type: 'highlightNode'; readonly payload: { readonly nodeId: string | null } };
+  | { readonly type: 'highlightNode'; readonly payload: { readonly nodeId: string | null } }
+  /** The positions could not be written; the toolbar page shows the message in its status bar (EF-R22). */
+  | { readonly type: 'savePositionsFailed'; readonly payload: { readonly message: string } };
 
 /** Host → host script. */
 export type HostMessage =
