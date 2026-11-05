@@ -22,7 +22,7 @@ import { notesDirectory, readNotes } from './release-notes.mjs';
 import { linkedSiblings } from './siblings.mjs';
 
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const repositoryRoot = path.resolve(projectDir, '../..');
+const repositoryRoot = projectDir;
 const manifestFile = path.join(projectDir, 'package.json');
 
 const [command, ...args] = process.argv.slice(2);

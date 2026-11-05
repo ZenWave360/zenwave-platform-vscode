@@ -10,7 +10,7 @@ import { parseExtensionVersion } from '../../scripts/release-rules.mjs';
 
 // The rules are tested as functions; these tests hold the workflow and the scripts to what the rules need to see.
 const read = (...parts: string[]) => readFileSync(join(import.meta.dirname, ...parts), 'utf8').replace(/\r\n/g, '\n');
-const verify = read('../../../../.github/workflows/verify.yml');
+const verify = read('../../.github/workflows/verify.yml');
 
 /** The `run:` block of the step with this name, up to the next step. */
 function step(name: string): string {
@@ -43,7 +43,7 @@ test('R-R10 verify.yml takes the GitHub release notes from the notes file, not f
 });
 
 test('pre-release.yml publishes only when ZENWAVE_PUBLISH_PRERELEASE is true, and the job that says it was held back has no secret and no environment', () => {
-  const text = read('../../../../.github/workflows/pre-release.yml');
+  const text = read('../../.github/workflows/pre-release.yml');
   const publish = text.slice(text.indexOf('\n  publish:'), text.indexOf('\n  withheld:'));
   const withheld = text.slice(text.indexOf('\n  withheld:'), text.indexOf('\n  trace:'));
   const trace = text.slice(text.indexOf('\n  trace:'));
@@ -63,7 +63,7 @@ test('R-R10 verify:vsix checks the changelog of a channel build for the version 
   assert.match(channelBlock, /problems\.push\(\.\.\.changelogProblems\(archive, info\.version\)\)/);
 });
 
-const workflowDirectory = join(import.meta.dirname, '../../../../.github/workflows');
+const workflowDirectory = join(import.meta.dirname, '../../.github/workflows');
 const VERSION_CHECK = '[[ ! "$VERSION" =~ $version_re ]]';
 const VERSION_STEP_NAME = 'Check the version is major.minor.patch';
 const VERSION_JOBS = [
@@ -305,17 +305,17 @@ function versionRuleDisagreements(versionRe: string): string[] {
 test('no --jq program interpolates the version, the tag or a GitHub expression', () => {
   const files = readdirSync(workflowDirectory).filter((file) => /\.ya?ml$/.test(file));
   assert.ok(files.length > 0);
-  const programs = files.flatMap((file) => jqPrograms(read('../../../../.github/workflows', file)).map((program) => `${file}: ${program}`));
+  const programs = files.flatMap((file) => jqPrograms(read('../../.github/workflows', file)).map((program) => `${file}: ${program}`));
   assert.ok(programs.length > 0, 'the workflows do use --jq');
   const interpolated = programs.filter((program) => /\$VERSION(?![A-Za-z0-9_])|\$tag(?![A-Za-z0-9_])|\$\{\{/.test(program));
   assert.deepEqual(interpolated, []);
-  const trace = job(read('../../../../.github/workflows/pre-release.yml'), 'trace');
+  const trace = job(read('../../.github/workflows/pre-release.yml'), 'trace');
   assert.ok(jqPrograms(trace).includes('.[] | select(.ref == $ENV.TAG_REF) | .object.sha'));
 });
 
 test('publish and trace check the version format before they use it', () => {
   for (const [file, name] of VERSION_JOBS) {
-    const text = read('../../../../.github/workflows', file);
+    const text = read('../../.github/workflows', file);
     const label = `${file} ${name}`;
     const step = versionStep(text, file, name);
     const run = stepRun(step);
@@ -344,7 +344,7 @@ test('a mutated version check that is skipped is reported', () => {
     },
   ];
   for (const [file, name] of VERSION_JOBS) {
-    const text = read('../../../../.github/workflows', file);
+    const text = read('../../.github/workflows', file);
     for (const mutation of mutations) {
       const mutated = replaceVersionStep(text, name, mutation.edit);
       const problems = versionCheckProblems(versionStep(mutated, file, name));
@@ -363,7 +363,7 @@ test('each version-check run block accepts a valid version and rejects an invali
   }
   for (const [file, name] of VERSION_JOBS) {
     const label = `${file} ${name}`;
-    const run = stepRun(versionStep(read('../../../../.github/workflows', file), file, name));
+    const run = stepRun(versionStep(read('../../.github/workflows', file), file, name));
     const valid = runVersionGuard(run, VALID_VERSION);
     const invalid = runVersionGuard(run, INVALID_VERSION);
     assert.equal(valid.status, 0, `${label} must accept ${VALID_VERSION}: ${valid.output}`);
@@ -377,7 +377,7 @@ test('an exit 0 before the version check lets an invalid version pass and is rep
     return;
   }
   for (const [file, name] of VERSION_JOBS) {
-    const text = read('../../../../.github/workflows', file);
+    const text = read('../../.github/workflows', file);
     const original = runVersionGuard(stepRun(versionStep(text, file, name)), INVALID_VERSION);
     assert.notEqual(original.status, 0, `${file} ${name} must reject ${INVALID_VERSION} before it is mutated`);
     const mutated = replaceVersionStep(text, name, (step) =>
@@ -426,7 +426,7 @@ test('a guard mutation that lets an invalid version pass is reported', (t) => {
     },
   ];
   for (const [file, name] of VERSION_JOBS) {
-    const text = read('../../../../.github/workflows', file);
+    const text = read('../../.github/workflows', file);
     const original = runVersionGuard(stepRun(versionStep(text, file, name)), INVALID_VERSION);
     assert.notEqual(original.status, 0, `${file} ${name} must reject ${INVALID_VERSION} before it is mutated`);
     for (const mutation of mutations) {
@@ -453,10 +453,10 @@ test('the workflow version regex agrees with release-rules.mjs when bash runs it
     return;
   }
   for (const [file, name] of VERSION_JOBS) {
-    const run = stepRun(versionStep(read('../../../../.github/workflows', file), file, name));
+    const run = stepRun(versionStep(read('../../.github/workflows', file), file, name));
     assert.deepEqual(versionRuleDisagreements(versionRegex(run)), [], `${file} ${name}`);
   }
-  const mutated = replaceVersionStep(read('../../../../.github/workflows/pre-release.yml'), 'publish', (step) => step.replaceAll('[1-9]', '[0-9]'));
+  const mutated = replaceVersionStep(read('../../.github/workflows/pre-release.yml'), 'publish', (step) => step.replaceAll('[1-9]', '[0-9]'));
   const problems = versionRuleDisagreements(versionRegex(stepRun(versionStep(mutated, 'pre-release.yml', 'publish'))));
   assert.ok(
     problems.some((problem) => problem.startsWith('"01.2.3"')),

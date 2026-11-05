@@ -11,12 +11,12 @@ const directory = join(import.meta.dirname, '../../publish-tools');
 const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
 const lock = JSON.parse(readFileSync(join(directory, 'package-lock.json'), 'utf8'));
 
-test('R-R13 the publishing tools are pinned exactly, in their own package outside the workspaces', () => {
+test('R-R13 the publishing tools are pinned exactly, in their own package, outside the root install', () => {
   assert.equal(manifest.private, true);
   assert.deepEqual(manifest.dependencies, { '@vscode/vsce': '4.1.0', ovsx: '1.3.0' });
   assert.equal(manifest.devDependencies, undefined);
-  const root = JSON.parse(readFileSync(join(directory, '../../../package.json'), 'utf8'));
-  assert.deepEqual(root.workspaces, ['packages/*'], 'a workspace pattern that reaches publish-tools would put it in the root install');
+  const root = JSON.parse(readFileSync(join(directory, '../package.json'), 'utf8'));
+  assert.equal(root.workspaces, undefined, 'a workspace pattern that reaches publish-tools would put it in the root install');
 });
 
 test('R-R13 the lock of the publishing tools names the pinned versions and a hash for every package', () => {
@@ -33,7 +33,7 @@ test('R-R13 the lock of the publishing tools names the pinned versions and a has
 
 // The publish jobs must take the tools from the commit. verify runs third-party build code before it uploads, so
 // anything it uploads can have been chosen by that code.
-const workflows = join(import.meta.dirname, '../../../../.github/workflows');
+const workflows = join(import.meta.dirname, '../../.github/workflows');
 const read = (name: string) => readFileSync(join(workflows, name), 'utf8').replace(/\r\n/g, '\n');
 
 test('R-R13 verify does not upload the publishing tools', () => {
@@ -46,18 +46,18 @@ for (const name of ['pre-release.yml', 'release.yml']) {
     const publish = text.slice(text.indexOf('\n  publish:'), text.indexOf('\n  trace:') === -1 ? undefined : text.indexOf('\n  trace:'));
     assert.match(publish, /uses: actions\/checkout@[0-9a-f]{40}/);
     assert.match(publish, /ref: \$\{\{ github\.sha \}\}/);
-    assert.match(publish, /sparse-checkout: packages\/extension\/publish-tools\n/);
+    assert.match(publish, /sparse-checkout: publish-tools\n/);
     assert.match(publish, /persist-credentials: false/);
-    assert.match(publish, /working-directory: packages\/extension\/publish-tools\n\s+run: \|\n\s+set -euo pipefail\n\s+npm ci --ignore-scripts/);
+    assert.match(publish, /working-directory: publish-tools\n\s+run: \|\n\s+set -euo pipefail\n\s+npm ci --ignore-scripts/);
     assert.ok(!/artifacts\/publish-tools|SHA256SUMS.*publish-tools/.test(publish));
     assert.ok(publish.indexOf('actions/checkout@') < publish.indexOf('secrets.'), 'the checkout comes before any step that reads a secret');
   });
 
-  test(`R-R13 ${name} installs publishing tools once, only in packages/extension/publish-tools`, () => {
+  test(`R-R13 ${name} installs publishing tools once, only in publish-tools`, () => {
     const document = load(read(name)) as { jobs?: Record<string, { steps?: WorkflowStep[] }> };
     const steps = document.jobs?.publish?.steps ?? [];
     assert.ok(steps.length > 0, `${name} has a publish job`);
-    assert.deepEqual(npmInstallDirectories(steps), ['packages/extension/publish-tools']);
+    assert.deepEqual(npmInstallDirectories(steps), ['publish-tools']);
   });
 }
 

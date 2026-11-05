@@ -11,7 +11,6 @@ import { languageServerStatus, presentStatus } from '../../src/lsp/status.js';
 import { LspSupervisor } from '../../src/lsp/supervisor.js';
 
 const extensionDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
-const repositoryDir = join(extensionDir, '../..');
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'package.json'), 'utf8')) as {
   activationEvents: string[];
   capabilities: { untrustedWorkspaces: { supported: string; description: string; restrictedConfigurations: string[] } };
@@ -75,7 +74,7 @@ test('JSON-RPC errors keep their code and data, and method-not-found reads as un
 });
 
 test('ESLint enforces which host may import which vscode-languageclient entry', async () => {
-  const eslint = new ESLint({ cwd: repositoryDir });
+  const eslint = new ESLint({ cwd: extensionDir });
   async function errors(file: string, source: string): Promise<string[]> {
     const [result] = await eslint.lintText(source, { filePath: join(extensionDir, file) });
     return (result?.messages ?? []).filter((message) => message.ruleId === '@typescript-eslint/no-restricted-imports')
@@ -129,7 +128,7 @@ test('the build fails with instructions when the language server package is not 
     assert.equal(run.status, 1);
     const { package: name, version } = manifest.zenwaveLanguageServer;
     assert.match(run.stderr, new RegExp(`expected ${name.replace('/', '\\/')}@${version.replace(/\./g, '\\.')}`));
-    assert.match(run.stderr, /npm install --no-save --workspace packages\/extension/);
+    assert.match(run.stderr, /npm install --no-save <zenwave-lsp>/);
     assert.match(run.stderr, /ZENWAVE_LSP_JS_DIR/);
   } finally {
     rmSync(empty, { recursive: true, force: true });

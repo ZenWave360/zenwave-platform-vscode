@@ -7,10 +7,10 @@
       "request": "launch",
       "args": [
         "--disable-extensions",
-        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
-        "${workspaceFolder}/packages/extension/fixtures"
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/fixtures"
       ],
-      "outFiles": ["${workspaceFolder}/packages/extension/dist/node/**/*.js"],
+      "outFiles": ["${workspaceFolder}/dist/node/**/*.js"],
       "preLaunchTask": "npm: watch"
     },
     {
@@ -20,11 +20,11 @@
       "request": "launch",
       "args": [
         "--disable-extensions",
-        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
+        "--extensionDevelopmentPath=${workspaceFolder}",
         "--extensionDevelopmentKind=web",
-        "${workspaceFolder}/packages/extension/fixtures"
+        "${workspaceFolder}/fixtures"
       ],
-      "outFiles": ["${workspaceFolder}/packages/extension/dist/browser/**/*.js"],
+      "outFiles": ["${workspaceFolder}/dist/browser/**/*.js"],
       "preLaunchTask": "npm: watch"
     }
   ]

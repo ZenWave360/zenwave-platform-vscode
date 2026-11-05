@@ -52,7 +52,7 @@ export function npmNext(name, run = spawnSync) {
 
 /**
  * Forgets the lockfile's entries for these packages, so npm resolves them again. Left in place, npm keeps the old entry
- * hoisted and puts the new version in packages/extension/node_modules, where it shadows a linked sibling and where
+ * hoisted and puts the new version in node_modules, where it shadows a linked sibling and where
  * the lockfile check does not look.
  */
 export function dropLockEntries(root, names) {
@@ -103,7 +103,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
   const include = args.flatMap((arg, index) => (arg === '--include' ? [args[index + 1]] : []));
   const extensionDirectory = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
   try {
-    for (const line of raisePins({ extensionDirectory, root: path.resolve(extensionDirectory, '../..'), include, dryRun: args.includes('--dry-run') })) {
+    for (const line of raisePins({ extensionDirectory, root: extensionDirectory, include, dryRun: args.includes('--dry-run') })) {
       console.log(line);
     }
   } catch (error) {

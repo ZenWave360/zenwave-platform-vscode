@@ -17,7 +17,7 @@ number as its patch: `0.0.57` before the first release, `0.1.58` after `v0.1.0`.
 Marketplace refuses a leading zero. The version is raised only for a stable release, on `main`; `develop` gets it by
 merging `main` back.
 
-Release notes are files in `packages/extension/release-notes/`: `next.md` is what is on `develop`, and
+Release notes are files in `release-notes/`: `next.md` is what is on `develop`, and
 `release-notes.vX.Y.Z.md` is the notes of each stable release. `CHANGELOG.md` is generated from them every time the
 extension is packaged, in every channel, with their full text, highest version first, and is not committed. In a
 pre-release `next.md` is the section of the stamped version and the date of the commit, and the GitHub pre-release has
@@ -85,11 +85,11 @@ it, and the tag and GitHub pre-release are updated, never duplicated.
 
 1. Merge `develop` into `main`. Every `@zenwave360/*` must be at a stable version on `main` (set stable pins by hand;
    `npm run pins:raise` only moves to `next`), and `resources/sdk-plugin-catalogue.json` current
-   (`npm run generate:sdk-catalogue --workspace packages/extension`).
+   (`npm run generate:sdk-catalogue`).
 2. Prepare the release, still on `main`:
 
    ```console
-   npm run release:prepare --workspace packages/extension -- 0.2.0
+   npm run release:prepare -- 0.2.0
    ```
 
    It sets the version in `package.json`, renames `next.md` to `release-notes.v0.2.0.md` and leaves an empty `next.md`.
@@ -124,8 +124,8 @@ above it, so users on them stay where they are and users on stable get the fix.
 The `verify` job never sees one. The `publish` job runs in the GitHub environment `vscode-prerelease` (limited to
 `develop`) or `vscode-release` (limited to `v*` tags, with a reviewer). It never installs or runs anything the `verify`
 job produced: it reads the VSIX, `release-info.json` and the notes as data, and checks the VSIX against `SHA256SUMS`. The
-publishing tools are `@vscode/vsce` and `ovsx`, from `packages/extension/publish-tools`, a small private package with its
-own lockfile, outside the workspaces and outside the VSIX. The job takes those two files from the commit
+publishing tools are `@vscode/vsce` and `ovsx`, from `publish-tools`, a small private package with its
+own lockfile, outside the root install and outside the VSIX. The job takes those two files from the commit
 (`github.sha`) with a sparse `actions/checkout` before any step that holds a secret, because `verify` runs third-party
 build code in its tree and a file it uploaded could choose what runs next to a token. It runs
 `npm ci --ignore-scripts` there in a step with no secret, and the publishing steps run the installed binaries, never

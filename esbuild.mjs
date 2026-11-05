@@ -43,7 +43,7 @@ function languageServerPackage() {
   const pinned = packageManifest.zenwaveLanguageServer;
   const help = [
     `${pinned.package}@${pinned.version} is needed to build the extension. Run npm ci, or link a local build without saving it:`,
-    `  npm install --no-save --workspace packages/extension <zenwave-lsp>/lsp-js/build/npm-pack/zenwave360-lsp-js-${pinned.version}.tgz`,
+    `  npm install --no-save <zenwave-lsp>/lsp-js/build/npm-pack/zenwave360-lsp-js-${pinned.version}.tgz`,
     `or point ZENWAVE_LSP_JS_DIR at the unpacked package (<zenwave-lsp>/lsp-js/build/npm-package).`,
   ].join(NEWLINE_INDENT);
   let directory = process.env.ZENWAVE_LSP_JS_DIR?.trim();
@@ -298,7 +298,7 @@ let seen = new Set();
  * we do not depend on the esbuild problem-matcher extension being installed.
  *
  * Paths are absolute on purpose. esbuild reports them relative to ITS cwd
- * (`packages/extension`), while the VS Code task runs from the workspace root,
+ * (the repository root), while the VS Code task may run from elsewhere,
  * so a relative path would resolve to the wrong file.
  */
 function report(name, messages, severity) {

@@ -16,4 +16,4 @@ tmp/
 .grok/config.toml
 
 # Generated from release-notes/ when packaging
-packages/extension/CHANGELOG.md
+CHANGELOG.md

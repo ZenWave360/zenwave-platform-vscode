@@ -253,9 +253,9 @@ export function setVersion(manifestText, version) {
   return manifestText.replace(pattern, `$1${version}$2`);
 }
 
-/** spec:release#r-r11. The same version in the lock's entry for the extension, so the next `npm install` has nothing to rewrite. */
+/** spec:release#r-r11. The same version in the lock's root entry, which is the extension, so the next `npm install` has nothing to rewrite. */
 export function setLockVersion(lockText, version) {
-  const pattern = /("packages\/extension": \{[^{}]*?"version": ")[^"]*(")/;
-  if (!pattern.test(lockText)) throw new Error('package-lock.json has no "packages/extension" entry with a version');
+  const pattern = /("packages": \{\s*"": \{[^{}]*?"version": ")[^"]*(")/;
+  if (!pattern.test(lockText)) throw new Error('package-lock.json has no root package entry with a version');
   return lockText.replace(pattern, `$1${version}$2`);
 }
