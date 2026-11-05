@@ -8,7 +8,7 @@ import { createNonce } from '../eventflow/page.js';
 import { buildFailedHtml, buildPreviewHtml } from './page.js';
 import { decidePreviewLink } from './links.js';
 import type { PreviewMode } from '../lsp/requests.js';
-import { FOLLOWING_VIEW_TYPE, PREVIEW_VIEW_TYPE, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
+import { FOLLOWING_VIEW_TYPE, PREVIEW_VIEW_TYPES, isPreviewViewType, previewViewType, RENDER_MODES, inboundMessage, isRenderMode, type PreviewProbe, type RenderMode } from './protocol.js';
 import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from './session.js';
 import { FollowingMemory, followTarget, followingTitle, followsLanguage, isFollowingViewType } from './following.js';
 
@@ -287,7 +287,7 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
 }
 
 const isPreviewTab = (uri: vscode.Uri) => (input: unknown): boolean =>
-  input instanceof vscode.TabInputCustom && input.viewType === PREVIEW_VIEW_TYPE && input.uri.toString() === uri.toString();
+  input instanceof vscode.TabInputCustom && isPreviewViewType(input.viewType) && input.uri.toString() === uri.toString();
 
 /** The tab holding a document's preview, in any group. */
 function previewTab(uri: vscode.Uri): vscode.Tab | undefined {
@@ -323,7 +323,7 @@ export function registerPreviewEditor(
   /** The preview that is the active editor: the active tab says so, and its panel's own flag covers a tab the host has not listed yet. */
   function activePreviewUri(): string | undefined {
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-    if (tab) return tab.input instanceof vscode.TabInputCustom && tab.input.viewType === PREVIEW_VIEW_TYPE ? tab.input.uri.toString() : undefined;
+    if (tab) return tab.input instanceof vscode.TabInputCustom && isPreviewViewType(tab.input.viewType) ? tab.input.uri.toString() : undefined;
     return [...editors].find((editor) => editor.panel.active)?.documentUri;
   }
 
@@ -382,8 +382,8 @@ export function registerPreviewEditor(
   /** A document has one preview: when it already has one, that one is shown instead of opening another. */
   async function reveal(uri: vscode.Uri, preserveFocus: boolean): Promise<boolean> {
     const existing = previewTab(uri);
-    if (!existing) return false;
-    await vscode.commands.executeCommand('vscode.openWith', uri, PREVIEW_VIEW_TYPE, { viewColumn: existing.group.viewColumn, preserveFocus });
+    if (!existing || !(existing.input instanceof vscode.TabInputCustom)) return false;
+    await vscode.commands.executeCommand('vscode.openWith', uri, existing.input.viewType, { viewColumn: existing.group.viewColumn, preserveFocus });
     return true;
   }
 
@@ -391,7 +391,7 @@ export function registerPreviewEditor(
     const uri = commandDocument(argument, isPreviewableDocument);
     if (!uri) return noDocument(argument);
     if (!await reveal(uri, true)) {
-      await vscode.commands.executeCommand('vscode.openWith', uri, PREVIEW_VIEW_TYPE, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true });
+      await vscode.commands.executeCommand('vscode.openWith', uri, previewViewType(uri.path), { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true });
     }
     return { kind: 'opened', documentUri: uri.toString() };
   }
@@ -412,7 +412,7 @@ export function registerPreviewEditor(
       const group = vscode.window.tabGroups.activeTabGroup;
       const textTab = findTab(group, (input) => input instanceof vscode.TabInputText && input.uri.toString() === uri.toString());
       const openPreview = (column: vscode.ViewColumn): Thenable<unknown> =>
-        vscode.commands.executeCommand('vscode.openWith', uri, PREVIEW_VIEW_TYPE, { viewColumn: column, preserveFocus: false });
+        vscode.commands.executeCommand('vscode.openWith', uri, previewViewType(uri.path), { viewColumn: column, preserveFocus: false });
       if (textTab) {
         if (textTab.isDirty) logger.info(`Preview of ${fileName(uri)}: the text has unsaved changes, so it stays open beside the preview`);
         await replaceInPlace(textTab, openPreview);
@@ -571,7 +571,7 @@ export function registerPreviewEditor(
       pendingModes.set(editor.documentUri, mode);
       const timer = setTimeout(() => pendingModes.delete(editor.documentUri), PENDING_MODE_MS);
       context.subscriptions.push({ dispose: () => clearTimeout(timer) });
-      await vscode.commands.executeCommand('vscode.openWith', uri, PREVIEW_VIEW_TYPE, { viewColumn: column, preserveFocus: false });
+      await vscode.commands.executeCommand('vscode.openWith', uri, previewViewType(uri.path), { viewColumn: column, preserveFocus: false });
     }
     editor.panel.dispose();
     logger.info(`Following preview locked on ${fileName(uri)}`);
@@ -591,11 +591,11 @@ export function registerPreviewEditor(
   }
 
   context.subscriptions.push(
-    vscode.window.registerCustomEditorProvider(PREVIEW_VIEW_TYPE, provider, {
+    ...Object.values(PREVIEW_VIEW_TYPES).map((viewType) => vscode.window.registerCustomEditorProvider(viewType, provider, {
       // A preview keeps its drawing and scroll while its tab is in the background, instead of redrawing on every switch.
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false,
-    }),
+    })),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openToSide, openToSide),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.open, open),
     vscode.commands.registerCommand(PREVIEW_COMMANDS.openSequenceDiagrams, open),

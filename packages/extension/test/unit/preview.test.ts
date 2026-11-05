@@ -7,7 +7,7 @@ import type { Preview, PreviewMode, SequenceRenderMode } from '../../src/lsp/req
 import type { RequestResult } from '../../src/lsp/supervisor.js';
 import { buildFailedHtml, buildPreviewHtml, previewContentSecurityPolicy } from '../../src/preview/page.js';
 import { decidePreviewLink } from '../../src/preview/links.js';
-import { FOLLOWING_VIEW_TYPE, inboundMessage, PREVIEW_VIEW_TYPE, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
+import { FOLLOWING_VIEW_TYPE, inboundMessage, PREVIEW_VIEW_TYPE, PREVIEW_VIEW_TYPES, isPreviewViewType, previewViewType, RENDER_MODES, type OutboundMessage } from '../../src/preview/protocol.js';
 import { outcomeOf, reselect } from '../../src/preview/selection.js';
 import { PREVIEW_MARKDOWN_CONTEXT_KEY, PreviewSession, markdownContextValue } from '../../src/preview/session.js';
 import { PREVIEW_STATE_KINDS, presentPreviewState, type PreviewDataState } from '../../src/preview/state.js';
@@ -16,6 +16,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(readFileSync(join(here, '../../package.json'), 'utf8'));
 const runtimeFiles = JSON.parse(readFileSync(join(here, '../../runtime-files.json'), 'utf8')) as { files: string[] };
 const zdlAnswer = (JSON.parse(readFileSync(join(here, '../fixtures/lsp-samples/preview-zdl.json'), 'utf8')) as { result: Preview }).result;
+
+const previewWhen = '(' + Object.values(PREVIEW_VIEW_TYPES).map((id) => `activeCustomEditorId == ${id}`).join(' || ') + ')';
 
 const ZFL = 'file:///workspace/checkout.zfl';
 const READY = { type: 'zenwave.preview.ready' };
@@ -394,8 +396,19 @@ test('the page has a CSP with no remote, inline-script or eval allowance, only i
 
 test('the manifest registers an optional preview editor and names each supported file mode', () => {
   const contributes = manifest.contributes;
-  assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === PREVIEW_VIEW_TYPE),
-    { viewType: 'zenwave.preview', displayName: 'ZenWave Preview', selector: [{ filenamePattern: '*.zdl' }, { filenamePattern: '*.zw' }, { filenamePattern: '*.zfl' }], priority: 'option' });
+  for (const [extension, viewType, displayName] of [
+    ['zfl', PREVIEW_VIEW_TYPE, 'ZenWave Sequence Diagrams'],
+    ['zdl', PREVIEW_VIEW_TYPES.zdl, 'ZenWave Model Docs'],
+    ['zw', PREVIEW_VIEW_TYPES.zw, 'ZenWave Scripts Docs'],
+  ]) {
+    assert.deepEqual(contributes.customEditors.find((editor: { viewType: string }) => editor.viewType === viewType),
+      { viewType, displayName, selector: [{ filenamePattern: '*.' + extension }], priority: 'option' });
+    assert.equal(previewViewType('/workspace/model.' + extension), viewType);
+    assert.equal(previewViewType('/workspace/model.' + extension!.toUpperCase()), viewType);
+    assert.ok(isPreviewViewType(viewType!));
+  }
+  assert.ok(!isPreviewViewType('zenwave.previewFollowing'));
+  assert.ok(!isPreviewViewType('zenwave.preview.other'));
   const commands = (contributes.commands as { command: string; title: string }[]).map((entry) => entry.command);
   for (const command of ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagrams', 'zenwave.preview.openModelDocs', 'zenwave.preview.openZdlDiagrams', 'zenwave.preview.openScriptsDocs', 'zenwave.preview.openSequenceDiagramsToSide', 'zenwave.preview.openModelDocsToSide', 'zenwave.preview.openScriptsDocsToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode', 'zenwave.preview.copyMarkdown']) {
     assert.ok(commands.includes(command), `${command} is not contributed`);
@@ -420,7 +433,7 @@ test('the manifest registers an optional preview editor and names each supported
     assert.equal((contributes.menus.commandPalette as { command: string; when?: string }[]).find((entry) => entry.command === `zenwave.preview.${command}`)?.when, 'false', `${command} is a menu entry; Open Preview to the Side keeps the palette`);
   }
   for (const submenu of ['zenwave.zflViews', 'zenwave.zdlViews', 'zenwave.zwViews']) {
-    assert.ok(menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.showText' && entry.when === 'activeCustomEditorId == zenwave.preview'), `${submenu} keeps the way back to text (MP-Q9)`);
+    assert.ok(menus[submenu]!.some((entry) => entry.command === 'zenwave.preview.showText' && entry.when === previewWhen), `${submenu} keeps the way back to text (MP-Q9)`);
   }
   const palette = Object.fromEntries((contributes.menus.commandPalette as { command: string; when?: string }[]).map((entry) => [entry.command, entry.when]));
   assert.match(palette['zenwave.preview.openSequenceDiagrams'] ?? '', /zfl/);
@@ -441,7 +454,7 @@ test('copy as markdown is on the title bar and in the palette only while that pr
   assert.equal(copy?.title, 'Copy as Markdown');
   assert.equal(copy?.category, 'ZenWave');
   assert.equal(copy?.icon, '$(copy)');
-  const when = `(activeCustomEditorId == ${PREVIEW_VIEW_TYPE} || activeWebviewPanelId == ${FOLLOWING_VIEW_TYPE}) && ${PREVIEW_MARKDOWN_CONTEXT_KEY}`;
+  const when = `(${previewWhen} || activeWebviewPanelId == ${FOLLOWING_VIEW_TYPE}) && ${PREVIEW_MARKDOWN_CONTEXT_KEY}`;
   const title = manifest.contributes.menus['editor/title'] as { command?: string; when: string; group?: string }[];
   const button = title.filter((item) => item.command === 'zenwave.preview.copyMarkdown');
   assert.deepEqual(button.map((item) => [item.when, item.group]), [[when, 'navigation@100']]);

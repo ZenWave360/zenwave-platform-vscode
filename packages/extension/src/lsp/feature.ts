@@ -149,7 +149,7 @@ export function registerLanguageServer(
     return document !== undefined && (MODEL_LANGUAGES.has(document.languageId) || isManifest(manifest, document));
   }
 
-  function refresh(): void {
+  function refresh(notify = true): void {
     const current = status();
     const presentation = presentStatus(current, capabilities.hostKind, manifest, serverInfo()?.version);
     item.text = presentation.text;
@@ -164,7 +164,7 @@ export function registerLanguageServer(
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.organizeModesAvailable, organizeModes);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.previewModesAvailable, previewModes);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.manifestAvailable, manifest.manifestUri !== undefined);
-    changed.fire();
+    if (notify) changed.fire();
   }
 
   context.subscriptions.push(supervisor.onDidChangeState((state) => {
@@ -283,7 +283,8 @@ export function registerLanguageServer(
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void reconsiderManifest('workspace folders changed')),
     vscode.workspace.onDidGrantWorkspaceTrust(() => void start('workspace trust granted')),
-    vscode.window.onDidChangeActiveTextEditor(() => refresh()),
+    // Focus changes only the status bar's visibility, not the server or its manifest.
+    vscode.window.onDidChangeActiveTextEditor(() => refresh(false)),
     vscode.commands.registerCommand(LSP_COMMANDS.restart, () => start('restart requested')),
     vscode.commands.registerCommand(LSP_COMMANDS.showStatus, () => showStatus()),
     vscode.commands.registerCommand(LSP_COMMANDS.recordCredential, () => credentials.record()),

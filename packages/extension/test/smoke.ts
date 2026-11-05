@@ -12,7 +12,7 @@ import type { HierarchyTreeApi, ModelExplorerApi, OpenRelatedOutcome } from '../
 import { findNode, type ExplorerNode } from '../src/explorer/hierarchy-model.js';
 import type { EventFlowApi, EventFlowEditorApi, EventFlowOpenOutcome } from '../src/eventflow/feature.js';
 import type { PreviewApi, PreviewEditorApi, PreviewOpenOutcome, PreviewSelectOutcome } from '../src/preview/feature.js';
-import { contentHash, type PreviewProbe } from '../src/preview/protocol.js';
+import { contentHash, PREVIEW_VIEW_TYPES, isPreviewViewType, type PreviewProbe } from '../src/preview/protocol.js';
 import { outcomeOf } from '../src/preview/selection.js';
 import type { Preview } from '../src/lsp/requests.js';
 
@@ -1230,7 +1230,7 @@ const editorCount = (api: PreviewApi): number => api.editors.length;
 const PREVIEW_COMMANDS = ['zenwave.preview.open', 'zenwave.preview.openToSide', 'zenwave.preview.openSequenceDiagramsToSide', 'zenwave.preview.openModelDocsToSide', 'zenwave.preview.openScriptsDocsToSide', 'zenwave.preview.showText', 'zenwave.preview.selectDiagram', 'zenwave.preview.selectRenderMode'];
 
 const isPreviewTab = (tab: vscode.Tab | undefined, uri: string): boolean =>
-  tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === 'zenwave.preview' && tab.input.uri.toString() === uri;
+  tab?.input instanceof vscode.TabInputCustom && isPreviewViewType(tab.input.viewType) && tab.input.uri.toString() === uri;
 
 const baseName = (url: string): string => url.slice(url.lastIndexOf('/') + 1);
 
@@ -1292,6 +1292,7 @@ async function previewModels(api: LanguageServerApi, preview: PreviewApi, deskto
   const flow = await renderedPreview(preview, checkout);
   const flowTab = allTabs().find((tab) => isPreviewTab(tab, checkout));
   assert(flowTab && flowTab.group.viewColumn === vscode.ViewColumn.Two, `The preview is not in the column beside: ${flowTab?.group.viewColumn}`);
+  assert(flowTab.input instanceof vscode.TabInputCustom && flowTab.input.viewType === PREVIEW_VIEW_TYPES.zfl, 'ZFL uses the Sequence Diagrams view type');
   assert(flowTab.label === 'checkout.zfl', `The preview tab does not name its document: ${flowTab.label}`);
   assert(isTextTab(vscode.window.tabGroups.activeTabGroup.activeTab, checkout), 'Focus left the text editor when the preview opened beside it');
   console.log('PASS: the preview opens beside the text, named for its document, and focus stays in the text');
@@ -1323,6 +1324,7 @@ async function previewModels(api: LanguageServerApi, preview: PreviewApi, deskto
   // A ZDL model: the server's Markdown page, rendered, its diagrams drawn, and no selector for a single representation (MP-R10, MP-R15).
   await vscode.commands.executeCommand('zenwave.preview.openToSide', ordersUri);
   const model = await renderedPreview(preview, orders);
+  assert(allTabs().some((tab) => isPreviewTab(tab, orders) && tab.input instanceof vscode.TabInputCustom && tab.input.viewType === PREVIEW_VIEW_TYPES.zdl), 'ZDL uses the Model Docs view type');
   const ordersAnswer = await serverPreview(api, orders);
   const page = ordersAnswer.representations[0]!;
   assert(ordersAnswer.representations.length === 1 && page.format === 'MARKDOWN', `The ZDL answer is not one Markdown page: ${ordersAnswer.representations.map((item) => `${item.id}:${item.format}`).join()}`);
@@ -1357,7 +1359,7 @@ async function previewModels(api: LanguageServerApi, preview: PreviewApi, deskto
   console.log('PASS: two models previewed at once keep their own document and diagram, and asking again reveals the existing preview');
 
   // 005/7.8: with a preview focused there is no active text editor, and a command still finds the document through the tab.
-  await vscode.commands.executeCommand('vscode.openWith', ordersUri, 'zenwave.preview', { viewColumn: vscode.ViewColumn.Two });
+  await vscode.commands.executeCommand('vscode.openWith', ordersUri, PREVIEW_VIEW_TYPES.zdl, { viewColumn: vscode.ViewColumn.Two });
   await waitFor(() => isPreviewTab(vscode.window.tabGroups.activeTabGroup.activeTab, orders), 'The orders preview is not the active tab', 10000);
   for (const command of ['zenwave.preview.openToSide', 'zenwave.preview.open']) {
     const fromTab = await vscode.commands.executeCommand<PreviewOpenOutcome>(command);
@@ -1821,6 +1823,7 @@ async function previewZw(api: LanguageServerApi, preview: PreviewApi): Promise<v
   const outcome = await vscode.commands.executeCommand<PreviewOpenOutcome>('zenwave.preview.openToSide');
   assert(outcome.kind === 'opened' && outcome.documentUri === name, `Preview of a .zw: ${JSON.stringify(outcome)}`);
   let editor = await renderedZwPreview(preview, name);
+  assert(allTabs().some((tab) => isPreviewTab(tab, name) && tab.input instanceof vscode.TabInputCustom && tab.input.viewType === PREVIEW_VIEW_TYPES.zw), 'ZW uses the Scripts Docs view type');
   const answer = await serverPreview(api, name);
   const page = answer.representations[0];
   assert(answer.representations.length === 1 && page?.id === 'configuration' && page.format === 'MARKDOWN' && page.title === 'Plugin configuration',

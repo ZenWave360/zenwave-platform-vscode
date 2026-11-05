@@ -22,6 +22,8 @@ export interface SessionLog {
 export interface SessionPorts {
   readonly documentUri: string;
   readonly fileName: string;
+  /** The open text model's version; unavailable documents must always be retried. */
+  documentVersion(): number | undefined;
   /** `languageServer.requests.eventFlowViews`. */
   eventFlowViews(uri: string, variant?: string, positions?: Positions): Promise<RequestResult<EventFlowViews>>;
   /** Whether the connected server advertised `flowVariants`. */
@@ -89,6 +91,8 @@ export class DiagramSession {
   private fileExists = false;
   /** The state of the positions file as this session last read or wrote it, to tell its own writes from outside changes. */
   private fileState: string | undefined;
+  private positionsReadable = true;
+  private lastRefreshKey: string | undefined;
   private loggedFileProblem: string | undefined;
   /** The variant the user chose in this editor, or `null` for the full diagram. Not persisted (EF-R12). */
   private variant: string | null = null;
@@ -122,24 +126,43 @@ export class DiagramSession {
     return this.fileExists;
   }
 
+  /** Server lifecycle changes must retry even when the document did not change. */
+  invalidateRefresh(): void {
+    this.lastRefreshKey = undefined;
+    ++this.generation;
+  }
+
   /** Asks the server for the view model and relays the answer. Answers overtaken by a newer request are dropped. */
   async refresh(): Promise<void> {
     if (this.disposed) return;
     const generation = ++this.generation;
+    const version = this.ports.documentVersion();
     const withVariants = this.ports.flowVariants();
-    let { result, saved } = await this.askServer(withVariants);
+    const withPositions = this.ports.savedPositions();
+    const file = withPositions ? await this.readPositionsFile() : undefined;
+    if (this.disposed || generation !== this.generation) return;
+    const refreshKey = (): string | undefined => version === undefined || (withPositions && !this.positionsReadable)
+      ? undefined
+      : JSON.stringify([version, this.variant, this.viewMode, this.displaySettings.humanizeLabels, withPositions ? this.fileState : null]);
+    let key = refreshKey();
+    if (key !== undefined && key === this.lastRefreshKey) return;
+    // A failed refresh must be retried, including when the text returns to an older successful version.
+    this.lastRefreshKey = undefined;
+    let { result, saved } = await this.askServer(withVariants, file);
     if (this.disposed || generation !== this.generation) return;
     if (withVariants && this.variant !== null && result.kind === 'failed' && result.code === INVALID_PARAMS) {
       // The variant is gone from the document: show the full diagram.
       this.ports.log.info(`EventFlow diagram for ${this.ports.fileName}: variant "${this.variant}" no longer exists; showing the full diagram`);
       this.variant = null;
-      ({ result, saved } = await this.askServer(withVariants));
+      key = refreshKey();
+      ({ result, saved } = await this.askServer(withVariants, file));
       if (this.disposed || generation !== this.generation) return;
     }
     const data = dataStateFromResult(result);
     this.record(data);
     this.data = data;
     if (result.kind === 'ok') {
+      this.lastRefreshKey = key;
       this.lastGood = result.value;
       this.lastSaved = saved && { exists: saved.exists, ...savedAnswer(saved.sent, result.value) };
       this.rendered = false;
@@ -148,18 +171,16 @@ export class DiagramSession {
     this.present();
   }
 
-  private async askServer(withVariants: boolean): Promise<{ result: RequestResult<EventFlowViews>; saved?: { exists: boolean; sent: boolean } }> {
+  private async askServer(withVariants: boolean, file?: PositionsFile): Promise<{ result: RequestResult<EventFlowViews>; saved?: { exists: boolean; sent: boolean } }> {
     if (withVariants && this.variant !== null) {
-      // No positions are sent for a variant, but the file may have gone, and Discard Saved Positions follows it.
-      if (this.ports.savedPositions()) await this.readPositionsFile();
+      // No positions are sent for a variant; the file was still read for Discard Saved Positions.
       this.requests++;
       return { result: await this.ports.eventFlowViews(this.ports.documentUri, this.variant) };
     }
-    if (!this.ports.savedPositions()) {
+    if (!file) {
       this.requests++;
       return { result: await this.ports.eventFlowViews(this.ports.documentUri) };
     }
-    const file = await this.readPositionsFile();
     this.requests++;
     const result = await this.ports.eventFlowViews(this.ports.documentUri, undefined, file.positions);
     return { result, saved: { exists: file.exists, sent: file.positions !== undefined } };
@@ -167,9 +188,11 @@ export class DiagramSession {
 
   private async readPositionsFile(): Promise<PositionsFile> {
     let file: PositionsFile;
+    this.positionsReadable = true;
     try {
       file = await this.ports.positionsFile.read();
     } catch (error) {
+      this.positionsReadable = false;
       this.ports.log.warn(`EventFlow diagram for ${this.ports.fileName}: could not read the positions file: ${error instanceof Error ? error.message : String(error)}`);
       file = { exists: false };
     }
@@ -219,6 +242,9 @@ export class DiagramSession {
       case 'viewModeChanged':
         // The page already shows this view: record it without telling the page (EF-R3).
         this.viewMode = message.payload.viewMode;
+        return;
+      case 'labelsChanged':
+        this.setDisplaySettings({ humanizeLabels: message.payload.humanize });
         return;
       case 'zenwave.host.loadError':
         if (this.page.kind === 'ready') {

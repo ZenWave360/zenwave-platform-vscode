@@ -22,7 +22,7 @@ export const EVENTFLOW_COMMANDS = {
   discardSavedPositions: 'zenwave.eventflow.discardSavedPositions',
 } as const;
 
-/** State of the focused diagram editor, for the title-bar toggles' `when` clauses. */
+/** State of the focused diagram editor, for the commands' `when` clauses. */
 export const EVENTFLOW_CONTEXT_KEYS = {
   viewMode: 'zenwave.eventflowViewMode',
   humanizeLabels: 'zenwave.eventflowHumanizeLabels',
@@ -106,6 +106,7 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
     webview.options = { enableScripts: true, enableCommandUris: false, localResourceRoots: [pageDirectory] };
     this.session = new DiagramSession({
       documentUri: this.documentUri,
+      documentVersion: () => this.textDocument?.isClosed === false ? this.textDocument.version : undefined,
       fileName: fileName(uri),
       eventFlowViews: (target, variant, positions) => deps.server.requests.eventFlowViews(target, variant, positions),
       flowVariants: () => deps.server.flowVariants,
@@ -130,12 +131,18 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
         if (event.document.uri.toString() === this.documentUri && event.contentChanges.length > 0) this.refresher.request();
       }),
       vscode.workspace.onDidOpenTextDocument((document) => {
-        if (document.uri.toString() === this.documentUri) this.refresher.request(SWITCH_DELAY_MS);
+        if (document.uri.toString() === this.documentUri) {
+          this.textDocument = document;
+          this.refresher.request(SWITCH_DELAY_MS);
+        }
       }),
       vscode.workspace.onDidCloseTextDocument((document) => {
         if (document.uri.toString() === this.documentUri && !this.disposed) void this.keepOpen();
       }),
-      deps.server.onDidChange(() => this.refresher.request(SWITCH_DELAY_MS)),
+      deps.server.onDidChange(() => {
+        this.session.invalidateRefresh();
+        this.refresher.request(SWITCH_DELAY_MS);
+      }),
     );
     // A change on disk (a branch switch, another tool) reaches an open text document as a change event; the
     // watcher covers a document whose text model VS Code has not loaded yet.
@@ -227,9 +234,10 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
   private receive(message: unknown): void {
     const wasReady = this.session.page.kind === 'ready';
     const viewMode = this.session.viewMode;
+    const humanizeLabels = this.session.displaySettings.humanizeLabels;
     this.session.receive(message);
-    // The user chose a view in the page's selector: the title bar follows, for the focused editor only.
-    if (this.session.viewMode !== viewMode && this.panel.active) this.deps.onFocus(this);
+    // The focused editor's context keys follow the page's view and labels choices.
+    if ((this.session.viewMode !== viewMode || this.session.displaySettings.humanizeLabels !== humanizeLabels) && this.panel.active) this.deps.onFocus(this);
     if (!wasReady && this.session.page.kind === 'ready') {
       if (this.loadTimer !== undefined) clearTimeout(this.loadTimer);
       this.loadTimer = undefined;
