@@ -70,9 +70,10 @@ const VERSION_JOBS = [
   ['pre-release.yml', 'publish'],
   ['pre-release.yml', 'trace'],
   ['release.yml', 'publish'],
+  ['release.yml', 'release'],
+  ['release.yml', 'sync'],
   ['release-on-main.yml', 'prepare'],
-  ['release-on-main.yml', 'release'],
-  ['release-on-main.yml', 'sync'],
+  ['release-on-main.yml', 'dispatch'],
 ] as const;
 const VALID_VERSION = '1.2.3';
 const INVALID_VERSION = '01.2.3';

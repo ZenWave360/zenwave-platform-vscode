@@ -45,8 +45,7 @@ for (const name of ['pre-release.yml', 'release.yml']) {
     const text = read(name);
     const publish = text.slice(text.indexOf('\n  publish:'), text.indexOf('\n  trace:') === -1 ? undefined : text.indexOf('\n  trace:'));
     assert.match(publish, /uses: actions\/checkout@[0-9a-f]{40}/);
-    // release.yml is also called with a tag, and then github.sha is the caller's commit, not the release's.
-    assert.match(publish, name === 'release.yml' ? /ref: \$\{\{ inputs\.tag && format\('refs\/tags\/\{0\}', inputs\.tag\) \|\| github\.sha \}\}/ : /ref: \$\{\{ github\.sha \}\}/);
+    assert.match(publish, /ref: \$\{\{ github\.sha \}\}/);
     assert.match(publish, /sparse-checkout: publish-tools\n/);
     assert.match(publish, /persist-credentials: false/);
     assert.match(publish, /working-directory: publish-tools\n\s+run: \|\n\s+set -euo pipefail\n\s+npm ci --ignore-scripts/);

@@ -8,8 +8,8 @@ This file is how to work with the pipelines in `.github/workflows/`.
 | `ci.yml` | a pull request, a push to `main` | `verify.yml` and nothing else. A pull request into `develop` is the dry run of the pre-release. |
 | `verify.yml` | called by the others | The checks, the package, both smoke tests, and the verified VSIX as an artifact. No registry credential. |
 | `pre-release.yml` | a push to `develop` that changes the extension | Verifies, and when `ZENWAVE_PUBLISH_PRERELEASE` is `true`, publishes a pre-release to both registries, tags `vX.Y.Z-pre` and creates the GitHub pre-release. |
-| `release-on-main.yml` | a push to `main`, or by hand | Plans the version from the commits; when there is one, prepares the release commit through a pull request, tags it, calls `release.yml`, creates the GitHub release and syncs `develop`. The usual way to release. |
-| `release.yml` | a tag `vX.Y.Z`, or called by `release-on-main.yml` with the tag | Verifies, waits for the reviewer of `vscode-release`, publishes a stable release. |
+| `release-on-main.yml` | a push to `main`, or by hand | Plans the version from the commits; when there is one, prepares the release commit through a pull request, tags it and starts `release.yml` on the tag. The usual way to release. |
+| `release.yml` | a tag `vX.Y.Z`, or `workflow_dispatch` on that tag (what `release-on-main.yml` does) | Verifies, waits for the reviewer of `vscode-release`, publishes a stable release, creates the GitHub release and syncs `develop`. |
 
 ## Versions and release notes
 
@@ -100,17 +100,25 @@ rest (spec R-R14 and R-R15):
    `chore(release): X.Y.Z` (only `package.json`, `package-lock.json` and the notes files may change), opens a pull request
    to `main`, merges it with a merge commit, waits until it is merged, and then pushes the tag `vX.Y.Z` on the release
    commit. A pull request is used because it needs no bypass of the ruleset of `main`.
-3. **publish** is `release.yml` called with the tag: the same checks, then it waits for the reviewer of `vscode-release`.
-4. **release** creates the GitHub release for the tag, with the notes file and the line with the commit and the registry
+3. **dispatch** starts `release.yml` on the tag with `gh workflow run release.yml --ref vX.Y.Z` and the run ends green,
+   without waiting for the approval. Its summary links the `release.yml` run when it can find it. A tag pushed with the
+   workflow's own token starts nothing, and a reusable call would run with `main` as its ref, which the `vscode-release`
+   environment (limited to `v*` tags) refuses; a run of `release.yml` on the tag is what that environment expects.
+   The rest is the jobs of that run, which also serve a tag pushed by hand:
+4. **publish** is the stable workflow: the same checks, then it waits for the reviewer of `vscode-release`.
+5. **release** creates the GitHub release for the tag, with the notes file and the line with the commit and the registry
    outcomes, once the registries were tried. If the reviewer refuses, nothing is published and there is no GitHub release.
-5. **sync** merges the release commit into `develop` through a pull request titled `chore: sync version`, so `develop`
-   carries the new `major.minor`.
+6. **sync** merges the release commit into `develop` through a pull request titled `chore: sync version` (from
+   `release/X.Y.Z` when that branch ends at the tag, else from a `sync/X.Y.Z` branch made at the tag), so `develop`
+   carries the new `major.minor`. Then it starts `pre-release.yml` on `develop`, because a merge by the workflow's token
+   starts none; that workflow accepts a dispatch on `develop` and nothing else.
 
 To see what a merge would release without changing anything, run the workflow by hand (Actions, Release on main, Run
 workflow, `dry_run` on): it prints the version, the commits that decided it and the notes check, and stops.
 
 Runs are one at a time and never cancelled. The release commit and the sync merge have a `chore(release)` or
-`chore: sync version` subject, and a run started for such a head commit does nothing; the pushes of the workflow's own
+`chore: sync version` subject, and a run started for such a head commit does nothing (for a manual run, the head that
+`plan` checked out is the one looked at); the pushes of the workflow's own
 token start no workflow in any case, so there is no loop. For the same reason no `pull_request` check runs on the two
 pull requests, and the build that counts is the one `release.yml` runs on the tag.
 
@@ -121,28 +129,34 @@ cannot meet.
 ### When it stops
 
 - **The reviewer refused.** The release commit and the tag exist, nothing is published, and no GitHub release was made.
-  Approve by running the failed jobs of the run again: `publish`, then `release` and `sync` follow.
+  `release-on-main` is already green. In the `release.yml` run on the tag, run the failed jobs again and approve:
+  `publish`, then `release` and `sync` follow.
 - **A registry refused.** As for a pre-release: `publish` and `release` fail, the other registry has the version. Run the
-  failed jobs again; the registry that has the version skips it, and the GitHub release is updated, not duplicated.
-- **The sync conflicts.** The run fails after publication, its summary lists the conflicting files, and the pull request
+  failed jobs of the `release.yml` run again; the registry that has the version skips it, and the GitHub release is updated, not duplicated.
+- **The sync conflicts.** The `release.yml` run fails after publication, its summary lists the conflicting files, and the pull request
   `chore: sync version` stays open. The usual one is `release-notes/next.md`: `main` emptied it, and `develop` still has
   lines that are now in the release's notes. Resolve it in the pull request keeping only what `develop` added after the
   merge to `main`, and merge it. Nothing is published again.
-- **`release/X.Y.Z` already exists.** A new run for that version fails at once and says so. The branch is left in place
-  on purpose after a release. If the branch is from a run that stopped before the merge, look at its pull request,
-  close it, delete the branch and run again. If the merge happened but the tag was not pushed, push the tag by hand on
-  the release commit (the manual path below) and run the failed jobs of that run again.
+- **`prepare` failed half way.** Run its failed jobs again: if `release/X.Y.Z` holds this run's release commit (its
+  subject is `chore(release): X.Y.Z` and its parent is the commit that was planned), it is reused, with its pull request
+  and an existing tag.
+- **`release/X.Y.Z` already exists** and is not this run's. A new run for that version fails at once and says so. The
+  branch is left in place on purpose after a release. If it is from a run that stopped before the merge, look at its pull
+  request, close it, delete the branch and run again. If the merge happened but the tag was not pushed, push the tag by
+  hand on the release commit (the manual path below), which starts `release.yml`.
 - **The merge conflicts** (`main` changed the manifest, the lockfile or the notes after the run was planned). The run
   fails before the tag exists. Resolve or close the pull request, delete `release/X.Y.Z` and run again.
 
-Trusted publishing sees `release.yml` called from `release-on-main.yml`: the OIDC claims name the calling workflow, so
-register the publisher accordingly when the tokens are retired (R-Q2).
+`release.yml` runs the same way however it was started, so the environment `vscode-release` stays limited to `v*` tags,
+its secrets are read by the publish job with nothing passed, and a trusted publisher is registered for `release.yml`
+(R-Q2). `plan` starts from the current head of `main`, not from the commit of the push, so a run that waited behind
+another release sees its release commit.
 
 ## A stable release by hand (the fallback)
 
 A tag `vX.Y.Z` pushed by hand still starts `release.yml` on its own, for the cases the workflow does not cover (it is
-down, or a hotfix is cut from a branch of `main`). It creates no GitHub release and no sync: create the release from the tag
-and merge `main` back into `develop` yourself.
+down, or a hotfix is cut from a branch of `main`). It does the same jobs after the tag, GitHub release and sync with `develop` included, because they are jobs of
+`release.yml`; only the version commit and the tag are yours.
 
 1. Merge `develop` into `main`. Every `@zenwave360/*` must be at a stable version on `main` (set stable pins by hand;
    `npm run pins:raise` only moves to `next`), and `resources/sdk-plugin-catalogue.json` current
@@ -167,7 +181,8 @@ and merge `main` back into `develop` yourself.
 3. Tag that commit `v0.2.0`, or create a GitHub release that creates the tag. A tag with a suffix such as `-pre` publishes
    nothing.
 4. Approve the `publish` job when `vscode-release` asks. Nothing publishes before.
-5. Merge `main` back into `develop`, so its manifest holds `0.2` and its pre-releases are above the release. If
+5. Merge `main` back into `develop`, so its manifest holds `0.2` and its pre-releases are above the release. The `sync`
+   job of `release.yml` does this; do it by hand only when that job failed or was skipped. If
    `develop` wrote to `next.md` after the merge to `main`, the merge conflicts there: `main` emptied the file, and
    `develop` still has the lines that are now in the release's notes. Keep only the lines `develop` added after that
    merge, and none of what is in `release-notes.v0.2.0.md`; keeping `develop`'s side whole would put the released notes
