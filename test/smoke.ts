@@ -717,13 +717,29 @@ async function eventflowDiagrams(api: LanguageServerApi, explorer: ModelExplorer
   const posted = flow.session.lastRenderBundle!;
   assert(JSON.stringify(posted.flowGraph) === JSON.stringify(views.flowGraph) && JSON.stringify(posted.serviceGraph) === JSON.stringify(views.serviceGraph),
     'renderBundle does not carry the server answer field for field');
-  assert(posted.viewMode === 'flow' && JSON.stringify(posted.displaySettings) === '{"humanizeLabels":true}', `renderBundle controls: ${posted.viewMode} ${JSON.stringify(posted.displaySettings)}`);
+  assert(posted.viewMode === 'flow' && JSON.stringify(posted.displaySettings) === '{"humanizeLabels":true,"lanes":"none"}', `renderBundle controls: ${posted.viewMode} ${JSON.stringify(posted.displaySettings)}`);
+  // EF-R24: the shipped server offers lanes, so the page may show its Lanes control; without lanes there are no bands.
+  assert((posted as { lanesSupported?: boolean }).lanesSupported === true, `renderBundle lanesSupported: ${JSON.stringify((posted as { lanesSupported?: boolean }).lanesSupported)}`);
+  assert(!(posted.flowGraph as { lanes?: unknown[] | null }).lanes?.length, 'The flow is drawn in lanes before lanes were chosen');
   const flowIds = views.flowGraph.nodes.map((node) => node.id).sort();
   const drawn = await waitFor(async () => {
     const probe = await flow.probe();
     return JSON.stringify([...probe.nodeIds].sort()) === JSON.stringify(flowIds) ? probe : undefined;
   }, `The page did not draw the server's flow nodes: ${JSON.stringify((await flow.probe()).nodeIds)} vs ${JSON.stringify(flowIds)}`, 30000);
   console.log(`PASS: renderBundle carries zenwave/eventFlowViews verbatim and the page draws all ${drawn.nodeIds.length} flow nodes`);
+
+  // EF-R24: Systems lanes from the palette command, drawn in server bands, then back to no lanes.
+  assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.lanes', placeOrderUri, 'systems'), 'The lanes command found no diagram');
+  const laned = await waitFor(async () => {
+    const bundle = flow.session.lastRenderBundle as { displaySettings?: { lanes?: string }; flowGraph?: { lanes?: { id: string }[] | null } } | undefined;
+    return bundle?.displaySettings?.lanes === 'systems' && (bundle.flowGraph?.lanes?.length ?? 0) > 0 ? bundle : undefined;
+  }, 'Choosing Systems lanes did not draw the flow in bands', 30000);
+  assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.lanes', placeOrderUri, 'none'), 'The lanes command found no diagram to turn lanes off');
+  await waitFor(async () => {
+    const bundle = flow.session.lastRenderBundle as { displaySettings?: { lanes?: string }; flowGraph?: { lanes?: unknown[] | null } } | undefined;
+    return bundle?.displaySettings?.lanes === 'none' && !bundle.flowGraph?.lanes?.length ? true : undefined;
+  }, 'Choosing No lanes did not draw the flow without bands', 30000);
+  console.log(`PASS: Systems lanes draw the flow in ${laned.flowGraph!.lanes!.length} server bands, and No lanes draws it without them`);
 
   // Controls, per editor: services view, labels as written.
   // The variant dropdown (EF-R12) shows the server's titles as written, so a label it names would be on the page anyway.

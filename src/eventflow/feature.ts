@@ -333,11 +333,13 @@ export function registerEventFlowEditor(
     { label: 'Services', lanes: 'services' },
   ];
 
-  async function chooseLanes(argument: unknown): Promise<boolean> {
-    const editor = target(argument);
+  /** `(lanes)` for the focused diagram, `(documentUri, lanes)` like the other commands, or no argument for a quick pick. */
+  async function chooseLanes(argument: unknown, given?: unknown): Promise<boolean> {
+    const lanes = typeof argument === 'string' ? argument : given;
+    const editor = target(typeof argument === 'string' ? undefined : argument);
     if (!editor) return false;
-    if (typeof argument === 'string' && LANES.includes(argument as Lanes)) {
-      editor.setLanes(argument as Lanes);
+    if (typeof lanes === 'string' && LANES.includes(lanes as Lanes)) {
+      editor.setLanes(lanes as Lanes);
       return true;
     }
     if (!server.flowLanes) {
