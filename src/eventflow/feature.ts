@@ -8,7 +8,7 @@ import { fileName, findTab, replaceInPlace } from '../model/editor-tabs.js';
 import type { ConfirmationAnswer, ConfirmationRequest } from '../model/actions.js';
 import { buildFallbackHtml, buildPageHtml, createNonce } from './page.js';
 import { parsePositionsFile, positionsFileName, serializePositions, type PositionsFile } from './positions.js';
-import { EVENTFLOW_VIEW_TYPE, type PageProbe, type ViewMode } from './protocol.js';
+import { EVENTFLOW_VIEW_TYPE, LANES, type Lanes, type PageProbe, type ViewMode } from './protocol.js';
 import { DiagramSession } from './session.js';
 
 export const EVENTFLOW_COMMANDS = {
@@ -20,6 +20,7 @@ export const EVENTFLOW_COMMANDS = {
   showLabelsAsWritten: 'zenwave.eventflow.showLabelsAsWritten',
   showHumanizedLabels: 'zenwave.eventflow.showHumanizedLabels',
   discardSavedPositions: 'zenwave.eventflow.discardSavedPositions',
+  lanes: 'zenwave.eventflow.lanes',
 } as const;
 
 /** State of the focused diagram editor, for the commands' `when` clauses. */
@@ -73,6 +74,7 @@ export const DISCARD_BUTTON = 'Discard';
 interface Initial {
   readonly viewMode: ViewMode;
   readonly humanizeLabels: boolean;
+  readonly lanes: Lanes;
 }
 
 function readInitial(uri: vscode.Uri): Initial {
@@ -80,6 +82,7 @@ function readInitial(uri: vscode.Uri): Initial {
   return {
     viewMode: settings.get<string>('defaultView', 'flow') === 'services' ? 'services' : 'flow',
     humanizeLabels: settings.get<boolean>('humanizeLabels', true),
+    lanes: LANES.find((lanes) => lanes === settings.get<string>('lanes', 'none')) ?? 'none',
   };
 }
 
@@ -108,7 +111,8 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
       documentUri: this.documentUri,
       documentVersion: () => this.textDocument?.isClosed === false ? this.textDocument.version : undefined,
       fileName: fileName(uri),
-      eventFlowViews: (target, variant, positions) => deps.server.requests.eventFlowViews(target, variant, positions),
+      eventFlowViews: (target, variant, positions, lanes) => deps.server.requests.eventFlowViews(target, variant, positions, lanes),
+      flowLanes: () => deps.server.flowLanes,
       flowVariants: () => deps.server.flowVariants,
       savedPositions: () => deps.server.savedPositions,
       positionsFile: this.positionsFile(),
@@ -117,7 +121,7 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
       log: deps.logger,
       warn: (message) => { void vscode.window.showWarningMessage(message); },
       positionsExistChanged: () => { if (panel.active) deps.onFocus(this); },
-    }, { viewMode: initial.viewMode, displaySettings: { humanizeLabels: initial.humanizeLabels } });
+    }, { viewMode: initial.viewMode, displaySettings: { humanizeLabels: initial.humanizeLabels, lanes: initial.lanes } });
     this.refresher = new CoalescedRefresh(async () => {
       await this.session.refresh();
       if (this.panel.active) this.deps.onFocus(this);
@@ -260,6 +264,10 @@ class EventFlowEditor implements EventFlowEditorApi, vscode.Disposable {
     if (this.panel.active) this.deps.onFocus(this);
   }
 
+  setLanes(lanes: Lanes): void {
+    this.session.setLanes(lanes);
+  }
+
   settled(): Promise<void> {
     return this.refresher.idle();
   }
@@ -317,6 +325,29 @@ export function registerEventFlowEditor(
     await editor.session.discardSavedPositions();
     if (editor.panel.active) publish(editor);
     return 'discarded';
+  }
+
+  const LANES_CHOICES: readonly { readonly label: string; readonly lanes: Lanes }[] = [
+    { label: 'No lanes', lanes: 'none' },
+    { label: 'Systems', lanes: 'systems' },
+    { label: 'Services', lanes: 'services' },
+  ];
+
+  async function chooseLanes(argument: unknown): Promise<boolean> {
+    const editor = target(argument);
+    if (!editor) return false;
+    if (typeof argument === 'string' && LANES.includes(argument as Lanes)) {
+      editor.setLanes(argument as Lanes);
+      return true;
+    }
+    if (!server.flowLanes) {
+      void vscode.window.showInformationMessage('The connected ZenWave language server does not draw EventFlow diagrams in lanes.');
+      return false;
+    }
+    const choice = await vscode.window.showQuickPick(LANES_CHOICES, { title: 'EventFlow Lanes', placeHolder: 'Draw the flow in lanes' });
+    if (!choice) return false;
+    editor.setLanes(choice.lanes);
+    return true;
   }
 
   const provider: vscode.CustomReadonlyEditorProvider = {
@@ -406,6 +437,7 @@ export function registerEventFlowEditor(
     vscode.commands.registerCommand(EVENTFLOW_COMMANDS.showLabelsAsWritten, toggle((editor) => editor.setHumanizeLabels(false))),
     vscode.commands.registerCommand(EVENTFLOW_COMMANDS.showHumanizedLabels, toggle((editor) => editor.setHumanizeLabels(true))),
     vscode.commands.registerCommand(EVENTFLOW_COMMANDS.discardSavedPositions, discardSavedPositions),
+    vscode.commands.registerCommand(EVENTFLOW_COMMANDS.lanes, chooseLanes),
     { dispose: () => { for (const editor of [...editors]) editor.dispose(); } },
   );
 

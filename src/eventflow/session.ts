@@ -5,6 +5,7 @@ import {
   inboundMessage,
   readiness,
   type DisplaySettings,
+  type Lanes,
   type OutboundMessage,
   type PageMessage,
   type PageProbe,
@@ -25,9 +26,11 @@ export interface SessionPorts {
   /** The open text model's version; unavailable documents must always be retried. */
   documentVersion(): number | undefined;
   /** `languageServer.requests.eventFlowViews`. */
-  eventFlowViews(uri: string, variant?: string, positions?: Positions): Promise<RequestResult<EventFlowViews>>;
+  eventFlowViews(uri: string, variant?: string, positions?: Positions, lanes?: 'systems' | 'services'): Promise<RequestResult<EventFlowViews>>;
   /** Whether the connected server advertised `flowVariants`. */
   flowVariants(): boolean;
+  /** Whether the connected server advertised `flowLanes` (EF-R24). */
+  flowLanes(): boolean;
   /** Whether the connected server advertised `savedPositions`. */
   savedPositions(): boolean;
   /** The positions file beside the model (EF-R14). */
@@ -139,23 +142,25 @@ export class DiagramSession {
     const version = this.ports.documentVersion();
     const withVariants = this.ports.flowVariants();
     const withPositions = this.ports.savedPositions();
+    const lanes = this.lanes;
     const file = withPositions ? await this.readPositionsFile() : undefined;
     if (this.disposed || generation !== this.generation) return;
+    // With lanes the layout is always automatic: the positions file neither goes to the server nor refreshes the diagram (EF-R24).
     const refreshKey = (): string | undefined => version === undefined || (withPositions && !this.positionsReadable)
       ? undefined
-      : JSON.stringify([version, this.variant, this.viewMode, this.displaySettings.humanizeLabels, withPositions ? this.fileState : null]);
+      : JSON.stringify([version, this.variant, this.viewMode, this.displaySettings.humanizeLabels, lanes, withPositions && lanes === 'none' ? this.fileState : null]);
     let key = refreshKey();
     if (key !== undefined && key === this.lastRefreshKey) return;
     // A failed refresh must be retried, including when the text returns to an older successful version.
     this.lastRefreshKey = undefined;
-    let { result, saved } = await this.askServer(withVariants, file);
+    let { result, saved } = await this.askServer(withVariants, file, lanes);
     if (this.disposed || generation !== this.generation) return;
     if (withVariants && this.variant !== null && result.kind === 'failed' && result.code === INVALID_PARAMS) {
       // The variant is gone from the document: show the full diagram.
       this.ports.log.info(`EventFlow diagram for ${this.ports.fileName}: variant "${this.variant}" no longer exists; showing the full diagram`);
       this.variant = null;
       key = refreshKey();
-      ({ result, saved } = await this.askServer(withVariants, file));
+      ({ result, saved } = await this.askServer(withVariants, file, lanes));
       if (this.disposed || generation !== this.generation) return;
     }
     const data = dataStateFromResult(result);
@@ -171,15 +176,17 @@ export class DiagramSession {
     this.present();
   }
 
-  private async askServer(withVariants: boolean, file?: PositionsFile): Promise<{ result: RequestResult<EventFlowViews>; saved?: { exists: boolean; sent: boolean } }> {
+  private async askServer(withVariants: boolean, file: PositionsFile | undefined, lanes: Lanes): Promise<{ result: RequestResult<EventFlowViews>; saved?: { exists: boolean; sent: boolean } }> {
+    const drawn = lanes === 'none' ? undefined : lanes;
     if (withVariants && this.variant !== null) {
       // No positions are sent for a variant; the file was still read for Discard Saved Positions.
       this.requests++;
-      return { result: await this.ports.eventFlowViews(this.ports.documentUri, this.variant) };
+      return { result: await this.ports.eventFlowViews(this.ports.documentUri, this.variant, undefined, drawn) };
     }
-    if (!file) {
+    if (!file || drawn) {
+      // Lanes do not use saved positions: none are sent, and the page is not told any were applied (EF-R24).
       this.requests++;
-      return { result: await this.ports.eventFlowViews(this.ports.documentUri) };
+      return { result: await this.ports.eventFlowViews(this.ports.documentUri, undefined, undefined, drawn) };
     }
     this.requests++;
     const result = await this.ports.eventFlowViews(this.ports.documentUri, undefined, file.positions);
@@ -232,7 +239,16 @@ export class DiagramSession {
           void this.refresh();
         }
         return;
+      case 'lanesChanged':
+        this.setLanes(message.payload.lanes);
+        return;
       case 'savePositions':
+        if (this.lanes !== 'none') {
+          const why = 'positions are not saved while the diagram is drawn in lanes; choose No lanes to save them';
+          this.ports.log.info(`EventFlow diagram for ${this.ports.fileName}: ${why}; ignored`);
+          this.post({ type: 'savePositionsFailed', payload: { message: `Positions are not saved in lanes. Choose No lanes to save them.` } });
+          return;
+        }
         if (!this.ports.savedPositions() || this.variant !== null) {
           this.ports.log.info(`EventFlow diagram for ${this.ports.fileName}: positions are saved only from the full diagram of a server that applies them; ignored`);
           return;
@@ -316,10 +332,27 @@ export class DiagramSession {
     if (this.rendered) this.post({ type: 'setViewMode', payload: { viewMode } });
   }
 
-  setDisplaySettings(displaySettings: DisplaySettings): void {
+  setDisplaySettings(displaySettings: { readonly humanizeLabels: boolean }): void {
     if (this.displaySettings.humanizeLabels === displaySettings.humanizeLabels) return;
-    this.displaySettings = displaySettings;
-    if (this.rendered) this.post({ type: 'setDisplaySettings', payload: { displaySettings } });
+    this.displaySettings = { ...this.displaySettings, humanizeLabels: displaySettings.humanizeLabels };
+    if (this.rendered) this.post({ type: 'setDisplaySettings', payload: { displaySettings: this.shownSettings() } });
+  }
+
+  /** The lanes the diagram is drawn in: the chosen ones, or `none` when the server cannot draw them. */
+  get lanes(): Lanes {
+    return this.ports.flowLanes() ? this.displaySettings.lanes : 'none';
+  }
+
+  /** The lanes choice changed; unlike the labels choice it changes the layout, so the diagram is asked for again (EF-R23, EF-R24). */
+  setLanes(lanes: Lanes): void {
+    if (this.displaySettings.lanes === lanes) return;
+    this.displaySettings = { ...this.displaySettings, lanes };
+    if (this.ports.flowLanes()) void this.refresh();
+  }
+
+  /** What the page is told: the lanes it may show, not the ones the server cannot draw. */
+  private shownSettings(): DisplaySettings {
+    return { ...this.displaySettings, lanes: this.lanes };
   }
 
   /** The node id last asked to be highlighted, or `null`. */
@@ -362,7 +395,8 @@ export class DiagramSession {
       flowGraph: this.lastGood.flowGraph,
       serviceGraph: this.lastGood.serviceGraph,
       viewMode: this.viewMode,
-      displaySettings: this.displaySettings,
+      displaySettings: this.shownSettings(),
+      lanesSupported: this.ports.flowLanes(),
       diagramId: this.ports.documentUri,
       ...(this.ports.flowVariants() ? { variants: this.lastGood.variants ?? [], variant: this.variant } : {}),
       ...(this.lastSaved ? { savedPositions: this.lastSaved } : {}),

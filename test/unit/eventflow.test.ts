@@ -20,7 +20,7 @@ const URI = 'file:///workspace/place-order-flow.zfl';
 const READY = { type: 'webviewReady', payload: { protocol: EVENTFLOW_PROTOCOL, protocolVersion: 1 } };
 const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true } }, documentUri = URI, flowVariants = false, savedPositions = false) {
+function harness(answer: () => RequestResult | Promise<RequestResult>, initial = { viewMode: 'flow' as const, displaySettings: { humanizeLabels: true, lanes: 'none' as const } }, documentUri = URI, flowVariants = false, savedPositions = false, flowLanes = false) {
   const positionsFile = { file: { exists: false } as PositionsFile, written: [] as string[], removed: 0, readOnly: false, fail: undefined as Error | undefined, readError: undefined as Error | undefined };
   const posted: OutboundMessage[] = [];
   const logs: string[] = [];
@@ -34,7 +34,8 @@ function harness(answer: () => RequestResult | Promise<RequestResult>, initial =
     documentUri,
     documentVersion: () => document.version,
     fileName: 'place-order-flow.zfl',
-    eventFlowViews: (uri, variant, positions) => requests.eventFlowViews(uri, variant, positions),
+    eventFlowViews: (uri, variant, positions, lanes) => requests.eventFlowViews(uri, variant, positions, lanes),
+    flowLanes: () => flowLanes,
     flowVariants: () => flowVariants,
     savedPositions: () => savedPositions,
     positionsFile: {
@@ -94,7 +95,7 @@ test('the view model reaches the page as the same objects the server answered, a
   assert.equal(render.payload.flowGraph, flowGraph, 'flowGraph was replaced or copied');
   assert.equal(render.payload.serviceGraph, serviceGraph, 'serviceGraph was replaced or copied');
   assert.equal(render.payload.diagramId, URI);
-  assert.deepEqual(Object.keys(render.payload).sort(), ['diagramId', 'displaySettings', 'flowGraph', 'serviceGraph', 'viewMode']);
+  assert.deepEqual(Object.keys(render.payload).sort(), ['diagramId', 'displaySettings', 'flowGraph', 'lanesSupported', 'serviceGraph', 'viewMode']);
   assert.deepEqual(touched, [], `the view model was inspected: ${touched.join(', ')}`);
   assert.ok(logs.some((line) => line.endsWith(': rendered')));
 });
@@ -110,7 +111,7 @@ test('a recorded server answer is forwarded field for field, and the log never c
   assert.deepEqual(structuredClone({ flowGraph: render?.payload.flowGraph, serviceGraph: render?.payload.serviceGraph }), expected);
   assert.deepEqual(value, expected, 'the answer was modified');
   assert.deepEqual(render?.payload.viewMode, 'flow');
-  assert.deepEqual(render?.payload.displaySettings, { humanizeLabels: true });
+  assert.deepEqual(render?.payload.displaySettings, { humanizeLabels: true, lanes: 'none' });
   for (const line of logs) {
     assert.ok(!line.includes('CheckoutStarted') && !line.includes('zfl.eventflow.view'), `the log carries model content: ${line}`);
   }
@@ -219,20 +220,20 @@ test('every renderBundle names the diagram by its document, and a later update o
 
 test('view and label choices are kept per diagram and survive a re-render', async () => {
   const value = { flowGraph: {}, serviceGraph: {} };
-  const one = harness(() => ({ kind: 'ok', value }), { viewMode: 'flow', displaySettings: { humanizeLabels: true } });
-  const two = harness(() => ({ kind: 'ok', value }), { viewMode: 'flow', displaySettings: { humanizeLabels: true } });
+  const one = harness(() => ({ kind: 'ok', value }), { viewMode: 'flow', displaySettings: { humanizeLabels: true, lanes: 'none' } });
+  const two = harness(() => ({ kind: 'ok', value }), { viewMode: 'flow', displaySettings: { humanizeLabels: true, lanes: 'none' } });
   for (const { session } of [one, two]) { session.receive(READY); await session.refresh(); }
   one.session.setViewMode('services');
   one.session.setDisplaySettings({ humanizeLabels: false });
   assert.deepEqual(one.ofType('setViewMode').map((message) => message.payload), [{ viewMode: 'services' }]);
-  assert.deepEqual(one.ofType('setDisplaySettings').map((message) => message.payload), [{ displaySettings: { humanizeLabels: false } }]);
+  assert.deepEqual(one.ofType('setDisplaySettings').map((message) => message.payload), [{ displaySettings: { humanizeLabels: false, lanes: 'none' } }]);
   await one.session.refresh();
   const last = one.ofType('renderBundle').at(-1);
   assert.equal(last?.payload.viewMode, 'services');
-  assert.deepEqual(last?.payload.displaySettings, { humanizeLabels: false });
+  assert.deepEqual(last?.payload.displaySettings, { humanizeLabels: false, lanes: 'none' });
   assert.equal(two.session.viewMode, 'flow');
   assert.equal(two.ofType('setViewMode').length, 0);
-  const services = harness(() => ({ kind: 'ok', value }), { viewMode: 'services', displaySettings: { humanizeLabels: false } });
+  const services = harness(() => ({ kind: 'ok', value }), { viewMode: 'services', displaySettings: { humanizeLabels: false, lanes: 'none' } });
   services.session.receive(READY);
   await services.session.refresh();
   assert.equal(services.ofType('renderBundle')[0]?.payload.viewMode, 'services', 'the configured default view is the initial one');
@@ -352,7 +353,7 @@ test('labelsChanged validates a boolean and uses the palette display-settings pa
   one.session.receive(message);
   assert.equal(one.session.displaySettings.humanizeLabels, false);
   assert.equal(two.session.displaySettings.humanizeLabels, true);
-  assert.deepEqual(one.ofType('setDisplaySettings').map((message) => message.payload), [{ displaySettings: { humanizeLabels: false } }]);
+  assert.deepEqual(one.ofType('setDisplaySettings').map((message) => message.payload), [{ displaySettings: { humanizeLabels: false, lanes: 'none' } }]);
   one.session.receive(message);
   assert.equal(one.ofType('setDisplaySettings').length, 1, 'an echoed choice does not redraw twice');
   await one.session.refresh();
@@ -704,4 +705,148 @@ test('a failed write also tells the page, so its status bar shows why (EF-R22)',
   await settle();
   assert.deepEqual(h.ofType('savePositionsFailed').map((message) => message.payload), [{ message: 'EACCES' }]);
   assert.equal(h.warnings.length, 1, 'the notification stays');
+});
+
+// --- Lanes (EF-R24) ---
+
+const LANES_VALUE = { flowGraph: { schema: 'g', lanes: [] }, serviceGraph: { schema: 's' }, variants: VARIANTS };
+const withLanes = (flowLanes = true, savedPositions = true, variants = true) =>
+  harness(() => ({ kind: 'ok', value: LANES_VALUE }), undefined, URI, variants, savedPositions, flowLanes);
+
+test('lanesChanged accepts the three lanes and ignores anything else, like labelsChanged', () => {
+  for (const lanes of ['none', 'systems', 'services']) {
+    const message = { type: 'lanesChanged', payload: { lanes } };
+    assert.deepEqual(inboundMessage(message), message);
+  }
+  for (const payload of [undefined, null, {}, { lanes: 'rows' }, { lanes: 1 }, { lanes: true }, { lanes: null }, { lane: 'systems' }, { lanes: 'SYSTEMS' }]) {
+    assert.equal(inboundMessage({ type: 'lanesChanged', payload }), undefined);
+  }
+});
+
+test('the lanes choice is kept per diagram, starts from the setting, and the page is told it in displaySettings', async () => {
+  const one = withLanes();
+  const two = withLanes();
+  const configured = harness(() => ({ kind: 'ok', value: LANES_VALUE }), { viewMode: 'flow', displaySettings: { humanizeLabels: true, lanes: 'services' } }, URI, true, true, true);
+  for (const h of [one, two, configured]) { h.session.receive(READY); await h.session.refresh(); }
+  assert.equal(one.session.lastRenderBundle?.displaySettings.lanes, 'none', 'new diagrams start at none');
+  assert.equal(one.session.lastRenderBundle?.lanesSupported, true);
+  assert.equal(configured.session.lastRenderBundle?.displaySettings.lanes, 'services');
+  one.session.receive({ type: 'lanesChanged', payload: { lanes: 'systems' } });
+  await settle();
+  assert.equal(one.session.displaySettings.lanes, 'systems');
+  assert.equal(two.session.displaySettings.lanes, 'none');
+  assert.equal(one.session.lastRenderBundle?.displaySettings.lanes, 'systems');
+  assert.equal(one.session.lastRenderBundle?.displaySettings.humanizeLabels, true);
+  one.session.setDisplaySettings({ humanizeLabels: false });
+  assert.deepEqual(one.ofType('setDisplaySettings').at(-1)?.payload, { displaySettings: { humanizeLabels: false, lanes: 'systems' } });
+  await one.session.refresh();
+  assert.deepEqual(one.session.lastRenderBundle?.displaySettings, { humanizeLabels: false, lanes: 'systems' }, 'the choice survives a re-render');
+});
+
+test('the request carries lanes only when the server advertised flowLanes and the choice is not none', async () => {
+  const supported = withLanes();
+  supported.session.receive(READY);
+  await supported.session.refresh();
+  assert.equal('lanes' in (supported.asked[0] as object), false, 'none sends nothing');
+  supported.session.receive({ type: 'lanesChanged', payload: { lanes: 'services' } });
+  await settle();
+  assert.equal((supported.asked.at(-1) as { lanes?: string }).lanes, 'services');
+  supported.session.receive({ type: 'variantChanged', payload: { variant: 'happy' } });
+  await settle();
+  assert.deepEqual(supported.asked.at(-1), { textDocument: { uri: URI }, variant: 'happy', lanes: 'services' }, 'variants are drawn in the chosen lanes');
+
+  const old = withLanes(false);
+  old.session.receive(READY);
+  await old.session.refresh();
+  const before = old.asked.length;
+  old.session.receive({ type: 'lanesChanged', payload: { lanes: 'systems' } });
+  await settle();
+  assert.equal(old.asked.length, before, 'a server without lanes is not asked again');
+  assert.ok(old.asked.every((params) => !('lanes' in (params as object))));
+  assert.equal(old.session.lanes, 'none');
+  await old.session.refresh();
+  assert.equal(old.session.lastRenderBundle?.displaySettings.lanes, 'none', 'the page control stays at none');
+  assert.equal(old.session.lastRenderBundle?.lanesSupported, false);
+});
+
+test('a lanes change refreshes and an unchanged lanes choice does not (EF-R23)', async () => {
+  const h = withLanes();
+  h.document.version = 1;
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.equal(h.asked.length, 1);
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'none' } });
+  await h.session.refresh();
+  assert.equal(h.asked.length, 1, 'repeating the choice changes nothing');
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'systems' } });
+  await settle();
+  assert.equal(h.asked.length, 2);
+  assert.equal(h.ofType('renderBundle').length, 2);
+  await h.session.refresh();
+  assert.equal(h.asked.length, 2, 'the new choice is remembered');
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'services' } });
+  await settle();
+  assert.equal(h.asked.length, 3);
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'none' } });
+  await settle();
+  assert.equal(h.asked.length, 4, 'back to none asks again');
+});
+
+test('with lanes no positions are sent, none are reported applied, and a positions file change does not refresh', async () => {
+  const h = withLanes();
+  h.document.version = 1;
+  h.positionsFile.file = { exists: true, positions: { a: { x: 1, y: 2 } } };
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.ok('positions' in (h.asked[0] as object), 'without lanes the file is sent as today');
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'systems' } });
+  await settle();
+  assert.equal('positions' in (h.asked.at(-1) as object), false);
+  assert.equal('savedPositions' in (h.session.lastRenderBundle ?? {}), false);
+  const before = h.asked.length;
+  h.positionsFile.file = { exists: true, positions: { a: { x: 9, y: 9 } } };
+  await h.session.refresh();
+  assert.equal(h.asked.length, before, 'the layout is automatic, so the file does not matter');
+  assert.equal(h.session.savedPositionsExist, true, 'the file is still known for Discard Saved Positions');
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'none' } });
+  await settle();
+  assert.ok('positions' in (h.asked.at(-1) as object), 'back to none sends the file again');
+});
+
+test('a savedPositions answer with reason lanes is never reported as applied', async () => {
+  const h = harness(() => ({ kind: 'ok', value: { ...LANES_VALUE, savedPositions: { applied: false, reason: 'lanes', missing: [] } } }), undefined, URI, true, true, true);
+  h.positionsFile.file = { exists: true, positions: { a: { x: 1, y: 2 } } };
+  h.session.receive(READY);
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'services' } });
+  await h.session.refresh();
+  assert.notEqual((h.session.lastRenderBundle?.savedPositions as { applied?: boolean } | undefined)?.applied, true);
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'none' } });
+  await settle();
+  assert.equal((h.session.lastRenderBundle?.savedPositions as { applied?: boolean } | undefined)?.applied, false);
+});
+
+test('Save Positions from the page is refused politely while lanes are on', async () => {
+  const h = withLanes();
+  h.session.receive(READY);
+  await h.session.refresh();
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'systems' } });
+  await settle();
+  h.session.receive({ type: 'savePositions', payload: { positions: { a: { x: 1, y: 2 } } } });
+  await settle();
+  assert.deepEqual(h.positionsFile.written, []);
+  assert.equal(h.warnings.length, 0, 'no modal noise');
+  assert.match(h.ofType('savePositionsFailed').at(-1)?.payload.message ?? '', /lanes/);
+  h.session.receive({ type: 'lanesChanged', payload: { lanes: 'none' } });
+  await settle();
+  h.session.receive({ type: 'savePositions', payload: { positions: { a: { x: 1, y: 2 } } } });
+  await settle();
+  assert.equal(h.positionsFile.written.length, 1, 'with no lanes it saves as today');
+});
+
+test('the lanes setting and command are contributed', () => {
+  const property = manifest.contributes.configuration.properties['zenwave.eventflow.lanes'];
+  assert.deepEqual(property.enum, ['none', 'systems', 'services']);
+  assert.equal(property.default, 'none');
+  assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === 'zenwave.eventflow.lanes'));
+  assert.ok(!manifest.contributes.menus['editor/title'].some((entry: { command: string }) => entry.command === 'zenwave.eventflow.lanes'));
 });

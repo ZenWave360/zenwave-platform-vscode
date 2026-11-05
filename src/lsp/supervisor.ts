@@ -81,6 +81,12 @@ export function advertisedSavedPositions(initializeResult: unknown): boolean {
   return experimentalOf(initializeResult)?.savedPositions === true;
 }
 
+/** The server accepts `lanes` on `zenwave/eventFlowViews` and answers `flowGraph.lanes` (EF-R24). */
+export function advertisedFlowLanes(initializeResult: unknown): boolean {
+  const lanes = experimentalOf(initializeResult)?.flowLanes;
+  return Array.isArray(lanes) && lanes.includes('systems') && lanes.includes('services');
+}
+
 function experimentalOf(initializeResult: unknown): Record<string, unknown> | undefined {
   return object(object(object(initializeResult)?.capabilities)?.experimental);
 }

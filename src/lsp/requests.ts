@@ -63,13 +63,15 @@ export interface EventFlowViews {
   readonly serviceGraph: ViewModel;
   /** The flow's variants, in the server's order; absent from a server that does not list them. */
   readonly variants?: readonly FlowVariant[];
+  /** Echoed when `lanes` was sent to a server that advertised `flowLanes` (EF-R24). */
+  readonly lanes?: 'systems' | 'services';
   /** Present when `positions` was sent to a server that advertised `savedPositions` (LVR-R18). */
   readonly savedPositions?: SavedPositionsAnswer;
 }
 
 export type SavedPositionsAnswer =
   | { readonly applied: true }
-  | { readonly applied: false; readonly reason?: 'missing-nodes' | 'invalid'; readonly missing?: readonly string[] };
+  | { readonly applied: false; readonly reason?: 'missing-nodes' | 'invalid' | 'lanes'; readonly missing?: readonly string[] };
 
 export interface FlowVariant {
   readonly id: string;
@@ -185,9 +187,10 @@ export class ZenwaveRequests {
   /**
    * `variant` is sent only when given, and only to a server that advertised `flowVariants`; then `flowGraph` is that variant's view.
    * `positions` (a saved file's `flow`) is sent only for the full diagram, and only to a server that advertised `savedPositions`.
+   * `lanes` is sent only when the diagram is drawn in lanes, and only to a server that advertised `flowLanes` (EF-R24).
    */
-  async eventFlowViews(uri: string, variant?: string, positions?: Readonly<Record<string, unknown>>): Promise<RequestResult<EventFlowViews>> {
-    const params = { textDocument: { uri }, ...(variant === undefined ? {} : { variant }), ...(positions === undefined ? {} : { positions }) };
+  async eventFlowViews(uri: string, variant?: string, positions?: Readonly<Record<string, unknown>>, lanes?: 'systems' | 'services'): Promise<RequestResult<EventFlowViews>> {
+    const params = { textDocument: { uri }, ...(variant === undefined ? {} : { variant }), ...(positions === undefined ? {} : { positions }), ...(lanes === undefined ? {} : { lanes }) };
     return expect(ZENWAVE_REQUESTS.eventFlowViews,
       await this.issuer.request(ZENWAVE_REQUESTS.eventFlowViews, params),
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));
