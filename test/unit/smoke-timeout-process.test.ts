@@ -13,7 +13,8 @@ const driver = (kind: 'desktop' | 'browser') => `
 import { spawn } from 'node:child_process';
 import { SmokeTimeoutError, withDeadline, finishDesktopSmoke, finishBrowserSmoke, killProcessTree } from ${JSON.stringify(deadline)};
 const say = (line) => process.stdout.write(line + '\\n');
-const editor = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+// Detached outside Windows, as captureEditorProcess spawns the real editor, so its pid leads a process group.
+const editor = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: process.platform !== 'win32' });
 await new Promise((resolve) => editor.once('spawn', resolve));
 say('pid ' + editor.pid);
 setInterval(() => {}, 1000); // a server that would keep this process alive
