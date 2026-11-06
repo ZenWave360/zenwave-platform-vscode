@@ -210,6 +210,16 @@ function guardBypass(run: string): string | undefined {
   return 'an invalid version passes the version check';
 }
 
+/** Constructs that swallow a failing command, wherever they are in the script. Comments are ignored. */
+function swallowedExit(run: string): string[] {
+  const code = shellCode(run);
+  const problems: string[] = [];
+  if (/\|\|\s*true\b/.test(code)) problems.push('|| true swallows a failing command');
+  if (/\|\|\s*:(\s|$)/m.test(code)) problems.push('|| : swallows a failing command');
+  if (/\bset\s+\+[a-z]*e/.test(code)) problems.push('set +e swallows a failing command');
+  return problems;
+}
+
 function versionCheckProblems(step: WorkflowStep): string[] {
   const problems: string[] = [];
   if (continuesOnError(step['continue-on-error'])) {
@@ -220,6 +230,7 @@ function versionCheckProblems(step: WorkflowStep): string[] {
     problems.push('the version check has no run script');
     return problems;
   }
+  problems.push(...swallowedExit(step.run));
   if (!bashOnPath()) return problems;
   const bypass = guardBypass(step.run);
   if (bypass) problems.push(bypass);
@@ -466,4 +477,108 @@ test('the workflow version regex agrees with release-rules.mjs when bash runs it
     problems.some((problem) => problem.startsWith('"01.2.3"')),
     `a version_re that allows leading zeros must disagree with parseExtensionVersion, got ${problems.join('; ') || 'nothing'}`,
   );
+});
+
+// Gating steps: the ones whose failure has to stop the run. Registry publishing is left out on purpose,
+// because each registry is attempted and the run is failed afterwards (spec:release#r-r12).
+const GATING_COMMAND = /\b(npm run (typecheck|lint|build|build:smoke|package|verify:vsix|test:desktop|test:browser)|npm test|release\.mjs"? (check|check-next-notes|plan))\b/;
+const ALWAYS_FALSE_IF = /^\s*(\$\{\{\s*)?(false|0|''|""|null|1\s*==\s*2|!\s*true)(\s*\}\})?\s*$/;
+
+type WorkflowDocument = { jobs?: Record<string, { 'continue-on-error'?: unknown; if?: unknown; steps?: WorkflowStep[] }> };
+
+function allWorkflows(): { file: string; document: WorkflowDocument }[] {
+  return readdirSync(workflowDirectory)
+    .filter((file) => /\.ya?ml$/.test(file))
+    .map((file) => ({ file, document: load(read('../../.github/workflows', file)) as WorkflowDocument }));
+}
+
+function alwaysFalse(condition: unknown): boolean {
+  if (condition === false || condition === 0 || condition === null) return true;
+  return typeof condition === 'string' && ALWAYS_FALSE_IF.test(condition);
+}
+
+/** What is wrong with a step that has to stop the run when it fails. */
+function gatingStepProblems(step: WorkflowStep): string[] {
+  const problems: string[] = [];
+  if (continuesOnError(step['continue-on-error'])) problems.push('continue-on-error');
+  if (alwaysFalse(step.if)) problems.push('an if that is always false');
+  if (typeof step.run === 'string') problems.push(...swallowedExit(step.run));
+  return problems;
+}
+
+test('no job continues on error, and no job is switched off by an always-false if', () => {
+  const problems: string[] = [];
+  for (const { file, document } of allWorkflows()) {
+    for (const [name, body] of Object.entries(document.jobs ?? {})) {
+      if (continuesOnError(body['continue-on-error'])) problems.push(`${file} ${name}: job continue-on-error`);
+      if (alwaysFalse(body.if)) problems.push(`${file} ${name}: job if is always false`);
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
+test('every step that runs a check, a build or the version check stops the run when it fails', () => {
+  const problems: string[] = [];
+  let gating = 0;
+  for (const { file, document } of allWorkflows()) {
+    for (const [name, body] of Object.entries(document.jobs ?? {})) {
+      for (const step of body.steps ?? []) {
+        const gates = typeof step.run === 'string' && (GATING_COMMAND.test(step.run) || step.name === VERSION_STEP_NAME);
+        if (!gates) continue;
+        gating++;
+        for (const problem of gatingStepProblems(step)) problems.push(`${file} ${name} "${step.name}": ${problem}`);
+      }
+    }
+  }
+  assert.ok(gating >= 15, `the workflows have gating steps, found ${gating}`);
+  assert.deepEqual(problems, []);
+});
+
+test('a gating step that is made to continue, to be skipped or to swallow its exit is reported', () => {
+  const mutations: [string, WorkflowStep][] = [
+    ['continue-on-error: true', { run: 'npm test', 'continue-on-error': true }],
+    ['continue-on-error: "true"', { run: 'npm test', 'continue-on-error': 'true' }],
+    ['continue-on-error: ${{ expr }}', { run: 'npm test', 'continue-on-error': '${{ inputs.x }}' }],
+    ['if: false', { run: 'npm test', if: false }],
+    ['if: ${{ false }}', { run: 'npm test', if: '${{ false }}' }],
+    ['|| true', { run: 'npm test || true' }],
+    ['|| :', { run: 'npm run lint || :' }],
+    ['set +e', { run: 'set +e\nnpm test' }],
+  ];
+  for (const [label, step] of mutations) {
+    assert.notDeepEqual(gatingStepProblems(step), [], `${label} must be reported`);
+  }
+  assert.deepEqual(gatingStepProblems({ run: 'npm test', if: "inputs.channel != 'development'" }), []);
+  assert.deepEqual(gatingStepProblems({ run: 'npm test # || true is only a comment' }), []);
+});
+
+test('a version check made to swallow its exit is reported even when bash is not available', () => {
+  const text = read('../../.github/workflows/release.yml');
+  const edits: [string, (step: string) => string][] = [
+    ['set +e', (step) => step.replace('set -euo pipefail', 'set +e')],
+    ['|| true', (step) => replaceVersionGuard(step, '[[ "$VERSION" =~ $version_re ]] || true')],
+    ['|| :', (step) => replaceVersionGuard(step, '[[ "$VERSION" =~ $version_re ]] || :')],
+  ];
+  for (const [label, edit] of edits) {
+    const mutated = replaceVersionStep(text, 'publish', edit);
+    const problems = swallowedExit(stepRun(versionStep(mutated, 'release.yml', 'publish')));
+    assert.notDeepEqual(problems, [], `${label} must be reported`);
+  }
+});
+
+// Cases fixed by the rule itself ("major.minor.patch, no leading zeros"), so bash is held to the rule and not only to the script.
+const ACCEPTED_VERSIONS = ['0.0.0', '0.1.0', '0.1.58', '10.20.30'];
+
+test('the workflow version regex, run in bash, accepts and rejects the versions the rule says', (t) => {
+  if (!bashOnPath()) {
+    t.skip('bash is not on PATH, so the workflow version regex was not executed');
+    return;
+  }
+  for (const [file, name] of VERSION_JOBS) {
+    const regex = versionRegex(stepRun(versionStep(read('../../.github/workflows', file), file, name)));
+    const matched = bashMatches(regex, VERSION_CASES);
+    VERSION_CASES.forEach((version, index) => {
+      assert.equal(matched[index], ACCEPTED_VERSIONS.includes(version), `${file} ${name}: ${JSON.stringify(version)}`);
+    });
+  }
 });
