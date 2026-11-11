@@ -87,6 +87,7 @@ export interface SharedClientOptions {
   readonly outputChannel: vscode.OutputChannel;
   readonly traceOutputChannel: vscode.OutputChannel;
   readonly synchronize: { fileEvents: vscode.FileSystemWatcher[] };
+  readonly middleware?: NonNullable<LanguageClientOptions['middleware']>;
 }
 
 export function sharedClientOptions(
@@ -94,6 +95,7 @@ export function sharedClientOptions(
   initializationOptions: unknown,
   outputChannel: vscode.OutputChannel,
   fileEvents: vscode.FileSystemWatcher[],
+  middleware?: NonNullable<LanguageClientOptions['middleware']>,
 ): SharedClientOptions {
   return {
     documentSelector,
@@ -101,5 +103,6 @@ export function sharedClientOptions(
     outputChannel,
     traceOutputChannel: outputChannel,
     synchronize: { fileEvents },
+    ...(middleware ? { middleware } : {}),
   };
 }

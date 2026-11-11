@@ -63,7 +63,7 @@
   },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
-    "version": "0.1.0-next.22.1"
+    "version": "0.1.0-next.27.3"
   },
   "zenwaveEventFlowWebview": {
     "package": "@zenwave360/vistas-eventflow-webview",
@@ -85,6 +85,7 @@
     "onLanguage:zdl",
     "onLanguage:zw",
     "onLanguage:zfl",
+    "onFileSystem:zenwave",
     "workspaceContains:.zenwave/config.yml",
     "onView:zenwave.architecture",
     "onView:zenwave.model"
@@ -283,6 +284,16 @@
       {
         "command": "zenwave.lsp.showStatus",
         "title": "Show Language Server Status",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.manifest.choose",
+        "title": "Choose Architecture Manifest…",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.resource.open",
+        "title": "Open Architecture Resource",
         "category": "ZenWave"
       },
       {
@@ -519,6 +530,13 @@
         },
         {
           "command": "zenwave.lsp.showStatus"
+        },
+        {
+          "command": "zenwave.manifest.choose"
+        },
+        {
+          "command": "zenwave.resource.open",
+          "when": "false"
         },
         {
           "command": "zenwave.credentials.record",
@@ -920,7 +938,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "The architecture manifest for this workspace, relative to the workspace folder or absolute. When set it is used as-is and nothing is searched for; otherwise project-manifest in .zenwave/config.yml at a workspace folder root is used."
+          "description": "The architecture manifest for this workspace: a path relative to the workspace folder or absolute, or an http(s) address. **ZenWave: Choose Architecture Manifest…** writes it. When set it is used as-is and nothing is searched for; otherwise project-manifest in .zenwave/config.yml at a workspace folder root is used."
         },
         "zenwave.credentials.origins": {
           "type": "array",
@@ -1108,7 +1126,7 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.0.0",
-    "@zenwave360/lsp-js": "0.1.0-next.22.1",
+    "@zenwave360/lsp-js": "0.1.0-next.27.3",
     "@zenwave360/vistas-eventflow-webview": "0.0.0-next-20261110141833",
     "adm-zip": "^0.6.1",
     "esbuild": "^0.23.0",

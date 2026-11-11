@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { runTests } from '@vscode/test-web';
+import { startRemoteFixture } from './smoke-remote.mjs';
 import { finishBrowserSmoke, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
 
 const timeoutMs = smokeTimeoutMs();
@@ -33,14 +34,17 @@ await finishBrowserSmoke(undefined, undefined, (code) => process.exit(code), {
   // The shared suite exercises shipped authoring and absence of SDK Run lenses
   // in the actual Web Worker host, including when CI supplies a packaged build.
   // test-web's promise stays pending when the page answers 500, so the deadline has to reject it.
-  run: () => withDeadline(runTests({
-    browserType: 'chromium',
-    quality: 'stable',
-    extensionDevelopmentPath,
-    extensionTestsPath,
-    folderPath: path.join(projectDir, 'fixtures'),
-    headless: true,
-  }), timeoutMs, timeoutMessage),
+  run: () => withDeadline((async () => {
+    const remote = await startRemoteFixture();
+    try {
+      const common = { browserType: 'chromium', quality: 'stable', extensionDevelopmentPath, headless: true };
+      await runTests({ ...common, extensionTestsPath, folderPath: path.join(projectDir, 'fixtures') });
+      // An empty window: the manifest choice is a session override, and nothing can be written.
+      await runTests({ ...common, extensionTestsPath: path.join(path.dirname(extensionTestsPath), 'no-folder.js') });
+    } finally {
+      await remote.close();
+    }
+  })(), timeoutMs, timeoutMessage),
   cleanup() {
     if (!staged) return;
     const relative = path.relative(path.resolve(testRoot), path.resolve(staged));

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
+import { isRemoteManifest, manifestDocumentUri } from '../lsp/manifest-resolution.js';
 import { openLocation, toLocation } from '../model/navigation.js';
 import { CoalescedRefresh } from './coalesce.js';
 import { DiagramPanels, reflectSelection, type SelectionReflection } from './diagram-selection.js';
@@ -238,7 +239,10 @@ export function registerModelExplorer(
 
   /** Documents whose content can change what the Model tree shows. */
   const concernsModel = (uri: string): boolean => uri === shown || (model.tree?.sourceUris.has(uri) ?? false);
-  const isManifest = (uri: string): boolean => uri === server.manifest.manifestUri;
+  const isManifest = (uri: string): boolean => {
+    const manifestUri = server.manifest.manifestUri;
+    return manifestUri !== undefined && uri === manifestDocumentUri(manifestUri);
+  };
 
   let manifestWatcher: vscode.FileSystemWatcher | undefined;
   let watchedManifest: string | undefined;
@@ -249,7 +253,8 @@ export function registerModelExplorer(
     manifestWatcher = undefined;
     watchedManifest = manifestUri;
     architecture.view.description = manifestUri ? fileName(manifestUri) : '';
-    if (!manifestUri) return;
+    // An http(s) manifest has nothing on disk to watch; the server re-reads it on a restart.
+    if (!manifestUri || isRemoteManifest(manifestUri)) return;
     const uri = vscode.Uri.parse(manifestUri, true);
     const directory = vscode.Uri.joinPath(uri, '..');
     manifestWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, fileName(manifestUri)));
@@ -317,7 +322,7 @@ export function registerModelExplorer(
       await vscode.commands.executeCommand('workbench.action.openSettings', 'zenwave.workspace.manifest');
       return false;
     }
-    await vscode.window.showTextDocument(vscode.Uri.parse(manifestUri, true), { preview: true });
+    await vscode.window.showTextDocument(vscode.Uri.parse(manifestDocumentUri(manifestUri), true), { preview: true });
     return true;
   }
 

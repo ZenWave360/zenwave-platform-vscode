@@ -7,6 +7,7 @@ import {
   type LanguageServerHost,
   type LanguageServerTransport,
 } from './client.js';
+import { askManifest, choiceFromArgument, sessionValue, settingValue } from './manifest-choice.js';
 import { CREDENTIAL_REQUEST, CredentialBroker } from './credentials.js';
 import type { CredentialAnswer } from './credential-policy.js';
 import {
@@ -23,6 +24,7 @@ import {
   type ResolvedManifest,
 } from './manifest-resolution.js';
 import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource } from './plugin-catalogue.js';
+import { openResource, registerResourceProvider, type OpenResourceOutcome } from './resource-provider.js';
 import { ZenwaveRequests } from './requests.js';
 import { languageServerStatus, presentStatus, type LanguageServerStatus } from './status.js';
 import { advertisedFlowLanes, advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, LspSupervisor, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
@@ -43,9 +45,19 @@ export const LSP_CONTEXT_KEYS = {
 export const LSP_COMMANDS = {
   restart: 'zenwave.lsp.restart',
   showStatus: 'zenwave.lsp.showStatus',
+  chooseManifest: 'zenwave.manifest.choose',
+  openResource: 'zenwave.resource.open',
   recordCredential: 'zenwave.credentials.record',
   clearCredential: 'zenwave.credentials.clear',
 } as const;
+
+/** Where a session override of the manifest is kept when no folder is open to hold the setting (LC-R5). */
+const MANIFEST_OVERRIDE_KEY = 'zenwave.manifest.override';
+
+export type ChooseManifestOutcome =
+  | { readonly kind: 'cancelled' }
+  /** `setting`: written at workspace scope. `session`: kept in `workspaceState` only, nothing written to disk. */
+  | { readonly kind: 'chosen'; readonly scope: 'setting' | 'session'; readonly manifest: string };
 
 /**
  * The one connection every server-backed feature uses. Later changes (004–007)
@@ -78,6 +90,16 @@ export interface LanguageServerApi {
   /** Resolves once the current start, stop or restart has settled. */
   settled(): Promise<void>;
   restart(): Promise<void>;
+  /**
+   * **Choose Architecture Manifest…**. With a folder open it writes `zenwave.workspace.manifest` at workspace scope;
+   * with none it keeps the choice for the session. The server restarts with the new manifest. `argument` answers
+   * without asking: `{ url }` or `{ file }` (a URI string).
+   */
+  chooseManifest(argument?: unknown): Promise<ChooseManifestOutcome>;
+  /** Opens a `zenwave:` address as the server resolved it: the plain file for a workspace entry, otherwise through the scheme (AR-R4). */
+  openResource(address: string): Promise<OpenResourceOutcome>;
+  /** The documents the client sent the connected server with `textDocument/didOpen` since it started: what the selector let through. */
+  readonly sentToServer: readonly string[];
   /** The `zenwave/credential` handler, exposed for tests. */
   answerCredential(params: unknown): Promise<CredentialAnswer | null>;
   /** A test seam: the source the next start takes the plugin catalogue from instead of the shipped one; `undefined` restores it. */
@@ -106,11 +128,15 @@ export function registerLanguageServer(
   const changed = new vscode.EventEmitter<void>();
   const credentials = new CredentialBroker(context.secrets, context.globalState, logger);
   let manifest: ResolvedManifest = { route: 'none', notes: [] };
+  let manifestOverride = context.workspaceState.get<string>(MANIFEST_OVERRIDE_KEY);
+  // An override stands in for a setting no folder can hold; once a folder is open the setting is the place for the choice.
+  const currentOverride = (): string | undefined => (vscode.workspace.workspaceFolders?.length ? undefined : manifestOverride);
   let settings = readSettings();
   let absentReason: string | undefined = host ? undefined : 'no language server transport is available in this host';
   let pending: Promise<void> = Promise.resolve();
   let watchers: vscode.FileSystemWatcher[] = [];
   let lastState: LspState['kind'] = 'unavailable';
+  let sentToServer: string[] = [];
   let transport: ReturnType<typeof languageClientTransport> | undefined;
   let startError = 'language server was not located';
   let catalogueSource: PluginCatalogueSource = shippedCatalogueSource;
@@ -133,6 +159,7 @@ export function registerLanguageServer(
     return supervisor.request(method, params);
   };
   const requests = new ZenwaveRequests({ request });
+  registerResourceProvider(context, requests);
 
   const item = vscode.window.createStatusBarItem('zenwave.languageServer', vscode.StatusBarAlignment.Right, 100);
   item.name = 'ZenWave';
@@ -194,11 +221,12 @@ export function registerLanguageServer(
   }
 
   async function prepare(): Promise<boolean> {
-    manifest = await resolveWorkspaceManifest();
+    manifest = await resolveWorkspaceManifest(currentOverride());
     logger.info(describeManifest(manifest));
     for (const watcher of watchers) watcher.dispose();
     watchers = [];
     transport = undefined;
+    sentToServer = [];
     if (!host) return false;
     const location = await host.locateServer(settings.serverPath);
     if (location.kind === 'absent') {
@@ -219,6 +247,7 @@ export function registerLanguageServer(
       initializationOptions(manifest, true, pluginCatalogue),
       logger.outputChannel,
       watchers,
+      { didOpen: (document, next) => { sentToServer.push(document.uri.toString()); return next(document); } },
     );
     transport = languageClientTransport(host, location.location, options, [
       { method: CREDENTIAL_REQUEST, handle: (params) => credentials.answer(params) },
@@ -252,8 +281,9 @@ export function registerLanguageServer(
   function reconsiderManifest(trigger: string): Promise<void> {
     return queue(async () => {
       if (!settings.enabled || !vscode.workspace.isTrusted) return;
-      const next = await resolveWorkspaceManifest();
+      const next = await resolveWorkspaceManifest(currentOverride());
       if (sameInitialization(manifest, next)) {
+        if (manifest.route !== next.route) logger.info(describeManifest(next));
         manifest = next;
         refresh();
         return;
@@ -261,6 +291,32 @@ export function registerLanguageServer(
       logger.info(`Resolved configuration changed (${trigger}); restarting the language server with it`);
       void start('configuration changed');
     });
+  }
+
+  async function chooseManifest(argument?: unknown): Promise<ChooseManifestOutcome> {
+    const choice = choiceFromArgument(argument) ?? await askManifest();
+    if (!choice) return { kind: 'cancelled' };
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (folder) {
+      manifestOverride = undefined;
+      await context.workspaceState.update(MANIFEST_OVERRIDE_KEY, undefined);
+      await vscode.workspace.getConfiguration('zenwave.workspace', folder.uri)
+        .update('manifest', settingValue(choice), vscode.ConfigurationTarget.Workspace);
+    } else {
+      manifestOverride = sessionValue(choice);
+      await context.workspaceState.update(MANIFEST_OVERRIDE_KEY, manifestOverride);
+    }
+    await reconsiderManifest('Choose Architecture Manifest');
+    return { kind: 'chosen', scope: folder ? 'setting' : 'session', manifest: folder ? settingValue(choice) : sessionValue(choice) };
+  }
+
+  async function openResourceCommand(address: unknown): Promise<OpenResourceOutcome> {
+    const outcome = await openResource(requests, String(address));
+    if (outcome.kind === 'failed') {
+      logger.warn(outcome.message);
+      void vscode.window.showErrorMessage(outcome.message.split('\n')[0]!);
+    }
+    return outcome;
   }
 
   const configWatchers = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
@@ -289,6 +345,8 @@ export function registerLanguageServer(
     vscode.window.onDidChangeActiveTextEditor(() => refresh(false)),
     vscode.commands.registerCommand(LSP_COMMANDS.restart, () => start('restart requested')),
     vscode.commands.registerCommand(LSP_COMMANDS.showStatus, () => showStatus()),
+    vscode.commands.registerCommand(LSP_COMMANDS.chooseManifest, (argument?: unknown) => chooseManifest(argument)),
+    vscode.commands.registerCommand(LSP_COMMANDS.openResource, (address: unknown) => openResourceCommand(address)),
     vscode.commands.registerCommand(LSP_COMMANDS.recordCredential, () => credentials.record()),
     vscode.commands.registerCommand(LSP_COMMANDS.clearCredential, () => credentials.clear()),
     { dispose: () => { for (const watcher of watchers) watcher.dispose(); void supervisor.stop(); } },
@@ -331,6 +389,9 @@ export function registerLanguageServer(
     onDidChange: changed.event,
     settled: async () => { let seen: Promise<void> | undefined; while (seen !== pending) { seen = pending; await seen; } },
     restart: () => start('restart requested'),
+    get sentToServer() { return [...sentToServer]; },
+    chooseManifest,
+    openResource: (address) => openResource(requests, address),
     answerCredential: (params) => credentials.answer(params),
     overridePluginCatalogue: (source) => { catalogueSource = source ?? shippedCatalogueSource; },
   };

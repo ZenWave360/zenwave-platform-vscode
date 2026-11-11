@@ -96,7 +96,7 @@ test('ESLint enforces which host may import which vscode-languageclient entry', 
 });
 
 test('the extension starts only for ZenWave workspaces and documents, or when its views are opened, never at startup', () => {
-  assert.deepEqual(manifest.activationEvents.sort(), ['onLanguage:zdl', 'onLanguage:zfl', 'onLanguage:zw', 'onView:zenwave.architecture', 'onView:zenwave.model',
+  assert.deepEqual(manifest.activationEvents.sort(), ['onFileSystem:zenwave', 'onLanguage:zdl', 'onLanguage:zfl', 'onLanguage:zw', 'onView:zenwave.architecture', 'onView:zenwave.model',
     'workspaceContains:.zenwave/config.yml']);
 });
 
@@ -108,9 +108,10 @@ test('settings, commands and the trust statement match what the language client 
   assert.equal(properties['zenwave.lsp.serverPath']?.scope, 'machine-overridable');
   assert.equal(properties['zenwave.credentials.origins']?.scope, 'application', 'a repository must not authorise an origin');
   const commands = manifest.contributes.commands.map((command) => command.command);
-  for (const command of ['zenwave.lsp.restart', 'zenwave.lsp.showStatus', 'zenwave.credentials.record', 'zenwave.credentials.clear']) {
+  for (const command of ['zenwave.lsp.restart', 'zenwave.lsp.showStatus', 'zenwave.credentials.record', 'zenwave.credentials.clear', 'zenwave.manifest.choose', 'zenwave.resource.open']) {
     assert.ok(commands.includes(command), command);
   }
+  assert.equal(manifest.contributes.commands.find((command) => command.command === 'zenwave.manifest.choose')?.title, 'Choose Architecture Manifest…');
   const trust = manifest.capabilities.untrustedWorkspaces;
   assert.equal(trust.supported, 'limited');
   assert.match(trust.description, /no language server/);

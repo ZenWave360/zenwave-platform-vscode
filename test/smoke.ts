@@ -13,6 +13,7 @@ import { findNode, type ExplorerNode } from '../src/explorer/hierarchy-model.js'
 import type { EventFlowApi, EventFlowEditorApi, EventFlowOpenOutcome } from '../src/eventflow/feature.js';
 import type { PreviewApi, PreviewEditorApi, PreviewOpenOutcome, PreviewSelectOutcome } from '../src/preview/feature.js';
 import { contentHash, PREVIEW_VIEW_TYPES, isPreviewViewType, type PreviewProbe } from '../src/preview/protocol.js';
+import { remoteArchitecture } from './smoke-remote.js';
 import { outcomeOf } from '../src/preview/selection.js';
 import type { Preview } from '../src/lsp/requests.js';
 
@@ -1799,6 +1800,7 @@ export async function run(): Promise<void> {
   if (desktop) await modelActionsOnDisk(api);
   if (desktop) await explorerOnDisk(api, explorer);
   if (desktop) await languageServerSettings(api);
+  await remoteArchitecture(api, true);
 
   const document = await vscode.workspace.openTextDocument(await fixture('complete.zdl'));
   assert(document.languageId === 'zdl', `Expected zdl language id, got ${document.languageId}`);

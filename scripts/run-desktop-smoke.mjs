@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { downloadAndUnzipVSCode, runTests, runVSCodeCommand } from '@vscode/test-electron';
+import { startRemoteFixture } from './smoke-remote.mjs';
 import { captureEditorProcess, finishDesktopSmoke, killProcessTree, smokeTimeoutMs, withDeadline } from './smoke-deadline.mjs';
 
 // test-electron calls require('child_process'). The ESM namespace is read-only, so the capture wraps this object.
@@ -63,19 +64,32 @@ await finishDesktopSmoke(() => editorCapture.editor(), killProcessTree, (code) =
           version: 'stable',
         });
       }
-      await runTests({
-        ...(vscodeExecutablePath ? { vscodeExecutablePath } : {}),
-        extensionDevelopmentPath: packagedVsix
-          ? path.join(projectDir, 'test/smoke-harness')
-          : projectDir,
-        extensionTestsPath: path.join(projectDir, '.test-dist/node/index.js'),
-        launchArgs: [
-          workspace,
+      const remote = await startRemoteFixture();
+      try {
+        const common = {
+          ...(vscodeExecutablePath ? { vscodeExecutablePath } : {}),
+          extensionDevelopmentPath: packagedVsix
+            ? path.join(projectDir, 'test/smoke-harness')
+            : projectDir,
+        };
+        const launch = (...folder) => [
+          ...folder,
           '--user-data-dir', userData,
           '--extensions-dir', extensions,
           ...(packagedVsix ? [] : ['--disable-extensions']),
-        ],
-      });
+        ];
+        await runTests({ ...common, extensionTestsPath: path.join(projectDir, '.test-dist/node/index.js'), launchArgs: launch(workspace) });
+        // A window with no folder: the manifest choice is a session override, and no user setting is written.
+        const userSettings = path.join(userData, 'User/settings.json');
+        const settingsBefore = fs.readFileSync(userSettings, 'utf8');
+        await runTests({ ...common, extensionTestsPath: path.join(projectDir, '.test-dist/node/no-folder.js'), launchArgs: launch() });
+        if (fs.readFileSync(userSettings, 'utf8') !== settingsBefore) {
+          throw new Error('The no-folder run changed the user settings; a session override must write nothing to disk');
+        }
+        console.log('PASS: with no folder the user settings are unchanged');
+      } finally {
+        await remote.close();
+      }
     })(), timeoutMs, timeoutMessage);
     const logs = logContents(path.join(userData, 'logs'));
     if (!logs.includes('ZenWave SDK runs only through a POSIX shell') ||
@@ -104,6 +118,7 @@ await finishDesktopSmoke(() => editorCapture.editor(), killProcessTree, (code) =
       ['Preview of checkout.zfl: received', 'a preview request outcome'],
       ['Preview of smoke-unreadable.zfl: the language server could not read the document', 'why a preview could not be produced'],
       ['Preview of orders.zdl: needs the ZenWave language server', 'that a preview needs the server'],
+      ['for this session (not saved)', 'the session override, with no folder'],
     ]) {
       if (!logs.includes(expected)) throw new Error(`The ZenWave output channel does not record ${what} ("${expected}")`);
     }

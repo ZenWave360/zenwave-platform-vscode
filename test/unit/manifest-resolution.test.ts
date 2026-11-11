@@ -6,7 +6,11 @@ import {
   hasScheme,
   initializationOptions,
   isAbsolutePath,
+  isRemoteManifest,
   literalGlob,
+  manifestDocumentUri,
+  manifestFilters,
+  parseManifestUrl,
   projectManifestOf,
   relativeSegments,
   sameInitialization,
@@ -101,4 +105,39 @@ test('initialization options carry the shape the server parses, and a changed ma
 test('a manifest file name never widens into a glob', () => {
   assert.equal(literalGlob('zenwave-architecture.yml'), 'zenwave-architecture.yml');
   assert.equal(literalGlob('arch[1]*{a,b}.yml'), 'arch?1???a?b?.yml');
+});
+
+test('a session choice takes the place of the setting, outranks the configuration and is described as unsaved', () => {
+  const resolved = chooseManifest([configFolder, settingFolder], 'https://example.org/zenwave-architecture.yml');
+  assert.equal(resolved.route, 'override');
+  assert.equal(resolved.manifestUri, 'https://example.org/zenwave-architecture.yml');
+  assert.ok(resolved.notes.some((note) => note.includes('session choice comes first')));
+  assert.match(describeManifest(resolved), /for this session \(not saved\)/);
+  assert.deepEqual(chooseManifest([], 'https://example.org/m.yml').notes, []);
+});
+
+test('the order is override, setting, configuration, none', () => {
+  assert.equal(chooseManifest([configFolder, settingFolder], 'file:///o.yml').route, 'override');
+  assert.equal(chooseManifest([configFolder, settingFolder]).route, 'setting');
+  assert.equal(chooseManifest([configFolder]).route, 'config');
+  assert.equal(chooseManifest([]).route, 'none');
+});
+
+test('URL accepts http and https addresses only', () => {
+  assert.deepEqual(parseManifestUrl('  https://example.org/a/zenwave-architecture.yml '), { url: 'https://example.org/a/zenwave-architecture.yml' });
+  assert.deepEqual(parseManifestUrl('http://localhost:8080/m.yml'), { url: 'http://localhost:8080/m.yml' });
+  for (const refused of ['', 'ftp://example.org/m.yml', 'file:///m.yml', 'example.org/m.yml', 'https://', 'https://a b/m.yml', 'C:\\m.yml']) {
+    assert.ok('problem' in parseManifestUrl(refused), refused + ' is refused');
+  }
+});
+
+test('a remote manifest is served as the zenwave: document and selected by exact scheme and path', () => {
+  const local = (uri: string): { scheme: string; pattern: string } => ({ scheme: 'file', pattern: uri });
+  assert.equal(isRemoteManifest('https://example.org/m.yml'), true);
+  assert.equal(isRemoteManifest('file:///c%3A/m.yml'), false);
+  assert.equal(manifestDocumentUri('https://example.org/m.yml'), 'zenwave:/.zenwave-manifest.yml');
+  assert.equal(manifestDocumentUri('file:///m.yml'), 'file:///m.yml');
+  assert.deepEqual(manifestFilters('https://example.org/m.yml', local), [{ scheme: 'zenwave', pattern: '/.zenwave-manifest.yml' }]);
+  assert.deepEqual(manifestFilters('file:///m.yml', local), [{ scheme: 'file', pattern: 'file:///m.yml' }]);
+  assert.deepEqual(manifestFilters(undefined, local), []);
 });

@@ -5,8 +5,9 @@
  * candidates in, so the choice — and what is said about it — is testable
  * without an editor. URIs are opaque strings here; nothing is joined or split.
  */
+import { REMOTE_MANIFEST_ADDRESS, REMOTE_MANIFEST_PATH, ZENWAVE_SCHEME } from './resources.js';
 
-export type ManifestRoute = 'setting' | 'config' | 'none';
+export type ManifestRoute = 'setting' | 'override' | 'config' | 'none';
 
 export interface FolderCandidates {
   readonly folderName: string;
@@ -47,6 +48,37 @@ export function projectManifestOf(text: string): string | undefined {
   return undefined;
 }
 
+/** Whether a manifest is an `http(s)` address: the server serves it under `zenwave:` and it is read-only (LC-R3, AR-R11). */
+export function isRemoteManifest(manifestUri: string): boolean {
+  return /^https?:\/\//i.test(manifestUri);
+}
+
+/** The document the editor holds for a manifest: the manifest itself, or the `zenwave:` address the server serves a remote one under. */
+export function manifestDocumentUri(manifestUri: string): string {
+  return isRemoteManifest(manifestUri) ? REMOTE_MANIFEST_ADDRESS : manifestUri;
+}
+
+/** What *URL…* accepts: an `http` or `https` address with a host. Returns the trimmed address, or why it is refused. */
+export function parseManifestUrl(text: string): { readonly url: string } | { readonly problem: string } {
+  const value = text.trim();
+  if (!/^https?:\/\/[^\s/?#]+/i.test(value)) return { problem: 'Enter an http or https address, such as https://example.org/zenwave-architecture.yml' };
+  if (/\s/.test(value)) return { problem: 'The address cannot contain spaces' };
+  return { url: value };
+}
+
+/**
+ * The document filters the language client serves besides the model languages (LC-R3, AR-R8): the remote manifest
+ * by exact scheme and path, and nothing for `.yml`, `.yaml` or `.md` under the scheme. `local` is the filter for a
+ * manifest that is a file, supplied by the VS Code layer because it needs the URI's `fsPath`.
+ */
+export function manifestFilters(
+  manifestUri: string | undefined,
+  local: (manifestUri: string) => { scheme: string; pattern: string },
+): { scheme: string; pattern: string }[] {
+  if (!manifestUri) return [];
+  return [isRemoteManifest(manifestUri) ? { scheme: ZENWAVE_SCHEME, pattern: REMOTE_MANIFEST_PATH } : local(manifestUri)];
+}
+
 /** Whether a manifest reference names a URI rather than a path (`scheme:` with a scheme longer than a drive letter). */
 export function hasScheme(reference: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9+.-]+:/.test(reference);
@@ -68,8 +100,16 @@ export function relativeSegments(reference: string): string[] {
  * workspace order wins and every other offer is named in `notes`, so a
  * multi-root workspace never picks silently.
  */
-export function chooseManifest(folders: readonly FolderCandidates[]): ResolvedManifest {
+export function chooseManifest(folders: readonly FolderCandidates[], override?: string): ResolvedManifest {
   const notes: string[] = [];
+  if (override) {
+    // A session choice (no folder is open to hold a setting): it takes the setting's place and is never written to a file.
+    for (const folder of folders) {
+      if (folder.setting) notes.push(`zenwave.workspace.manifest in folder "${folder.folderName}" names ${folder.setting.manifestUri}; ignored, the session choice comes first`);
+      if (folder.config?.manifestUri) notes.push(`${folder.config.configUri} not consulted: a manifest was chosen for this session`);
+    }
+    return { route: 'override', manifestUri: override, notes };
+  }
   for (const folder of folders) {
     if (folder.config?.problem) notes.push(`${folder.config.configUri}: ${folder.config.problem}`);
   }
@@ -108,6 +148,7 @@ export function chooseManifest(folders: readonly FolderCandidates[]): ResolvedMa
 export function describeManifest(resolved: ResolvedManifest): string {
   const how = {
     setting: `from the zenwave.workspace.manifest setting (folder "${resolved.folderName}")`,
+    override: 'chosen with Choose Architecture Manifest… for this session (not saved)',
     config: `from ${resolved.configUri}`,
     none: 'none found: no zenwave.workspace.manifest setting and no .zenwave/config.yml at a workspace folder root; starting without a manifest',
   }[resolved.route];

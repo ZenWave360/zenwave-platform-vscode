@@ -46,7 +46,7 @@ test('every request the server advertises today has a wrapper sending the wire p
     { method: 'zenwave/preview', params: { textDocument: { uri: 'file:///w/a.zfl' }, sequenceRenderMode: 'SEPARATE_VARIANTS' } },
     { method: 'zenwave/symbolAt', params: { textDocument: { uri: 'file:///w/a.zfl' }, position: { line: 14, character: 30 } } },
   ]);
-  assert.deepEqual(Object.values(ZENWAVE_REQUESTS).filter((method) => method !== ZENWAVE_REQUESTS.conceptAt), json('customRequests.json'));
+  assert.deepEqual(Object.values(ZENWAVE_REQUESTS).filter((method) => method !== ZENWAVE_REQUESTS.conceptAt && method !== ZENWAVE_REQUESTS.statResource && method !== ZENWAVE_REQUESTS.readResource), json('customRequests.json'));
 });
 
 test('conceptAt sends the cursor position and normalizes several, truncated, empty, and no-architecture answers', async () => {

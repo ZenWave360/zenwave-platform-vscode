@@ -4,7 +4,10 @@ import {
   chooseManifest,
   hasScheme,
   isAbsolutePath,
+  isRemoteManifest,
   literalGlob,
+  manifestDocumentUri,
+  manifestFilters,
   projectManifestOf,
   relativeSegments,
   type FolderCandidates,
@@ -57,10 +60,11 @@ async function candidatesFor(folder: vscode.WorkspaceFolder): Promise<FolderCand
  * so the web host resolves the same way; nothing is fetched and no content is
  * read beyond the configuration file itself.
  */
-export async function resolveWorkspaceManifest(): Promise<ResolvedManifest> {
+export async function resolveWorkspaceManifest(override?: string): Promise<ResolvedManifest> {
   const folders = vscode.workspace.workspaceFolders ?? [];
-  const resolved = chooseManifest(await Promise.all(folders.map(candidatesFor)));
-  if (!resolved.manifestUri) return resolved;
+  const resolved = chooseManifest(await Promise.all(folders.map(candidatesFor)), override);
+  // A remote manifest is the server's to read; there is nothing to stat from here.
+  if (!resolved.manifestUri || isRemoteManifest(resolved.manifestUri)) return resolved;
   try {
     await vscode.workspace.fs.stat(vscode.Uri.parse(resolved.manifestUri, true));
     return resolved;
@@ -79,16 +83,17 @@ export async function resolveWorkspaceManifest(): Promise<ResolvedManifest> {
  * as a glob, so the file matches exactly whatever characters its name holds.
  */
 export function documentSelector(resolved: ResolvedManifest): DocumentSelector {
-  const selector: DocumentSelector = [{ language: 'zdl' }, { language: 'zw' }, { language: 'zfl' }];
-  if (resolved.manifestUri) {
-    const uri = vscode.Uri.parse(resolved.manifestUri, true);
-    selector.push({ scheme: uri.scheme, pattern: uri.fsPath });
-  }
-  return selector;
+  return [
+    { language: 'zdl' }, { language: 'zw' }, { language: 'zfl' },
+    ...manifestFilters(resolved.manifestUri, (manifestUri) => {
+      const uri = vscode.Uri.parse(manifestUri, true);
+      return { scheme: uri.scheme, pattern: uri.fsPath };
+    }),
+  ];
 }
 
 function manifestPattern(resolved: ResolvedManifest): vscode.RelativePattern | undefined {
-  if (!resolved.manifestUri) return undefined;
+  if (!resolved.manifestUri || isRemoteManifest(resolved.manifestUri)) return undefined;
   const uri = vscode.Uri.parse(resolved.manifestUri, true);
   const name = uri.path.slice(uri.path.lastIndexOf('/') + 1);
   return name ? new vscode.RelativePattern(vscode.Uri.joinPath(uri, '..'), literalGlob(name)) : undefined;
@@ -96,7 +101,12 @@ function manifestPattern(resolved: ResolvedManifest): vscode.RelativePattern | u
 
 /** Whether a document is the resolved manifest. */
 export function isManifest(resolved: ResolvedManifest, document: vscode.TextDocument): boolean {
-  return resolved.manifestUri !== undefined && document.uri.toString() === vscode.Uri.parse(resolved.manifestUri, true).toString();
+  return resolved.manifestUri !== undefined && document.uri.toString() === manifestDocument(resolved)?.toString();
+}
+
+/** The document that holds the manifest: the file, or for an `http(s)` manifest the `zenwave:` document the server serves it as. */
+export function manifestDocument(resolved: ResolvedManifest): vscode.Uri | undefined {
+  return resolved.manifestUri ? vscode.Uri.parse(manifestDocumentUri(resolved.manifestUri), true) : undefined;
 }
 
 /**

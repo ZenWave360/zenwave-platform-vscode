@@ -18,6 +18,8 @@ export const ZENWAVE_REQUESTS = {
   preview: 'zenwave/preview',
   symbolAt: 'zenwave/symbolAt',
   conceptAt: 'zenwave/conceptAt',
+  statResource: 'zenwave/statResource',
+  readResource: 'zenwave/readResource',
 } as const;
 
 export type ZenwaveRequestMethod = typeof ZENWAVE_REQUESTS[keyof typeof ZENWAVE_REQUESTS];
@@ -42,6 +44,22 @@ export interface ArchitectureConcept {
 export interface ConceptsAt {
   readonly concepts: readonly ArchitectureConcept[];
   readonly truncated: boolean;
+}
+
+/** `zenwave/statResource` (AR-R4): what a `zenwave:` address resolves to. `fileUri` is present only for the `workspace` source. */
+export interface ResourceStat {
+  readonly uri: string;
+  readonly type: 'file';
+  readonly size: number;
+  readonly readonly: true;
+  readonly source: { readonly kind: string; readonly fileUri?: string };
+}
+
+/** `zenwave/readResource` (AR-R5): the content as text, or as base64 when it is not text. */
+export interface ResourceContent {
+  readonly uri: string;
+  readonly encoding: 'utf8' | 'base64';
+  readonly content: string;
 }
 
 export interface RelatedResource {
@@ -226,6 +244,18 @@ export class ZenwaveRequests {
     return expect(ZENWAVE_REQUESTS.symbolAt,
       await this.issuer.request(ZENWAVE_REQUESTS.symbolAt, { textDocument: { uri }, position: { line: position.line, character: position.character } }),
       (value) => value === null || (isObject(value) && typeof value.uri === 'string' && typeof value.semanticId === 'string'));
+  }
+
+  /** What a `zenwave:` address resolves to, and where it came from (AR-R4). Fetches nothing the server does not already hold. */
+  async statResource(uri: string): Promise<RequestResult<ResourceStat>> {
+    return expect(ZENWAVE_REQUESTS.statResource, await this.issuer.request(ZENWAVE_REQUESTS.statResource, { uri }),
+      (value) => isObject(value) && typeof value.size === 'number' && isObject(value.source) && typeof value.source.kind === 'string');
+  }
+
+  /** The content of a `zenwave:` address (AR-R5). */
+  async readResource(uri: string): Promise<RequestResult<ResourceContent>> {
+    return expect(ZENWAVE_REQUESTS.readResource, await this.issuer.request(ZENWAVE_REQUESTS.readResource, { uri }),
+      (value) => isObject(value) && typeof value.content === 'string' && (value.encoding === 'utf8' || value.encoding === 'base64'));
   }
 
   /** Architectural concepts covering a document position. Older JVM servers return the concepts array directly. */
