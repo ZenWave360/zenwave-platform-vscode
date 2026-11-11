@@ -261,6 +261,11 @@
       },
       {
         "view": "zenwave.model",
+        "contents": "Nothing provides an outline for this document.",
+        "when": "zenwave.modelTreeState == outline-empty"
+      },
+      {
+        "view": "zenwave.model",
         "contents": "The model tree could not be loaded. The reason is recorded in the ZenWave output.\n[Show Output](command:zenwave.showOutput)",
         "when": "zenwave.modelTreeState == failed"
       }

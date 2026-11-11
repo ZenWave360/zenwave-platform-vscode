@@ -5,10 +5,12 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { HierarchyNode } from '../../src/lsp/requests.js';
 import { CoalescedRefresh, type Scheduler } from '../../src/explorer/coalesce.js';
+import { documentSymbolsToHierarchy, loadDocumentOutline, type DocumentSymbolLike, type SymbolInformationLike } from '../../src/explorer/document-symbols.js';
 import { DiagramPanels, reflectSelection } from '../../src/explorer/diagram-selection.js';
-import { followDecision, isModelDocument, tabDocumentUri } from '../../src/explorer/follow.js';
+import { focusedTreeTarget, followDecision, isApiDescription, isModelDocument, tabDocumentUri, targetForTextDocument } from '../../src/explorer/follow.js';
 import { buildTree, findNode, NEUTRAL_ICON, nodeAt, presentNode, walk } from '../../src/explorer/hierarchy-model.js';
 import { describeState, serverUnavailable, stateFromResult, TREE_STATE_KINDS } from '../../src/explorer/tree-state.js';
+import { LatestLoad } from '../../src/explorer/latest-load.js';
 
 /** Wire samples recorded from @zenwave360/lsp-js 0.1.0-SNAPSHOT (zenwave-lsp d7156e7). */
 const samples = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/lsp-samples');
@@ -40,6 +42,91 @@ test('a server that repeats an id still yields unique tree keys', () => {
     sourceRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, children: [], relatedResources: [], uiHints: {}, viewNodeIds: [] });
   const tree = buildTree(FLOW, [node('x', 'a'), node('x', 'b'), node('', 'c')]);
   assert.deepEqual(tree.roots.map((root) => root.key), ['x', 'x~1', `${FLOW}/event:c`]);
+});
+
+test('a nested document-symbol response becomes a navigable nested tree', () => {
+  const range = { start: { line: 1, character: 0 }, end: { line: 8, character: 0 } };
+  const symbols: DocumentSymbolLike[] = [{
+    name: 'Orders', detail: 'namespace', kind: 3, range,
+    selectionRange: { start: { line: 1, character: 0 }, end: { line: 1, character: 6 } },
+    children: [{ name: 'create', kind: 5, range: { start: { line: 3, character: 2 }, end: { line: 5, character: 3 } } }],
+  }];
+  const tree = buildTree('file:///workspace/openapi.yaml', documentSymbolsToHierarchy('file:///workspace/openapi.yaml', symbols));
+  const root = tree.roots[0]!;
+  assert.deepEqual([root.node.label, root.node.sourceUri, root.node.sourceRange, root.revealRange],
+    ['Orders', 'file:///workspace/openapi.yaml', symbols[0]!.range, symbols[0]!.selectionRange]);
+  assert.deepEqual(root.children.map((child) => child.node.label), ['create']);
+  assert.equal(presentNode(root, tree.documentUri).description, 'namespace');
+});
+
+test('a flat SymbolInformation response keeps every entry as a navigable root', () => {
+  const symbols: SymbolInformationLike[] = [
+    { name: 'GET /orders', kind: 12, containerName: 'paths', location: { uri: { toString: () => 'file:///workspace/openapi.yaml' }, range: { start: { line: 2, character: 0 }, end: { line: 2, character: 11 } } } },
+    { name: 'Order', kind: 5, location: { uri: { toString: () => 'file:///workspace/schemas.yaml' }, range: { start: { line: 1, character: 0 }, end: { line: 6, character: 0 } } } },
+  ];
+  const nodes = documentSymbolsToHierarchy('file:///workspace/openapi.yaml', symbols);
+  assert.deepEqual(nodes.map((node) => [node.label, node.children.length, node.sourceUri]), [
+    ['GET /orders', 0, 'file:///workspace/openapi.yaml'], ['Order', 0, 'file:///workspace/schemas.yaml'],
+  ]);
+  assert.equal(nodes[0]!.uiHints.detail, 'paths');
+});
+
+test('a document symbol uses its full range for cursor containment and its selection range for navigation', () => {
+  const uri = 'file:///workspace/README.md';
+  const fullRange = { start: { line: 10, character: 0 }, end: { line: 40, character: 0 } };
+  const selectionRange = { start: { line: 10, character: 2 }, end: { line: 10, character: 9 } };
+  const tree = buildTree(uri, documentSymbolsToHierarchy(uri, [{ name: 'Heading', kind: 15, range: fullRange, selectionRange }]));
+  assert.equal(nodeAt(tree, uri, { line: 25, character: 0 })?.node.label, 'Heading');
+  assert.deepEqual(tree.roots[0]?.revealRange, selectionRange);
+});
+
+test('an empty symbol response has no nodes, and only Markdown and API descriptions select the host outline', () => {
+  assert.deepEqual(documentSymbolsToHierarchy('file:///workspace/README.md', undefined), []);
+  const markdown = { path: '/workspace/README.md', toString: () => 'file:///workspace/README.md' };
+  const yaml = { path: '/workspace/openapi.yaml', toString: () => 'file:///workspace/openapi.yaml' };
+  const json = { path: '/workspace/openapi.json', toString: () => 'file:///workspace/openapi.json' };
+  assert.deepEqual(targetForTextDocument(markdown, 'markdown'), { uri: 'file:///workspace/README.md', source: 'outline', outlineKind: 'markdown' });
+  assert.deepEqual(targetForTextDocument(yaml, 'yaml', 'openapi: 3.1.0'), { uri: 'file:///workspace/openapi.yaml', source: 'outline', outlineKind: 'api-description' });
+  assert.deepEqual(targetForTextDocument(json, 'json', '{ "asyncapi": "3.0.0" }'), { uri: 'file:///workspace/openapi.json', source: 'outline', outlineKind: 'api-description' });
+  assert.deepEqual(targetForTextDocument(json, 'jsonc', '// generated\n{ "swagger": "2.0" }'), { uri: 'file:///workspace/openapi.json', source: 'outline', outlineKind: 'api-description' });
+  assert.equal(targetForTextDocument(yaml, 'yaml', 'config:\n  openapi: ignored'), undefined);
+  assert.equal(targetForTextDocument(json, 'json', '{ "config": { "openapi": "3.1.0" } }'), undefined);
+  assert.equal(targetForTextDocument(json, 'jsonc', '{ "title": "an openapi: mention" }'), undefined);
+  assert.equal(targetForTextDocument({ path: '/workspace/model.zdl', toString: () => FLOW }, 'zdl').source, 'server');
+  assert.equal(targetForTextDocument({ path: '/workspace/App.java', toString: () => 'file:///workspace/App.java' }, 'java'), undefined);
+  assert.equal(targetForTextDocument({ path: '/workspace/notes.txt', toString: () => 'file:///workspace/notes.txt' }, 'plaintext'), undefined);
+});
+
+test('the API discriminator looks only at top-level keys in the first fifty lines and four kilobytes', () => {
+  assert.ok(isApiDescription('---\n# a description\nasyncapi: 3.0.0', 'yaml'));
+  assert.ok(isApiDescription('{ /* a comment */ "openapi": "3.1.0" }', 'jsonc'));
+  assert.equal(isApiDescription(`${'ignored: value\n'.repeat(50)}openapi: 3.1.0`, 'yaml'), false);
+  assert.equal(isApiDescription(`${' '.repeat(4096)}\nopenapi: 3.1.0`, 'yaml'), false);
+});
+
+test('a document-symbol provider failure becomes a failed tree state with a provider-specific log', async () => {
+  const result = await loadDocumentOutline('file:///workspace/openapi.yaml', async () => { throw new Error('provider exploded'); });
+  assert.deepEqual(result.state, { kind: 'failed', reason: 'provider exploded' });
+  assert.match(result.log ?? '', /^document symbol provider failed for .*openapi\.yaml: provider exploded$/);
+  assert.doesNotMatch(result.log ?? '', /zenwave\/hierarchy/);
+});
+
+test('an empty outline load carries no banner of its own', async () => {
+  const result = await loadDocumentOutline('file:///workspace/README.md', async () => []);
+  assert.deepEqual(result.state, { kind: 'outline-empty' });
+  assert.equal(result.message, undefined);
+  assert.deepEqual(result.nodes, []);
+});
+
+test('a load result is discarded when its target becomes stale', async () => {
+  let target = { uri: 'file:///workspace/first.md', source: 'outline' };
+  let release: (() => void) | undefined;
+  const latest = new LatestLoad<typeof target, string>();
+  const pending = latest.run(() => target, async () => new Promise<string>((resolve) => { release = () => resolve('first'); }),
+    (left, right) => left.uri === right.uri && left.source === right.source);
+  target = { uri: 'file:///workspace/second.md', source: 'outline' };
+  release!();
+  assert.equal(await pending, undefined);
 });
 
 test('nodes present in this client vocabulary, and a kind released later still renders under its name', () => {
@@ -116,6 +203,25 @@ test('the node at a cursor is the narrowest declaration containing it, in the do
   assert.equal(nodeAt(tree, ZDL, { line: 5, character: 10 })?.node.label, 'createOrder');
   assert.equal(nodeAt(tree, ZDL, { line: 4, character: 2 })?.node.label, 'OrderService');
   assert.equal(nodeAt(tree, FLOW, { line: 8, character: 0 }), undefined);
+  assert.equal(nodeAt(tree, ZDL, { line: 0, character: 0 })?.node.label, 'Orders', 'a zero-width server range matches its point');
+  assert.equal(nodeAt(tree, ZDL, { line: 0, character: 1 }), undefined, 'a zero-width range matches only its point');
+});
+
+test('a boundary shared by adjacent outline symbols belongs to the following symbol', () => {
+  const uri = 'file:///workspace/README.md';
+  const heading = (label: string, startCharacter: number, endCharacter: number): HierarchyNode => ({
+    id: label, label, kind: 'heading', sourceUri: uri,
+    sourceRange: { start: { line: 3, character: startCharacter }, end: { line: 3, character: endCharacter } },
+    children: [], relatedResources: [], uiHints: {}, viewNodeIds: [],
+  });
+  const tree = buildTree(uri, [heading('First', 0, 4), heading('Second', 4, 10)]);
+  assert.equal(nodeAt(tree, uri, { line: 3, character: 3 })?.node.label, 'First');
+  assert.equal(nodeAt(tree, uri, { line: 3, character: 4 })?.node.label, 'Second', 'the shared end is outside the previous symbol');
+  assert.equal(nodeAt(tree, uri, { line: 3, character: 10 }), undefined, 'a non-zero range excludes its end');
+
+  const point = buildTree(uri, [heading('Point', 4, 4), heading('After', 4, 10)]);
+  assert.equal(nodeAt(point, uri, { line: 3, character: 4 })?.node.label, 'Point', 'a zero-width range is narrower than the symbol that starts there');
+  assert.equal(nodeAt(point, uri, { line: 3, character: 5 })?.node.label, 'After');
 });
 
 test('the model tree follows the focused model, but not into a document its hierarchy already spans', () => {
@@ -139,6 +245,24 @@ test('the active document comes from text and custom editor tabs alike', () => {
   assert.equal(isModelDocument({ path: 'Untitled-1', toString: () => 'untitled:Untitled-1' }, 'zfl'), true);
   assert.equal(isModelDocument({ path: '/w/App.java', toString: () => '' }, 'java'), false);
   assert.equal(isModelDocument({ path: '/w/zenwave-architecture.yml', toString: () => '' }, undefined), false);
+});
+
+test('a focused diagram is the model on screen even when a text editor in another group is still active', () => {
+  const checkout = { path: '/w/lsp/checkout.zfl', toString: () => 'file:///w/lsp/checkout.zfl' };
+  const placeOrder = { path: '/w/place-order-flow.zfl', toString: () => 'file:///w/place-order-flow.zfl' };
+  const readme = { path: '/w/README.md', toString: () => 'file:///w/README.md' };
+  const checkoutText = targetForTextDocument(checkout, 'zfl');
+  assert.deepEqual(focusedTreeTarget(checkoutText, { uri: placeOrder, customEditor: true, languageId: undefined }),
+    { uri: placeOrder.toString(), source: 'server' });
+  assert.deepEqual(focusedTreeTarget(undefined, { uri: placeOrder, customEditor: true, languageId: 'zfl' }),
+    { uri: placeOrder.toString(), source: 'server' });
+  assert.deepEqual(focusedTreeTarget(undefined, { uri: checkout, customEditor: false, languageId: 'zfl' }),
+    { uri: checkout.toString(), source: 'server' }, 'a text tab still follows the server when no text editor is active');
+  const markdown = targetForTextDocument(readme, 'markdown');
+  assert.deepEqual(focusedTreeTarget(markdown, { uri: readme, customEditor: false, languageId: 'markdown' }), markdown);
+  assert.equal(focusedTreeTarget(undefined, undefined), undefined, 'no focused document keeps the current model');
+  assert.equal(focusedTreeTarget(undefined, { uri: { path: '/w/App.java', toString: () => 'file:///w/App.java' }, customEditor: false, languageId: 'java' }), undefined);
+  assert.deepEqual(focusedTreeTarget(markdown, { uri: { path: '/w/pic.png', toString: () => 'file:///w/pic.png' }, customEditor: true, languageId: undefined }), markdown);
 });
 
 test('an empty tree says why: no server, no hierarchy request, not found, unreadable, empty', () => {
@@ -244,7 +368,8 @@ test('the container, both views, activation and an explanation for every empty s
 
   const keys = { 'zenwave.architecture': 'zenwave.architectureTreeState', 'zenwave.model': 'zenwave.modelTreeState' } as const;
   for (const [view, key] of Object.entries(keys)) {
-    const relevant = TREE_STATE_KINDS.filter((kind) => kind !== 'ready' && (kind !== 'no-manifest' || view === 'zenwave.architecture') && (kind !== 'no-model' || view === 'zenwave.model'));
+    const relevant = TREE_STATE_KINDS.filter((kind) => kind !== 'ready' && (kind !== 'no-manifest' || view === 'zenwave.architecture') &&
+      (kind !== 'no-model' || view === 'zenwave.model') && (kind !== 'outline-empty' || view === 'zenwave.model'));
     for (const kind of relevant) {
       const entries = contributes.viewsWelcome.filter((entry) => entry.view === view && entry.when === `${key} == ${kind}`);
       assert.equal(entries.length, 1, `${view} explains ${kind}`);

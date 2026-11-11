@@ -14,6 +14,7 @@ export type TreeState =
   | { readonly kind: 'no-manifest' }
   | { readonly kind: 'no-model' }
   | { readonly kind: 'empty' }
+  | { readonly kind: 'outline-empty' }
   | { readonly kind: 'not-found'; readonly reason: string }
   | { readonly kind: 'unreadable'; readonly problems: number }
   | { readonly kind: 'failed'; readonly reason: string };
@@ -22,7 +23,7 @@ export type TreeStateKind = TreeState['kind'];
 
 /** Every state; each but `ready` is explained by a `viewsWelcome` entry. */
 export const TREE_STATE_KINDS: readonly TreeStateKind[] = [
-  'ready', 'loading', 'no-server', 'unsupported', 'no-manifest', 'no-model', 'empty', 'not-found', 'unreadable', 'failed',
+  'ready', 'loading', 'no-server', 'unsupported', 'no-manifest', 'no-model', 'empty', 'outline-empty', 'not-found', 'unreadable', 'failed',
 ];
 
 /** Whether the tree can ask the server at all; `undefined` when it can. */
@@ -60,6 +61,7 @@ export function describeState(tree: string, subject: string | undefined, state: 
     case 'no-manifest': return `${tree} tree is empty: no architecture manifest was resolved for this workspace (set zenwave.workspace.manifest or project-manifest in .zenwave/config.yml)`;
     case 'no-model': return `${tree} tree is empty: no ZDL or ZFL document has been focused yet`;
     case 'empty': return `${tree} tree is empty: the language server reports no hierarchy${about}`;
+    case 'outline-empty': return `${tree} tree is empty: nothing provides an outline${about}`;
     case 'not-found': return `${tree} tree is empty: the language server could not read${subject ? ` ${subject}` : ' the document'} (${state.reason}). ` +
       'A server running in a browser reads only documents that are open in the editor or reachable over http(s).';
     case 'unreadable': return `${tree} tree: the language server could not read${subject ? ` ${subject}` : ' the document'}` +

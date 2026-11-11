@@ -459,6 +459,7 @@ async function explorerBeforeAnyDocument(api: LanguageServerApi, explorer: Model
     assert(await vscode.commands.executeCommand<boolean>('zenwave.explorer.openManifest'), 'Open Architecture Manifest did nothing');
     await treeState(architecture, 'ready', 'Architecture tree once the user opened the manifest');
     assert(labels(roots(architecture)[0]?.children).join() === 'orders,fulfillment', `Domains after opening: ${labels(roots(architecture)[0]?.children)}`);
+    assert(architecture.view.message === '', `Architecture success left a stale banner: ${architecture.view.message}`);
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     console.log('PASS: in the browser the architecture tree explains an unreadable manifest without retrying, and populates once the user opens it');
   }
@@ -552,15 +553,28 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
     `PaymentsProcessingService commands: ${labels(payments?.children)}`);
   console.log('PASS: place-order-flow.zfl: five systems, one declared in its annotated ZDL, commands under their services');
 
-  // Not a model: the tree keeps the last model rather than emptying.
-  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(await fixture('README.md')));
-  const panel = vscode.window.createWebviewPanel('zenwave.smoke', 'Not a model', vscode.ViewColumn.Active, {});
+  // A Java editor keeps the last model, while Markdown uses its host outline without asking the server.
+  const java = await vscode.workspace.openTextDocument({ language: 'java', content: 'class App {}' });
+  await vscode.window.showTextDocument(java);
   await delay(1000);
   await model.settled();
   assert(model.documentUri === placeOrderUri.toString() && model.state.kind === 'ready' && roots(model).length > 0,
-    `A Markdown editor or a webview changed the model tree: ${model.documentUri} ${JSON.stringify(model.state)}`);
+    `A Java editor changed the model tree: ${model.documentUri} ${JSON.stringify(model.state)}`);
+  const markdown = await vscode.workspace.openTextDocument(await fixture('README.md'));
+  const hierarchyRequests = model.stats.requests;
+  await vscode.window.showTextDocument(markdown);
+  await waitFor(() => model.tree?.documentUri === markdown.uri.toString() && model.state.kind === 'ready' && roots(model).length > 0 ? true : undefined,
+    `Model tree did not follow Markdown with its outline: ${model.documentUri} ${JSON.stringify(model.state)}`);
+  await model.settled();
+  assert(model.stats.requests === hierarchyRequests, `Following Markdown sent ${model.stats.requests - hierarchyRequests} hierarchy request(s)`);
+  const markdownRoots = labels(roots(model)).join();
+  const panel = vscode.window.createWebviewPanel('zenwave.smoke', 'Not a model', vscode.ViewColumn.Active, {});
+  await delay(1000);
+  await model.settled();
+  assert(model.tree?.documentUri === markdown.uri.toString() && model.state.kind === 'ready' && labels(roots(model)).join() === markdownRoots,
+    `A webview changed the model tree: ${model.documentUri} ${JSON.stringify(model.state)}`);
   panel.dispose();
-  console.log('PASS: focusing a Markdown file or a webview keeps the last model on screen');
+  console.log('PASS: Java keeps the last model; Markdown follows its host outline without a hierarchy request; a webview keeps that outline');
 
   // Deliberately moving back to the flow retargets; drilling into its ZDL does not.
   await vscode.window.showTextDocument(checkoutDocument);

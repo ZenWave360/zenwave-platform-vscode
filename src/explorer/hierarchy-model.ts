@@ -9,6 +9,8 @@ export interface ExplorerNode {
   /** Unique within one tree: the server `id`, suffixed only if the server repeats one. */
   readonly key: string;
   readonly node: HierarchyNode;
+  /** Where an outline item's name is, as distinct from the full range it contains. */
+  readonly revealRange?: LspRange;
   readonly parent: ExplorerNode | undefined;
   readonly children: readonly ExplorerNode[];
   readonly depth: number;
@@ -37,7 +39,9 @@ export function buildTree(documentUri: string, nodes: readonly HierarchyNode[]):
     size++;
     if (typeof node.sourceUri === 'string' && node.sourceUri.length > 0) sourceUris.add(node.sourceUri);
     const children: ExplorerNode[] = [];
-    const wrapped: ExplorerNode = { key: count === 0 ? base : `${base}~${count}`, node, parent, children, depth };
+    const revealRange = (node as HierarchyNode & { readonly revealRange?: LspRange }).revealRange;
+    const wrapped: ExplorerNode = { key: count === 0 ? base : `${base}~${count}`, node, parent, children, depth,
+      ...(revealRange ? { revealRange } : {}) };
     byKey.set(wrapped.key, wrapped);
     for (const child of Array.isArray(node.children) ? node.children : []) children.push(wrap(child, wrapped, depth + 1));
     return wrapped;
@@ -63,7 +67,12 @@ function compare(a: LspPosition, b: LspPosition): number {
 }
 
 function contains(range: LspRange | undefined, position: LspPosition): boolean {
-  return range !== undefined && compare(range.start, position) <= 0 && compare(position, range.end) <= 0;
+  if (range === undefined || compare(range.start, position) > 0) return false;
+  // Ranges are half-open, so a boundary shared with the next outline symbol belongs to that symbol.
+  // A zero-width range is a point — the server sends these — and still matches that point.
+  return compare(range.start, range.end) === 0
+    ? compare(position, range.end) === 0
+    : compare(position, range.end) < 0;
 }
 
 function extent(range: LspRange): number {
@@ -188,6 +197,8 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
   if (kind === 'manifest' && serverLabel === 'manifest' && item.sourceUri) label = fileName(item.sourceUri);
 
   const details: string[] = [];
+  const outlineDetail = kind === 'outline' ? hint(item, 'detail') : undefined;
+  if (outlineDetail) details.push(outlineDetail);
   if (kind === 'policy' && hint(item, 'command')) details.push(`do ${hint(item, 'command')}`);
   const isResource = kind === 'artifact' || kind === 'doc';
   const version = typeof item.version === 'string' && item.version.length > 0 ? item.version : undefined;
