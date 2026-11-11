@@ -17,6 +17,7 @@ export const ZENWAVE_REQUESTS = {
   eventFlowViews: 'zenwave/eventFlowViews',
   preview: 'zenwave/preview',
   symbolAt: 'zenwave/symbolAt',
+  conceptAt: 'zenwave/conceptAt',
 } as const;
 
 export type ZenwaveRequestMethod = typeof ZENWAVE_REQUESTS[keyof typeof ZENWAVE_REQUESTS];
@@ -28,6 +29,20 @@ export interface RequestIssuer {
 
 export interface LspPosition { readonly line: number; readonly character: number }
 export interface LspRange { readonly start: LspPosition; readonly end: LspPosition }
+
+/** An architectural concept covering the requested position, named by the server. */
+export interface ArchitectureConcept {
+  readonly id: string;
+  readonly kind: string;
+  readonly name: string;
+  readonly identityOrigin: string;
+}
+
+/** The concepts the server found, plus whether its limit omitted further matches. */
+export interface ConceptsAt {
+  readonly concepts: readonly ArchitectureConcept[];
+  readonly truncated: boolean;
+}
 
 export interface RelatedResource {
   readonly targetKind: string;
@@ -212,4 +227,31 @@ export class ZenwaveRequests {
       await this.issuer.request(ZENWAVE_REQUESTS.symbolAt, { textDocument: { uri }, position: { line: position.line, character: position.character } }),
       (value) => value === null || (isObject(value) && typeof value.uri === 'string' && typeof value.semanticId === 'string'));
   }
+
+  /** Architectural concepts covering a document position. Older JVM servers return the concepts array directly. */
+  async conceptAt(uri: string, position: LspPosition): Promise<RequestResult<ConceptsAt>> {
+    const result = await this.issuer.request(ZENWAVE_REQUESTS.conceptAt, { uri, position: { line: position.line, character: position.character } });
+    if (result.kind !== 'ok') return result;
+    const concepts = conceptsAt(result.value);
+    return concepts
+      ? { kind: 'ok', value: concepts }
+      : { kind: 'failed', reason: `Language server answered ${ZENWAVE_REQUESTS.conceptAt} with an unexpected shape` };
+  }
+}
+
+function isConcept(value: unknown): value is ArchitectureConcept {
+  return isObject(value) && typeof value.id === 'string' && typeof value.kind === 'string' &&
+    typeof value.name === 'string' && typeof value.identityOrigin === 'string';
+}
+
+function conceptsAt(value: unknown): ConceptsAt | undefined {
+  // The present JVM adapter returns its `List<ArchitectureConceptRef>` directly.
+  if (Array.isArray(value)) return value.every(isConcept) ? { concepts: value, truncated: false } : undefined;
+  if (!isObject(value) || typeof value.truncated !== 'boolean') return undefined;
+  // `elements` is the core DTO's field. Accept `concepts` as well while the
+  // request is being carried to the JavaScript server.
+  const concepts = Array.isArray(value.elements) ? value.elements : value.concepts;
+  return Array.isArray(concepts) && concepts.every(isConcept)
+    ? { concepts, truncated: value.truncated }
+    : undefined;
 }
