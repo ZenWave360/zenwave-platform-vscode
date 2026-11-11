@@ -253,7 +253,14 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   for (const command of ['zenwave.model.forwardReferences', 'zenwave.model.reverseReferences', 'zenwave.zfl.organizeServices', 'zenwave.zfl.addMissingServices']) {
     assert(commands.includes(command), `${command} was not registered`);
   }
-  assert(!commands.includes('zenwave.model.conceptsAt'), 'conceptsAt must not exist while no server answers it');
+  assert(commands.includes('zenwave.model.conceptsAt'), 'conceptsAt was not registered');
+  assert(!api.advertisedRequests.includes('zenwave/conceptAt'), 'The bundled server unexpectedly advertises conceptAt');
+  const manifest = vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON as {
+    contributes?: { menus?: { commandPalette?: { command?: string; when?: string }[] } };
+  } | undefined;
+  const conceptsMenu = manifest?.contributes?.menus?.commandPalette?.find((item) => item.command === 'zenwave.model.conceptsAt');
+  assert(conceptsMenu?.when?.includes("'zenwave/conceptAt' in zenwave.languageServerRequests"),
+    'conceptsAt must be hidden until the connected server advertises it');
 
   const checkout = await vscode.workspace.openTextDocument(await fixture('lsp/checkout.zfl'));
   await vscode.window.showTextDocument(checkout);

@@ -46,7 +46,29 @@ test('every request the server advertises today has a wrapper sending the wire p
     { method: 'zenwave/preview', params: { textDocument: { uri: 'file:///w/a.zfl' }, sequenceRenderMode: 'SEPARATE_VARIANTS' } },
     { method: 'zenwave/symbolAt', params: { textDocument: { uri: 'file:///w/a.zfl' }, position: { line: 14, character: 30 } } },
   ]);
-  assert.deepEqual(Object.values(ZENWAVE_REQUESTS), json('customRequests.json'));
+  assert.deepEqual(Object.values(ZENWAVE_REQUESTS).filter((method) => method !== ZENWAVE_REQUESTS.conceptAt), json('customRequests.json'));
+});
+
+test('conceptAt sends the cursor position and normalizes several, truncated, empty, and no-architecture answers', async () => {
+  const first = { id: 'architecture://orders', kind: 'service', name: 'Orders', identityOrigin: 'manifest' };
+  const second = { id: 'architecture://orders/create', kind: 'command', name: 'Create Order', identityOrigin: 'model' };
+  const answers: unknown[] = [
+    { elements: [first, second], truncated: true },
+    { concepts: [], truncated: false },
+    [], // The current server's no-architecture result is its legacy empty list.
+  ];
+  const { sent, requests } = issuer(() => ({ kind: 'ok', value: answers.shift() }));
+  assert.deepEqual(await requests.conceptAt('file:///w/orders.zdl', { line: 8, character: 4 }),
+    { kind: 'ok', value: { concepts: [first, second], truncated: true } });
+  assert.deepEqual(await requests.conceptAt('file:///w/orders.zdl', { line: 9, character: 0 }),
+    { kind: 'ok', value: { concepts: [], truncated: false } });
+  assert.deepEqual(await requests.conceptAt('file:///w/no-architecture.zdl', { line: 0, character: 0 }),
+    { kind: 'ok', value: { concepts: [], truncated: false } });
+  assert.deepEqual(sent, [
+    { method: 'zenwave/conceptAt', params: { uri: 'file:///w/orders.zdl', position: { line: 8, character: 4 } } },
+    { method: 'zenwave/conceptAt', params: { uri: 'file:///w/orders.zdl', position: { line: 9, character: 0 } } },
+    { method: 'zenwave/conceptAt', params: { uri: 'file:///w/no-architecture.zdl', position: { line: 0, character: 0 } } },
+  ]);
 });
 
 test('recorded server answers pass through unchanged and unexpected shapes fail', async () => {

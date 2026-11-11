@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { commandAvailability } from '../../src/model/availability.js';
+import { NO_ARCHITECTURE_MESSAGE, presentConceptsAt } from '../../src/model/concepts-at.js';
 import {
   decideOrganize,
   FULL_ORGANIZE_ACCEPT,
@@ -13,7 +14,7 @@ import {
 } from '../../src/model/organize.js';
 import { applyReplacement, minimalReplacement, withLineEnding } from '../../src/model/text-replacement.js';
 
-const ALL = ['zenwave/symbolAt', 'zenwave/forwardReferences', 'zenwave/reverseReferences', 'zenwave/organizeZflServices'];
+const ALL = ['zenwave/symbolAt', 'zenwave/forwardReferences', 'zenwave/reverseReferences', 'zenwave/organizeZflServices', 'zenwave/conceptAt'];
 
 test('availability distinguishes no server, a starting server and a server without the request', () => {
   assert.equal(commandAvailability('Organize', ['zenwave/organizeZflServices'],
@@ -36,6 +37,19 @@ test('availability distinguishes no server, a starting server and a server witho
   assert.equal(older.kind, 'unsupported');
   assert.deepEqual('missing' in older ? older.missing : [], ['zenwave/symbolAt']);
   assert.match('message' in older ? older.message : '', /not supported by the connected ZenWave language server \(0\.0\.9\): it does not offer zenwave\/symbolAt/);
+});
+
+test('concepts-at keeps several and truncated results, distinguishes empty, and explains no architecture', () => {
+  const concepts = [
+    { id: 'architecture://orders', kind: 'service', name: 'Orders', identityOrigin: 'manifest' },
+    { id: 'architecture://orders/create', kind: 'command', name: 'Create Order', identityOrigin: 'model' },
+  ];
+  assert.deepEqual(presentConceptsAt('file:///w/architecture.yml', { concepts, truncated: true }),
+    { kind: 'shown', concepts, truncated: true });
+  assert.deepEqual(presentConceptsAt('file:///w/architecture.yml', { concepts: [], truncated: false }),
+    { kind: 'empty', message: 'The ZenWave language server identifies no architectural concept at this position.' });
+  assert.deepEqual(presentConceptsAt(undefined, { concepts: [], truncated: false }),
+    { kind: 'no-architecture', message: NO_ARCHITECTURE_MESSAGE });
 });
 
 test('a rewrite becomes the smallest replacement that reproduces it', () => {
@@ -81,6 +95,7 @@ test('each model action is offered only with a connected server advertising its 
   const expectations: Record<string, { requests: string[]; language: RegExp; title: string; capability?: RegExp; hidesCapability?: boolean }> = {
     'zenwave.model.forwardReferences': { requests: ['zenwave/symbolAt', 'zenwave/forwardReferences'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, title: 'Go to What This References' },
     'zenwave.model.reverseReferences': { requests: ['zenwave/symbolAt', 'zenwave/reverseReferences'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, title: 'Go to What References This' },
+    'zenwave.model.conceptsAt': { requests: ['zenwave/conceptAt'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, title: 'Show Concepts at Position' },
     'zenwave.zfl.organizeServices': { requests: ['zenwave/organizeZflServices'], language: /editorLangId == zfl/, title: 'Organize ZFL Services in Full', hidesCapability: true },
     'zenwave.zfl.addMissingServices': { requests: ['zenwave/organizeZflServices'], language: /editorLangId == zfl/, title: 'Add Missing ZFL Services', capability: /zenwave\.organizeModesAvailable/ },
   };
@@ -100,8 +115,6 @@ test('each model action is offered only with a connected server advertising its 
       if (expected.hidesCapability) assert.doesNotMatch(when, /zenwave\.organizeModesAvailable/, `${command} in ${menu} stays available on an older server: ${when}`);
     }
   }
-  assert.ok(!manifest.contributes.commands.some((item) => item.command === 'zenwave.model.conceptsAt'),
-    'conceptsAt is not offered while no server answers a concepts-at-a-position request');
 });
 
 /** A document position, counting a CRLF pair as one line break the way the editor does. */

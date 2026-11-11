@@ -301,6 +301,11 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.model.conceptsAt",
+        "title": "Show Concepts at Position",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.model.reverseReferences",
         "title": "Go to What References This",
         "category": "ZenWave"
@@ -531,6 +536,10 @@
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests"
         },
         {
+          "command": "zenwave.model.conceptsAt",
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/conceptAt' in zenwave.languageServerRequests"
+        },
+        {
           "command": "zenwave.zfl.organizeServices",
           "when": "editorLangId == zfl && zenwave.languageServerAvailable && 'zenwave/organizeZflServices' in zenwave.languageServerRequests"
         },
@@ -669,6 +678,11 @@
           "command": "zenwave.model.reverseReferences",
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
           "group": "navigation@91"
+        },
+        {
+          "command": "zenwave.model.conceptsAt",
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/conceptAt' in zenwave.languageServerRequests",
+          "group": "navigation@92"
         },
         {
           "command": "zenwave.zfl.addMissingServices",

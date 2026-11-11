@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
-import { ZENWAVE_REQUESTS, type NavigationTarget } from '../lsp/requests.js';
+import { ZENWAVE_REQUESTS, type ConceptsAt, type NavigationTarget } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import { commandAvailability } from './availability.js';
+import { NO_ARCHITECTURE_MESSAGE, presentConceptsAt } from './concepts-at.js';
 import { presentLocations, toLocation, type PresentedLocations } from './navigation.js';
 import { organizeLenses, resolveOrganize, type AskWarning, type OrganizeAction } from './organize.js';
 import { minimalReplacement, withLineEnding } from './text-replacement.js';
@@ -11,6 +12,7 @@ import { minimalReplacement, withLineEnding } from './text-replacement.js';
 export const MODEL_ACTION_COMMANDS = {
   forwardReferences: 'zenwave.model.forwardReferences',
   reverseReferences: 'zenwave.model.reverseReferences',
+  conceptsAt: 'zenwave.model.conceptsAt',
   /** Full organise. Confirms first; an older server is sent no mode. */
   organizeServices: 'zenwave.zfl.organizeServices',
   /** Add missing. Offered only when the server advertises organize modes. */
@@ -32,6 +34,10 @@ export type OrganizeOutcome =
   | { readonly kind: 'organized' | 'unchanged' | 'cancelled' }
   | { readonly kind: 'not-organizable' | 'no-document' | 'no-server' | 'unsupported' | 'failed'; readonly message: string };
 
+export type ConceptsAtOutcome =
+  | { readonly kind: 'shown' | 'empty' | 'no-architecture'; readonly concepts?: ConceptsAt['concepts'] }
+  | { readonly kind: 'no-document' | 'no-server' | 'unsupported' | 'failed'; readonly message: string };
+
 type Direction = 'forwardReferences' | 'reverseReferences';
 
 const FEATURE: Record<Direction | OrganizeAction, string> = {
@@ -40,6 +46,8 @@ const FEATURE: Record<Direction | OrganizeAction, string> = {
   full: 'Organize ZFL services',
   additive: 'Add missing ZFL services',
 };
+
+const CONCEPTS_FEATURE = 'Show concepts at this position';
 
 /** CodeLens above a ZFL `systems` block. Empty until a server that organises services is connected. */
 class OrganizeCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
@@ -268,6 +276,50 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     return { kind: 'organized' };
   }
 
+  async function conceptsAt(uriArgument?: unknown, positionArgument?: unknown): Promise<ConceptsAtOutcome> {
+    const uri = uriArgument instanceof vscode.Uri ? uriArgument : undefined;
+    const editor = editorFor(uri);
+    const document = editor?.document ?? (uri ? await vscode.workspace.openTextDocument(uri) : undefined);
+    if (!document || !MODEL_LANGUAGES.has(document.languageId)) {
+      return report('no-document', `${CONCEPTS_FEATURE} works on a ZDL or ZFL document.`, 'info');
+    }
+    const position = isPosition(positionArgument)
+      ? new vscode.Position(positionArgument.line, positionArgument.character)
+      : editor?.selection.active;
+    if (!position) return report('no-document', `${CONCEPTS_FEATURE} needs a position in the document.`, 'info');
+    const problem = unavailable(CONCEPTS_FEATURE, [ZENWAVE_REQUESTS.conceptAt]);
+    if (problem) return problem;
+    // The client starts the server with this resolved manifest, so this is the
+    // distinguishable no-architecture case before an empty server answer.
+    if (!server.manifest.manifestUri) {
+      logger.info(NO_ARCHITECTURE_MESSAGE);
+      void vscode.window.showInformationMessage(NO_ARCHITECTURE_MESSAGE);
+      return { kind: 'no-architecture' };
+    }
+    const result = await server.requests.conceptAt(document.uri.toString(), { line: position.line, character: position.character });
+    if (result.kind !== 'ok') return requestProblem(CONCEPTS_FEATURE, result);
+    const presentation = presentConceptsAt(server.manifest.manifestUri, result.value);
+    if (presentation.kind === 'no-architecture') {
+      logger.info(presentation.message);
+      void vscode.window.showInformationMessage(presentation.message);
+      return { kind: 'no-architecture' };
+    }
+    if (presentation.kind === 'empty') {
+      logger.info(presentation.message);
+      void vscode.window.showInformationMessage(presentation.message);
+      return { kind: 'empty', concepts: result.value.concepts };
+    }
+    await vscode.window.showQuickPick(presentation.concepts.map((concept) => ({
+      label: concept.name,
+      description: concept.kind,
+    })), {
+      title: 'ZenWave Concepts at Position',
+      ...(presentation.truncated ? { placeHolder: 'More matching concepts exist; this list is incomplete.' } : {}),
+    });
+    logger.debug(`${CONCEPTS_FEATURE}: ${result.value.concepts.length} concept(s)${result.value.truncated ? ' (truncated)' : ''}`);
+    return { kind: 'shown', concepts: result.value.concepts };
+  }
+
   function unsupportedMode(feature: string): { kind: 'unsupported'; message: string } {
     const version = server.serverInfo?.version;
     const connected = version ? `ZenWave language server (${version})` : 'ZenWave language server';
@@ -284,6 +336,8 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
       (uri?: unknown, position?: unknown) => followReferences('forwardReferences', uri, position)),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.reverseReferences,
       (uri?: unknown, position?: unknown, semanticId?: unknown) => followReferences('reverseReferences', uri, position, semanticId)),
+    vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.conceptsAt,
+      (uri?: unknown, position?: unknown) => conceptsAt(uri, position)),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.organizeServices,
       (uri?: unknown) => organizeServices('full', uri)),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.addMissingServices,
