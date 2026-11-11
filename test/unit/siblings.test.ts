@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 // @ts-expect-error A build script without type declarations.
-import { linkedSiblings, linkSiblings } from '../../scripts/siblings.mjs';
+import { linkedSiblingVersionProblems, linkedSiblings, linkSiblings } from '../../scripts/siblings.mjs';
 // @ts-expect-error A build script without type declarations.
 import { SIBLING_BUILDS, siblingBuildCommand } from '../../scripts/build-siblings.mjs';
 
@@ -29,6 +29,10 @@ function buildDslSibling(name = DSL): void {
 
 function installedVersion(): string {
   return JSON.parse(readFileSync(join(root, 'node_modules/@zenwave360/dsl/package.json'), 'utf8')).version;
+}
+
+function manifest(version = '1.10.0'): Record<string, unknown> {
+  return { dependencies: { [DSL]: version } };
 }
 
 beforeEach(() => {
@@ -137,4 +141,46 @@ test('opting out leaves the registry package, and removes a link but not what it
   assert.deepEqual(linkedSiblings(root), []);
   assert.equal(existsSync(join(root, 'node_modules/@zenwave360/dsl')), false);
   assert.ok(lstatSync(join(workspace, 'dsl-kotlin/build/js/packages/dsl-kotlin/package.json')).isFile());
+});
+
+test('a package may package a linked sibling when its version exactly matches the pin', () => {
+  buildDslSibling();
+  linkSiblings(root, {});
+
+  assert.deepEqual(linkedSiblingVersionProblems(manifest('1.11.0-next.0'), root), []);
+});
+
+test('a linked sibling whose version differs from its pin explains how to restore registry dependencies', () => {
+  buildDslSibling();
+  linkSiblings(root, {});
+
+  const problems = linkedSiblingVersionProblems(manifest(), root);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /@zenwave360\/dsl/);
+  assert.match(problems[0], /\.\.\/dsl-kotlin\/build\/js\/packages\/dsl-kotlin/);
+  assert.match(problems[0], /version 1\.11\.0-next\.0/);
+  assert.match(problems[0], /pins 1\.10\.0/);
+  assert.match(problems[0], /ZENWAVE_USE_LOCAL_DEPENDENCIES=false then npm ci/);
+});
+
+test('a sibling uses its ZenWave manifest blocks as package pins', () => {
+  buildDslSibling();
+  linkSiblings(root, {});
+  const languageServerManifest = {
+    zenwaveLanguageServer: { package: DSL, version: '1.10.0' },
+  };
+
+  assert.match(linkedSiblingVersionProblems(languageServerManifest, root)[0], /pins 1\.10\.0/);
+  assert.deepEqual(
+    linkedSiblingVersionProblems({ zenwaveLanguageServer: { package: DSL, version: '1.11.0-next.0' } }, root),
+    [],
+  );
+  const eventFlowManifest = {
+    zenwaveEventFlowWebview: { package: DSL, version: '1.10.0' },
+  };
+  assert.match(linkedSiblingVersionProblems(eventFlowManifest, root)[0], /pins 1\.10\.0/);
+  assert.deepEqual(
+    linkedSiblingVersionProblems({ zenwaveEventFlowWebview: { package: DSL, version: '1.11.0-next.0' } }, root),
+    [],
+  );
 });
