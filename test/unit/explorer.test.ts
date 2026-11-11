@@ -68,6 +68,47 @@ test('nodes present in this client vocabulary, and a kind released later still r
   assert.equal(presentNode(manifest.roots[0]!.children[0]!, MANIFEST).label, 'orders');
 });
 
+test('an Arcadia architecture hierarchy keeps resources lazy, typed and visibly pending where the server says so', () => {
+  const tree = buildTree(MANIFEST, sample('hierarchy-arcadia-manifest.json'));
+  const domain = findNode(tree, byLabel('architecture', 'domain'))!;
+  const subdomain = findNode(tree, byLabel('catalogue', 'subdomain'))!;
+  const emptyDomain = findNode(tree, byLabel('empty-domain', 'domain'))!;
+  assert.ok(domain.children.some(byLabel('Docs', 'docs')), 'a domain with docs is kept even without a version');
+  assert.ok(subdomain.children.some(byLabel('Docs', 'docs')), 'a subdomain with docs remains a node');
+  assert.equal(emptyDomain.children.length, 0, 'a domain without services is not dropped');
+
+  const artifacts = presentNode(findNode(tree, byLabel('Artifacts', 'artifacts'))!, MANIFEST);
+  const docs = presentNode(findNode(tree, byLabel('Docs', 'docs'))!, MANIFEST);
+  const consumers = presentNode(findNode(tree, byLabel('Consumers', 'consumers'))!, MANIFEST);
+  assert.deepEqual([artifacts.icon, docs.icon, consumers.icon], ['package', 'book', 'organization']);
+
+  const openapi = presentNode(findNode(tree, byLabel('apis/catalog.yml', 'artifact'))!, MANIFEST);
+  assert.deepEqual([openapi.icon, openapi.description, openapi.address, openapi.disabled], [
+    'symbol-interface',
+    'apis/catalog.yml · 1.2.3',
+    'zenwave:/architecture/catalogue/1.2.3/apis/catalog.yml',
+    false,
+  ]);
+  const absolute = presentNode(findNode(tree, byLabel('https://schemas.arcadia.example/catalog/openapi.yml', 'artifact'))!, MANIFEST);
+  assert.equal(absolute.label, 'https://schemas.arcadia.example/catalog/openapi.yml', 'an absolute URI is shown as the server labelled it');
+  assert.equal(absolute.description, 'https://schemas.arcadia.example/catalog/openapi.yml · 2026.11');
+
+  const unversionedDoc = presentNode(findNode(tree, byLabel('README.md', 'doc'))!, MANIFEST);
+  assert.deepEqual([unversionedDoc.description, unversionedDoc.address], ['README.md', 'zenwave:/architecture/-/README.md']);
+  assert.ok(!unversionedDoc.description?.includes('undefined'), 'an unversioned document does not acquire a synthetic version');
+
+  const glob = presentNode(findNode(tree, byLabel('contracts/**/*.yaml', 'artifact'))!, MANIFEST);
+  assert.equal(glob.description, 'contracts/**/*.yaml · 2.0.0 · pending (phase 2)');
+  assert.equal(glob.disabled, true);
+  assert.equal(glob.address, undefined, 'folder and glob resources cannot be opened before phase 2');
+  assert.match(glob.tooltip, /Pending \(phase 2\): Folder and glob entries are not supported/);
+
+  const consumer = presentNode(findNode(tree, byLabel('Arcadia storefront', 'consumer'))!, MANIFEST);
+  assert.deepEqual([consumer.label, consumer.address, consumer.disabled], ['Arcadia storefront', undefined, false], 'consumers are plain text');
+  const unknown = presentNode(findNode(tree, byLabel('Release notes', 'future-resource'))!, MANIFEST);
+  assert.deepEqual([unknown.label, unknown.icon], ['Release notes', NEUTRAL_ICON], 'a future kind remains visible');
+});
+
 test('the node at a cursor is the narrowest declaration containing it, in the document the cursor is in', () => {
   const tree = buildTree(FLOW, sample('hierarchy-unopened-zfl.json'));
   assert.equal(nodeAt(tree, FLOW, { line: 21, character: 8 })?.node.kind, 'policy', 'the when block, not a part repeated under it');
@@ -193,7 +234,7 @@ test('the container, both views, activation and an explanation for every empty s
       viewsContainers: { activitybar: { id: string; icon: string }[] };
       views: Record<string, { id: string; name: string }[]>;
       viewsWelcome: { view: string; contents: string; when: string }[];
-      menus: Record<string, { command: string; when?: string }[]>;
+      menus: Record<string, { command: string; when?: string; group?: string }[]>;
     };
   };
   const { contributes } = manifest;
@@ -217,8 +258,10 @@ test('the container, both views, activation and an explanation for every empty s
   assert.ok((references?.when ?? '').includes("'zenwave/symbolAt' in zenwave.languageServerRequests"));
   assert.ok((references?.when ?? '').includes("'zenwave/reverseReferences' in zenwave.languageServerRequests"));
   assert.equal(references?.group, 'inline@2');
+  const refresh = contributes.menus['view/title']?.find((entry) => entry.command === 'zenwave.explorer.refresh');
+  assert.deepEqual([refresh?.when, refresh?.group], ['view == zenwave.architecture || view == zenwave.model', 'navigation']);
   const palette = Object.fromEntries((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
-  for (const command of ['zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences']) {
+  for (const command of ['zenwave.explorer.openNode', 'zenwave.explorer.openResource', 'zenwave.explorer.openRelated', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences']) {
     assert.equal(palette[command], 'false', `${command} is reachable from the Command Palette`);
   }
   assertMenuMarkers(contributes.menus);

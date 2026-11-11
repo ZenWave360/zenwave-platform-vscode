@@ -18,6 +18,7 @@ export const EXPLORER_VIEWS = {
 export const EXPLORER_COMMANDS = {
   refresh: 'zenwave.explorer.refresh',
   openNode: 'zenwave.explorer.openNode',
+  openResource: 'zenwave.explorer.openResource',
   goToDefinition: 'zenwave.explorer.goToDefinition',
   goToReferences: 'zenwave.explorer.goToReferences',
   openRelated: 'zenwave.explorer.openRelated',
@@ -80,6 +81,8 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
   renders = 0;
   private generation = 0;
   private logged: { state: TreeState; uri: string | undefined } | undefined;
+  /** Resource-open failures survive tree rendering until the user explicitly refreshes. */
+  private readonly openWarnings = new Map<string, string>();
 
   constructor(
     private readonly name: string,
@@ -103,10 +106,14 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
       : vscode.TreeItemCollapsibleState.None);
     item.id = element.key;
     if (presentation.description) item.description = presentation.description;
-    item.tooltip = presentation.tooltip;
-    item.iconPath = new vscode.ThemeIcon(presentation.icon);
+    const warning = this.openWarnings.get(element.key);
+    item.tooltip = warning ? `${presentation.tooltip}\n\nWarning: ${warning}` : presentation.tooltip;
+    item.iconPath = new vscode.ThemeIcon(warning ? 'warning' : presentation.icon,
+      presentation.disabled ? new vscode.ThemeColor('disabledForeground') : undefined);
     item.contextValue = presentation.contextValue;
-    if (element.node.sourceUri) {
+    if (presentation.address) {
+      item.command = { command: EXPLORER_COMMANDS.openResource, title: 'Open Architecture Resource', arguments: [element] };
+    } else if (element.node.kind !== 'artifact' && element.node.kind !== 'doc' && element.node.kind !== 'consumer' && element.node.sourceUri) {
       item.command = { command: EXPLORER_COMMANDS.openNode, title: 'Go to Declaration', arguments: [element] };
     }
     return item;
@@ -120,6 +127,23 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
     // An element the view still holds from before a refresh answers with the current tree's parent.
     const current = this.tree?.byKey.get(element.key) ?? element;
     return current.parent;
+  }
+
+  /** The title-bar refresh deliberately clears resource warnings before re-asking the hierarchy. */
+  manualRefresh(): void {
+    this.openWarnings.clear();
+    this.changed.fire(undefined);
+    this.refresher.request(SWITCH_DELAY_MS);
+  }
+
+  async openResource(element: unknown): Promise<void> {
+    const explorerNode = element as ExplorerNode | undefined;
+    const presentation = explorerNode ? presentNode(explorerNode, this.tree?.documentUri ?? '') : undefined;
+    if (!explorerNode || !presentation?.address) return;
+    const outcome = await this.server.openResource(presentation.address);
+    if (outcome.kind === 'opened') return;
+    this.openWarnings.set(explorerNode.key, outcome.message);
+    this.changed.fire(explorerNode);
   }
 
   private async load(): Promise<void> {
@@ -185,7 +209,7 @@ function api(tree: HierarchyTree, documentUri: () => string | undefined): Hierar
     provider: tree,
     get stats() { return { requests: tree.requests, renders: tree.renders }; },
     settled: () => tree.refresher.idle(),
-    refresh: () => tree.refresher.request(SWITCH_DELAY_MS),
+    refresh: () => tree.manualRefresh(),
   };
 }
 
@@ -268,6 +292,12 @@ export function registerModelExplorer(
     watchManifest();
     architecture.refresher.request(SWITCH_DELAY_MS);
     model.refresher.request(SWITCH_DELAY_MS);
+  }
+
+  function manualRefreshAll(): void {
+    watchManifest();
+    architecture.manualRefresh();
+    model.manualRefresh();
   }
 
   let revealTimer: ReturnType<typeof setTimeout> | undefined;
@@ -363,8 +393,9 @@ export function registerModelExplorer(
       void reflectSelection(diagramPanels, model.tree?.documentUri, selected ? selected.node.viewNodeIds ?? [] : undefined)
         .then((reflection) => { lastReflection = reflection; });
     }),
-    vscode.commands.registerCommand(EXPLORER_COMMANDS.refresh, () => refreshAll()),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.refresh, () => manualRefreshAll()),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openNode, openNode),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.openResource, (element: unknown) => architecture.openResource(element)),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.goToDefinition, openNode),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, (element: unknown) => {
       const item = (element as ExplorerNode | undefined)?.node;

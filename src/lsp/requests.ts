@@ -86,6 +86,12 @@ export interface HierarchyNode {
   readonly uiHints: Readonly<Record<string, unknown>>;
   /** Ids of the same document's `zenwave/eventFlowViews` nodes and groups; empty when none. */
   readonly viewNodeIds: readonly string[];
+  /** Manifest resource version, when the declaration has one. */
+  readonly version?: string;
+  /** Server-owned `zenwave:` address for an architecture resource. */
+  readonly address?: string;
+  /** Why this manifest entry is visible but cannot be opened yet. */
+  readonly disabledReason?: string;
 }
 
 /** A view model as the server produced it; `schema` names its shape. */

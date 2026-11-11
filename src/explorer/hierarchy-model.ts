@@ -92,6 +92,12 @@ const KIND_ICONS: Readonly<Record<string, string>> = {
   manifest: 'book',
   domain: 'symbol-namespace',
   subdomain: 'symbol-module',
+  artifacts: 'package',
+  docs: 'book',
+  consumers: 'organization',
+  artifact: 'file',
+  doc: 'markdown',
+  consumer: 'person',
   section: 'list-tree',
   document: 'file-code',
   system: 'server-environment',
@@ -112,6 +118,14 @@ const KIND_ICONS: Readonly<Record<string, string>> = {
   field: 'symbol-field',
 };
 
+const ARTIFACT_TYPE_ICONS: Readonly<Record<string, string>> = {
+  openapi: 'symbol-interface',
+  asyncapi: 'symbol-event',
+  avro: 'symbol-structure',
+  zdl: 'symbol-class',
+  zfl: 'type-hierarchy',
+};
+
 export const NEUTRAL_ICON = 'circle-small';
 
 export interface NodePresentation {
@@ -121,6 +135,10 @@ export interface NodePresentation {
   readonly icon: string;
   readonly contextValue: string;
   readonly collapsible: boolean;
+  /** A server-owned architecture resource address, if this entry can be opened. */
+  readonly address?: string;
+  /** An entry the server deliberately exposed but which this client must not open. */
+  readonly disabled: boolean;
 }
 
 export function fileName(uri: string): string {
@@ -171,8 +189,19 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
 
   const details: string[] = [];
   if (kind === 'policy' && hint(item, 'command')) details.push(`do ${hint(item, 'command')}`);
+  const isResource = kind === 'artifact' || kind === 'doc';
+  const version = typeof item.version === 'string' && item.version.length > 0 ? item.version : undefined;
+  const disabledReason = typeof item.disabledReason === 'string' && item.disabledReason.length > 0 ? item.disabledReason : undefined;
+  const address = typeof item.address === 'string' && item.address.length > 0 ? item.address : undefined;
+  // Manifest resource labels are paths (or an absolute URI). Preserve them as
+  // the server gave them and repeat them in the compact path/version detail.
+  if (isResource) {
+    details.push(serverLabel);
+    if (version) details.push(version);
+    if (disabledReason) details.push('pending (phase 2)');
+  }
   const elsewhere = item.sourceUri && item.sourceUri !== treeDocumentUri ? fileName(item.sourceUri) : undefined;
-  if (elsewhere) details.push(elsewhere);
+  if (elsewhere && !isResource) details.push(elsewhere);
 
   const related = Array.isArray(item.relatedResources) && item.relatedResources.length > 0;
   const tooltipLines = [`${kind} ${serverLabel}`];
@@ -180,6 +209,7 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
   const events = hint(item, 'events');
   if (events) tooltipLines.push(`Emits ${events.split(',').join(', ')}`);
   if (related) tooltipLines.push(`${item.relatedResources.length} related resource${item.relatedResources.length === 1 ? '' : 's'}`);
+  if (disabledReason) tooltipLines.push(`Pending (phase 2): ${disabledReason}`);
 
   // Named concepts a user can open. `service` and `event` also occur under a `policy` or an `outcome`,
   // where they repeat the parent's range and name a reference, not a declaration. `relationship` is a bucket.
@@ -192,7 +222,9 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
     label,
     ...(details.length > 0 ? { description: details.join(' · ') } : {}),
     tooltip: tooltipLines.join('\n'),
-    icon: KIND_ICONS[kind] ?? NEUTRAL_ICON,
+    icon: kind === 'artifact'
+      ? ARTIFACT_TYPE_ICONS[hint(item, 'type') ?? ''] ?? KIND_ICONS.artifact ?? NEUTRAL_ICON
+      : KIND_ICONS[kind] ?? NEUTRAL_ICON,
     contextValue: [
       `zenwave.hierarchy.${kind.replace(/[^A-Za-z0-9-]/g, '_')}`,
       related ? 'related' : '',
@@ -200,5 +232,7 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
       references ? 'references' : '',
     ].filter((part) => part.length > 0).join('.'),
     collapsible: node.children.length > 0,
+    ...(address && !disabledReason ? { address } : {}),
+    disabled: disabledReason !== undefined,
   };
 }

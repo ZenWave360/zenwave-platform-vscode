@@ -1,0 +1,244 @@
+{
+  "request": {
+    "method": "zenwave/hierarchy",
+    "params": { "uri": "file:///workspace/zenwave-architecture.yml" }
+  },
+  "result": [
+    {
+      "id": "file:///workspace/zenwave-architecture.yml#manifest",
+      "label": "manifest",
+      "kind": "manifest",
+      "language": "manifest",
+      "sourceUri": "file:///workspace/zenwave-architecture.yml",
+      "sourceRange": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+      "children": [
+        {
+          "id": "#domains.architecture",
+          "label": "architecture",
+          "kind": "domain",
+          "language": "manifest",
+          "sourceUri": "file:///workspace/zenwave-architecture.yml",
+          "sourceRange": { "start": { "line": 2, "character": 2 }, "end": { "line": 30, "character": 0 } },
+          "children": [
+            {
+              "id": "#domains.architecture.docs",
+              "label": "Docs",
+              "kind": "docs",
+              "language": "manifest",
+              "sourceUri": "file:///workspace/zenwave-architecture.yml",
+              "sourceRange": { "start": { "line": 3, "character": 4 }, "end": { "line": 5, "character": 0 } },
+              "children": [
+                {
+                  "id": "#domains.architecture.docs.readme",
+                  "label": "README.md",
+                  "kind": "doc",
+                  "language": "manifest",
+                  "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                  "sourceRange": { "start": { "line": 4, "character": 6 }, "end": { "line": 4, "character": 30 } },
+                  "children": [],
+                  "relatedResources": [],
+                  "uiHints": { "key": "readme" },
+                  "viewNodeIds": [],
+                  "address": "zenwave:/architecture/-/README.md"
+                }
+              ],
+              "relatedResources": [],
+              "uiHints": {},
+              "viewNodeIds": []
+            },
+            {
+              "id": "#domains.architecture.subdomains.catalogue",
+              "label": "catalogue",
+              "kind": "subdomain",
+              "language": "manifest",
+              "sourceUri": "file:///workspace/zenwave-architecture.yml",
+              "sourceRange": { "start": { "line": 6, "character": 4 }, "end": { "line": 28, "character": 0 } },
+              "children": [
+                {
+                  "id": "#domains.architecture.subdomains.catalogue.docs",
+                  "label": "Docs",
+                  "kind": "docs",
+                  "language": "manifest",
+                  "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                  "sourceRange": { "start": { "line": 7, "character": 6 }, "end": { "line": 9, "character": 0 } },
+                  "children": [
+                    {
+                      "id": "#domains.architecture.subdomains.catalogue.docs.guide",
+                      "label": "docs/guide.md",
+                      "kind": "doc",
+                      "language": "manifest",
+                      "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                      "sourceRange": { "start": { "line": 8, "character": 8 }, "end": { "line": 8, "character": 35 } },
+                      "children": [],
+                      "relatedResources": [],
+                      "uiHints": { "key": "guide" },
+                      "viewNodeIds": [],
+                      "address": "zenwave:/architecture/catalogue/-/docs/guide.md"
+                    }
+                  ],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": []
+                },
+                {
+                  "id": "#domains.architecture.subdomains.catalogue.services.catalog-api",
+                  "label": "catalog-api",
+                  "kind": "service",
+                  "language": "manifest",
+                  "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                  "sourceRange": { "start": { "line": 10, "character": 6 }, "end": { "line": 27, "character": 0 } },
+                  "children": [
+                    {
+                      "id": "#catalog-api.artifacts",
+                      "label": "Artifacts",
+                      "kind": "artifacts",
+                      "language": "manifest",
+                      "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                      "sourceRange": { "start": { "line": 11, "character": 8 }, "end": { "line": 17, "character": 0 } },
+                      "children": [
+                        {
+                          "id": "#catalog-api.artifacts.0",
+                          "label": "apis/catalog.yml",
+                          "kind": "artifact",
+                          "language": "manifest",
+                          "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                          "sourceRange": { "start": { "line": 12, "character": 10 }, "end": { "line": 12, "character": 55 } },
+                          "children": [],
+                          "relatedResources": [],
+                          "uiHints": { "type": "openapi" },
+                          "viewNodeIds": [],
+                          "version": "1.2.3",
+                          "address": "zenwave:/architecture/catalogue/1.2.3/apis/catalog.yml"
+                        },
+                        {
+                          "id": "#catalog-api.artifacts.1",
+                          "label": "contracts/**/*.yaml",
+                          "kind": "artifact",
+                          "language": "manifest",
+                          "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                          "sourceRange": { "start": { "line": 13, "character": 10 }, "end": { "line": 13, "character": 58 } },
+                          "children": [],
+                          "relatedResources": [],
+                          "uiHints": { "type": "asyncapi" },
+                          "viewNodeIds": [],
+                          "version": "2.0.0",
+                          "address": "zenwave:/architecture/catalogue/2.0.0/contracts/**/*.yaml",
+                          "disabledReason": "Folder and glob entries are not supported"
+                        },
+                        {
+                          "id": "#catalog-api.artifacts.2",
+                          "label": "https://schemas.arcadia.example/catalog/openapi.yml",
+                          "kind": "artifact",
+                          "language": "manifest",
+                          "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                          "sourceRange": { "start": { "line": 14, "character": 10 }, "end": { "line": 14, "character": 78 } },
+                          "children": [],
+                          "relatedResources": [],
+                          "uiHints": { "type": "openapi" },
+                          "viewNodeIds": [],
+                          "version": "2026.11",
+                          "address": "zenwave:/architecture/catalogue/2026.11/absolute-uri"
+                        }
+                      ],
+                      "relatedResources": [],
+                      "uiHints": {},
+                      "viewNodeIds": []
+                    },
+                    {
+                      "id": "#catalog-api.docs",
+                      "label": "Docs",
+                      "kind": "docs",
+                      "language": "manifest",
+                      "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                      "sourceRange": { "start": { "line": 18, "character": 8 }, "end": { "line": 20, "character": 0 } },
+                      "children": [
+                        {
+                          "id": "#catalog-api.docs.overview",
+                          "label": "docs/overview.md",
+                          "kind": "doc",
+                          "language": "manifest",
+                          "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                          "sourceRange": { "start": { "line": 19, "character": 10 }, "end": { "line": 19, "character": 45 } },
+                          "children": [],
+                          "relatedResources": [],
+                          "uiHints": { "key": "overview" },
+                          "viewNodeIds": [],
+                          "version": "1.2.3",
+                          "address": "zenwave:/architecture/catalogue/1.2.3/docs/overview.md"
+                        }
+                      ],
+                      "relatedResources": [],
+                      "uiHints": {},
+                      "viewNodeIds": []
+                    },
+                    {
+                      "id": "#catalog-api.consumers",
+                      "label": "Consumers",
+                      "kind": "consumers",
+                      "language": "manifest",
+                      "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                      "sourceRange": { "start": { "line": 21, "character": 8 }, "end": { "line": 23, "character": 0 } },
+                      "children": [
+                        {
+                          "id": "#catalog-api.consumers.0",
+                          "label": "Arcadia storefront",
+                          "kind": "consumer",
+                          "language": "manifest",
+                          "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                          "sourceRange": { "start": { "line": 22, "character": 10 }, "end": { "line": 22, "character": 31 } },
+                          "children": [],
+                          "relatedResources": [],
+                          "uiHints": {},
+                          "viewNodeIds": []
+                        }
+                      ],
+                      "relatedResources": [],
+                      "uiHints": {},
+                      "viewNodeIds": []
+                    },
+                    {
+                      "id": "#catalog-api.future",
+                      "label": "Release notes",
+                      "kind": "future-resource",
+                      "language": "manifest",
+                      "sourceUri": "file:///workspace/zenwave-architecture.yml",
+                      "sourceRange": { "start": { "line": 24, "character": 8 }, "end": { "line": 24, "character": 31 } },
+                      "children": [],
+                      "relatedResources": [],
+                      "uiHints": {},
+                      "viewNodeIds": []
+                    }
+                  ],
+                  "relatedResources": [],
+                  "uiHints": {},
+                  "viewNodeIds": []
+                }
+              ],
+              "relatedResources": [],
+              "uiHints": {},
+              "viewNodeIds": []
+            },
+            {
+              "id": "#domains.empty",
+              "label": "empty-domain",
+              "kind": "domain",
+              "language": "manifest",
+              "sourceUri": "file:///workspace/zenwave-architecture.yml",
+              "sourceRange": { "start": { "line": 31, "character": 2 }, "end": { "line": 32, "character": 0 } },
+              "children": [],
+              "relatedResources": [],
+              "uiHints": {},
+              "viewNodeIds": []
+            }
+          ],
+          "relatedResources": [],
+          "uiHints": {},
+          "viewNodeIds": []
+        }
+      ],
+      "relatedResources": [],
+      "uiHints": {},
+      "viewNodeIds": []
+    }
+  ]
+}

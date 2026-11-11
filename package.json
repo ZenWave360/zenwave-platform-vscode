@@ -343,6 +343,11 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.explorer.openResource",
+        "title": "Open Architecture Resource",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.explorer.goToDefinition",
         "title": "Go to Definition",
         "category": "ZenWave",
@@ -571,6 +576,10 @@
         },
         {
           "command": "zenwave.explorer.openNode",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.explorer.openResource",
           "when": "false"
         },
         {
