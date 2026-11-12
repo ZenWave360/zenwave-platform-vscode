@@ -124,27 +124,54 @@ export function isApiDescription(text: string, languageId: string): boolean {
   return languageId === 'json' || languageId === 'jsonc' ? jsonHasApiDescriptionKey(prefix) : false;
 }
 
-/** A tab that may hold the document the Model tree should show. */
+/**
+ * A tab that may hold the document the Model tree should show.
+ * `uri` is absent for a webview, a diff, a terminal or a notebook: the tab is still
+ * the focus, and it must not be treated as "no tab".
+ */
 export interface FocusedTab {
-  readonly uri: UriLike;
-  /** A diagram or preview (`TabInputCustom`), rather than a text tab. */
+  readonly uri?: UriLike;
+  /** A diagram, preview, image or other non-text tab (`TabInputCustom` or a webview). */
   readonly customEditor: boolean;
-  readonly languageId: string | undefined;
+  readonly languageId?: string;
+  /** Opening text of a text tab, from that tab's document, for the API-description check. */
+  readonly text?: string;
 }
 
 /**
- * The document the Model tree should show for the current focus.
+ * The document the Model tree should show for the current focus (ME-R3).
  *
- * A focused diagram or preview wins over `activeTextEditor`: that editor stays
- * on a text document in another group, or is undefined, while the custom editor
- * has focus. A text editor then contributes its own target. Anything else —
- * a webview, a diff, Java, ordinary YAML — leaves the current model in place.
+ * The active tab decides. A text tab contributes its own document. A ZenWave
+ * custom editor of a model document contributes that document. Any other custom
+ * editor, webview or image keeps the current tree: a text editor left active in
+ * another group is not the focus. `text` is used only when the editor reported
+ * no active tab.
  */
 export function focusedTreeTarget(text: TextDocumentTarget | undefined, tab: FocusedTab | undefined): TextDocumentTarget | undefined {
-  if (tab?.customEditor && isModelDocument(tab.uri, tab.languageId)) return { uri: tab.uri.toString(), source: 'server' };
-  if (text) return text;
-  if (tab && !tab.customEditor && isModelDocument(tab.uri, tab.languageId)) return { uri: tab.uri.toString(), source: 'server' };
+  if (!tab) return text;
+  if (!tab.customEditor && tab.uri) {
+    if (tab.languageId !== undefined) return targetForTextDocument(tab.uri, tab.languageId, tab.text ?? '');
+    return isModelDocument(tab.uri, undefined) ? { uri: tab.uri.toString(), source: 'server' } : undefined;
+  }
+  if (tab.uri && isModelDocument(tab.uri, tab.languageId)) return { uri: tab.uri.toString(), source: 'server' };
   return undefined;
+}
+
+/**
+ * An edit of a text document, after the quiet period. The tree moves onto the
+ * host outline only when this is the active document and it now qualifies.
+ * A document that stops qualifying, or an edit that is not the active document,
+ * leaves the current tree in place.
+ */
+export function outlineRetarget(
+  shown: { readonly uri: string; readonly source: ModelTreeSource } | undefined,
+  edit: { readonly active: boolean; readonly uri: UriLike; readonly languageId: string; readonly text: string },
+): TextDocumentTarget | undefined {
+  if (!edit.active) return undefined;
+  const target = targetForTextDocument(edit.uri, edit.languageId, edit.text);
+  if (target?.source !== 'outline') return undefined;
+  if (shown?.uri === target.uri && shown.source === target.source) return undefined;
+  return target;
 }
 
 export type FollowDecision = 'retarget' | 'keep';

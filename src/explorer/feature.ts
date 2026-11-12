@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
-import { isRemoteManifest, manifestDocumentUri } from '../lsp/manifest-resolution.js';
+import { manifestDocument } from '../lsp/manifest.js';
+import { isRemoteManifest } from '../lsp/manifest-resolution.js';
 import { openLocation, toLocation } from '../model/navigation.js';
 import { CoalescedRefresh } from './coalesce.js';
 import { loadDocumentOutline, type DocumentOutlineSymbol } from './document-symbols.js';
 import { DiagramPanels, reflectSelection, type SelectionReflection } from './diagram-selection.js';
-import { focusedTreeTarget, followDecision, tabDocumentUri, targetForTextDocument, type ModelTreeSource, type OutlineKind } from './follow.js';
+import { focusedTreeTarget, followDecision, outlineRetarget, tabDocumentUri, targetForTextDocument, type FocusedTab, type ModelTreeSource, type OutlineKind, type TextDocumentTarget } from './follow.js';
 import { buildTree, fileName, nodeAt, presentNode, type ExplorerNode, type ExplorerTree } from './hierarchy-model.js';
 import { describeState, sameState, serverUnavailable, stateFromResult, type TreeState } from './tree-state.js';
 import { LatestLoad } from './latest-load.js';
@@ -311,9 +312,6 @@ export function registerModelExplorer(
   }
   let lastReflection: SelectionReflection | undefined;
 
-  const openDocumentLanguage = (uri: string): string | undefined =>
-    vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.languageId;
-
   /** Reads only enough of a structured document to identify an API description. */
   const outlineProbe = (document: vscode.TextDocument): string => {
     const lastLine = Math.min(document.lineCount - 1, 49);
@@ -321,20 +319,38 @@ export function registerModelExplorer(
     return document.getText(new vscode.Range(0, 0, end.line, end.character)).slice(0, 4 * 1024);
   };
 
+  /**
+   * The active tab, including one that holds no model document. A webview has no
+   * uri; it is still the focus, so the text editor in another group is not used.
+   */
+  function describeFocusedTab(input: unknown): FocusedTab {
+    const uri = tabDocumentUri(input);
+    if (uri && isPlainTextTab(input)) {
+      const document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
+      return document
+        ? { uri, customEditor: false, languageId: document.languageId, text: outlineProbe(document) }
+        : { uri, customEditor: false };
+    }
+    if (!uri) return { customEditor: true };
+    const languageId = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.languageId;
+    return languageId !== undefined ? { uri, customEditor: true, languageId } : { uri, customEditor: true };
+  }
+
   function followActiveDocument(): void {
+    const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
     const textEditor = vscode.window.activeTextEditor;
-    const textTarget = textEditor
+    // The text editor is the fallback only when the editor reported no active tab.
+    // A diagram, image or webview is the focus even while a text editor stays
+    // active in another group.
+    const textTarget = !activeTab && textEditor
       ? targetForTextDocument(textEditor.document.uri, textEditor.document.languageId, outlineProbe(textEditor.document))
       : undefined;
-    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
-    const tabUri = tabDocumentUri(input);
-    // A diagram or preview is the focused document even when activeTextEditor is
-    // still a text editor in another group, or is undefined. A webview tab has no
-    // document uri, so it does not move the tree.
-    const next = focusedTreeTarget(textTarget, tabUri
-      ? { uri: tabUri, customEditor: isCustomEditorInput(input), languageId: openDocumentLanguage(tabUri.toString()) }
-      : undefined);
+    const next = focusedTreeTarget(textTarget, activeTab ? describeFocusedTab(activeTab.input) : undefined);
     if (!next) return;
+    adoptTreeTarget(next);
+  }
+
+  function adoptTreeTarget(next: TextDocumentTarget): void {
     const focused: Target = { uri: next.uri, source: next.source, ...(next.outlineKind ? { outlineKind: next.outlineKind } : {}) };
 
     if (focused.source === 'server') {
@@ -351,12 +367,45 @@ export function registerModelExplorer(
     model.refresher.request(SWITCH_DELAY_MS);
   }
 
+  /**
+   * The document the user is editing. A text tab is that tab's document. The
+   * active text editor counts only when no tab is reported: a diagram or image
+   * can leave a text editor active in another group.
+   */
+  function isActiveTextDocument(document: vscode.TextDocument): boolean {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document !== document) return false;
+    const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (!activeTab) return true;
+    if (!isPlainTextTab(activeTab.input)) return false;
+    return tabDocumentUri(activeTab.input)?.toString() === document.uri.toString();
+  }
+
+  let outlineEditTimer: ReturnType<typeof setTimeout> | undefined;
+  let outlineEditDocument: vscode.TextDocument | undefined;
+  /** Re-reads the active document's discriminator once edits have gone quiet. */
+  function scheduleOutlineRecheck(document: vscode.TextDocument): void {
+    outlineEditDocument = document;
+    if (outlineEditTimer !== undefined) clearTimeout(outlineEditTimer);
+    outlineEditTimer = setTimeout(() => {
+      outlineEditTimer = undefined;
+      const edited = outlineEditDocument;
+      outlineEditDocument = undefined;
+      if (!edited || !isActiveTextDocument(edited)) return;
+      const current = shown?.uri && shown.source ? { uri: shown.uri, source: shown.source } : undefined;
+      const next = outlineRetarget(current, {
+        active: true,
+        uri: edited.uri,
+        languageId: edited.languageId,
+        text: outlineProbe(edited),
+      });
+      if (next) adoptTreeTarget(next);
+    }, EDIT_DELAY_MS);
+  }
+
   /** Documents whose content can change what the Model tree shows. */
   const concernsModel = (uri: string): boolean => uri === shown?.uri || (shown?.source === 'server' && (model.tree?.sourceUris.has(uri) ?? false));
-  const isManifest = (uri: string): boolean => {
-    const manifestUri = server.manifest.manifestUri;
-    return manifestUri !== undefined && uri === manifestDocumentUri(manifestUri);
-  };
+  const isManifest = (uri: string): boolean => uri === manifestDocument(server.manifest)?.toString();
 
   let manifestWatcher: vscode.FileSystemWatcher | undefined;
   let watchedManifest: string | undefined;
@@ -439,12 +488,12 @@ export function registerModelExplorer(
   }
 
   async function openManifest(): Promise<boolean> {
-    const manifestUri = server.manifest.manifestUri;
-    if (!manifestUri) {
+    const document = manifestDocument(server.manifest);
+    if (!document) {
       await vscode.commands.executeCommand('workbench.action.openSettings', 'zenwave.workspace.manifest');
       return false;
     }
-    await vscode.window.showTextDocument(vscode.Uri.parse(manifestDocumentUri(manifestUri), true), { preview: true });
+    await vscode.window.showTextDocument(document, { preview: true });
     return true;
   }
 
@@ -468,6 +517,9 @@ export function registerModelExplorer(
       const uri = event.document.uri.toString();
       if (isManifest(uri)) architecture.refresher.request();
       if (concernsModel(uri)) model.refresher.request();
+      // An ordinary YAML or JSON file can become an API description as it is typed.
+      // The discriminator is the bounded prefix; the tree moves only when it qualifies.
+      if (isActiveTextDocument(event.document)) scheduleOutlineRecheck(event.document);
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (isManifest(document.uri.toString())) architecture.refresher.request();
@@ -480,7 +532,10 @@ export function registerModelExplorer(
       if (revealTimer !== undefined) clearTimeout(revealTimer);
       revealTimer = setTimeout(() => { revealTimer = undefined; void revealCursor(event.textEditor); }, REVEAL_DELAY_MS);
     }),
-    { dispose: () => { if (revealTimer !== undefined) clearTimeout(revealTimer); } },
+    { dispose: () => {
+      if (revealTimer !== undefined) clearTimeout(revealTimer);
+      if (outlineEditTimer !== undefined) clearTimeout(outlineEditTimer);
+    } },
     model.view.onDidChangeSelection((event) => {
       const selected = event.selection[0];
       void reflectSelection(diagramPanels, model.tree?.documentUri, selected ? selected.node.viewNodeIds ?? [] : undefined)
@@ -551,9 +606,9 @@ function deadline<T>(pending: PromiseLike<T>, ms: number): Promise<T> {
   return result.finally(() => { if (timer !== undefined) clearTimeout(timer); });
 }
 
-/** A diagram or preview (`TabInputCustom`) carries both `viewType` and `uri`. A webview has no document uri. */
-function isCustomEditorInput(input: unknown): boolean {
+/** `TabInputText`: one document uri, and none of the fields a custom editor, webview, diff or notebook carries. */
+function isPlainTextTab(input: unknown): boolean {
   if (typeof input !== 'object' || input === null) return false;
-  const candidate = input as { viewType?: unknown; uri?: unknown };
-  return typeof candidate.viewType === 'string' && typeof candidate.uri === 'object' && candidate.uri !== null;
+  if ('viewType' in input || 'notebookType' in input || 'original' in input || 'modified' in input) return false;
+  return tabDocumentUri(input) !== undefined;
 }

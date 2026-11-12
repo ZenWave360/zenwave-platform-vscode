@@ -7,7 +7,7 @@ import type { HierarchyNode } from '../../src/lsp/requests.js';
 import { CoalescedRefresh, type Scheduler } from '../../src/explorer/coalesce.js';
 import { documentSymbolsToHierarchy, loadDocumentOutline, type DocumentSymbolLike, type SymbolInformationLike } from '../../src/explorer/document-symbols.js';
 import { DiagramPanels, reflectSelection } from '../../src/explorer/diagram-selection.js';
-import { focusedTreeTarget, followDecision, isApiDescription, isModelDocument, tabDocumentUri, targetForTextDocument } from '../../src/explorer/follow.js';
+import { focusedTreeTarget, followDecision, isApiDescription, isModelDocument, outlineRetarget, tabDocumentUri, targetForTextDocument } from '../../src/explorer/follow.js';
 import { buildTree, findNode, NEUTRAL_ICON, nodeAt, presentNode, walk } from '../../src/explorer/hierarchy-model.js';
 import { describeState, serverUnavailable, stateFromResult, TREE_STATE_KINDS } from '../../src/explorer/tree-state.js';
 import { LatestLoad } from '../../src/explorer/latest-load.js';
@@ -262,7 +262,45 @@ test('a focused diagram is the model on screen even when a text editor in anothe
   assert.deepEqual(focusedTreeTarget(markdown, { uri: readme, customEditor: false, languageId: 'markdown' }), markdown);
   assert.equal(focusedTreeTarget(undefined, undefined), undefined, 'no focused document keeps the current model');
   assert.equal(focusedTreeTarget(undefined, { uri: { path: '/w/App.java', toString: () => 'file:///w/App.java' }, customEditor: false, languageId: 'java' }), undefined);
-  assert.deepEqual(focusedTreeTarget(markdown, { uri: { path: '/w/pic.png', toString: () => 'file:///w/pic.png' }, customEditor: true, languageId: undefined }), markdown);
+  assert.equal(focusedTreeTarget(markdown, { uri: { path: '/w/pic.png', toString: () => 'file:///w/pic.png' }, customEditor: true }), undefined,
+    'an image is not a model or an outline, so the tree stays where it is');
+  assert.equal(focusedTreeTarget(markdown, { customEditor: true }), undefined, 'a webview keeps the current tree');
+  assert.deepEqual(focusedTreeTarget(markdown, undefined), markdown, 'with no active tab the text editor is the fallback');
+});
+
+test('focusing an image keeps diagram B when Markdown A is still the active text editor', () => {
+  const markdownA = targetForTextDocument({ path: '/w/README.md', toString: () => 'file:///w/README.md' }, 'markdown');
+  const diagramB = { path: '/w/place-order-flow.zfl', toString: () => 'file:///w/place-order-flow.zfl' };
+  const image = { path: '/w/pic.png', toString: () => 'file:///w/pic.png' };
+  const onDiagram = focusedTreeTarget(markdownA, { uri: diagramB, customEditor: true });
+  assert.deepEqual(onDiagram, { uri: diagramB.toString(), source: 'server' }, 'the diagram is the model on screen');
+  assert.equal(focusedTreeTarget(markdownA, { uri: image, customEditor: true }), undefined,
+    'the image keeps diagram B; Markdown A is a text editor in another group');
+  assert.equal(focusedTreeTarget(markdownA, { customEditor: true }), undefined, 'a webview keeps diagram B too');
+});
+
+test('editing the active document onto an API description switches to its outline, and back does not', () => {
+  const yaml = { path: '/w/service.yaml', toString: () => 'file:///w/service.yaml' };
+  const shown = { uri: 'file:///w/place-order-flow.zfl', source: 'server' as const };
+  assert.equal(outlineRetarget(shown, { active: true, uri: yaml, languageId: 'yaml', text: 'info:\n  title: Orders\n' }), undefined,
+    'ordinary YAML leaves the current model');
+  const qualified = outlineRetarget(shown, { active: true, uri: yaml, languageId: 'yaml', text: 'openapi: 3.1.0\ninfo:\n  title: Orders\n' });
+  assert.deepEqual(qualified, { uri: 'file:///w/service.yaml', source: 'outline', outlineKind: 'api-description' });
+  assert.equal(outlineRetarget(
+    { uri: 'file:///w/service.yaml', source: 'outline' },
+    { active: true, uri: yaml, languageId: 'yaml', text: 'openapi: 3.1.0\npaths: {}\n' },
+  ), undefined, 'further edits of the outline already on screen do not retarget');
+  assert.equal(outlineRetarget(
+    { uri: 'file:///w/service.yaml', source: 'outline' },
+    { active: true, uri: yaml, languageId: 'yaml', text: 'info:\n  title: Orders\n' },
+  ), undefined, 'removing the key keeps the outline');
+  const json = { path: '/w/service.json', toString: () => 'file:///w/service.json' };
+  assert.deepEqual(outlineRetarget(shown, { active: true, uri: json, languageId: 'json', text: '{ "openapi": "3.1.0" }' }),
+    { uri: 'file:///w/service.json', source: 'outline', outlineKind: 'api-description' });
+  assert.equal(outlineRetarget(shown, { active: false, uri: yaml, languageId: 'yaml', text: 'openapi: 3.1.0\n' }), undefined,
+    'a document that is not the active one does not move the tree');
+  assert.equal(outlineRetarget(shown, { active: true, uri: { path: '/w/model.zdl', toString: () => 'file:///w/model.zdl' }, languageId: 'zdl', text: 'openapi: 3.1.0\n' }), undefined,
+    'a ZenWave model stays with the server');
 });
 
 test('an empty tree says why: no server, no hierarchy request, not found, unreadable, empty', () => {
