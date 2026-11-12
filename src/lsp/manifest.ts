@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { DocumentSelector } from 'vscode-languageclient';
 import {
+  architectureSettings,
   chooseManifest,
   hasScheme,
   isAbsolutePath,
@@ -10,11 +11,24 @@ import {
   manifestFilters,
   projectManifestOf,
   relativeSegments,
+  ALLOWED_DOMAINS_SETTING,
+  REMOTE_MANIFEST_NAME_SETTING,
+  type ArchitectureSettings,
   type FolderCandidates,
   type ResolvedManifest,
 } from './manifest-resolution.js';
 
 export const MANIFEST_SETTING = 'zenwave.workspace.manifest';
+export { ALLOWED_DOMAINS_SETTING, REMOTE_MANIFEST_NAME_SETTING };
+
+const ARCHITECTURE_SECTION = 'zenwave.architecture';
+
+/** `zenwave.architecture.remoteManifestName` and `zenwave.architecture.allowedDomains`, normalised. */
+export function readArchitectureSettings(): ArchitectureSettings {
+  const configuration = vscode.workspace.getConfiguration(ARCHITECTURE_SECTION);
+  return architectureSettings(configuration.get<unknown>('remoteManifestName'), configuration.get<unknown>('allowedDomains'));
+}
+
 const CONFIG_SEGMENTS = ['.zenwave', 'config.yml'] as const;
 
 /** A reference relative to a folder, joined as a URI — never as a file-system path. */
@@ -82,13 +96,13 @@ export async function resolveWorkspaceManifest(override?: string): Promise<Resol
  * scores a pattern equal to a document's `fsPath` as a match before treating it
  * as a glob, so the file matches exactly whatever characters its name holds.
  */
-export function documentSelector(resolved: ResolvedManifest): DocumentSelector {
+export function documentSelector(resolved: ResolvedManifest, remoteManifestName: string = readArchitectureSettings().remoteManifestName): DocumentSelector {
   return [
     { language: 'zdl' }, { language: 'zw' }, { language: 'zfl' },
     ...manifestFilters(resolved.manifestUri, (manifestUri) => {
       const uri = vscode.Uri.parse(manifestUri, true);
       return { scheme: uri.scheme, pattern: uri.fsPath };
-    }),
+    }, remoteManifestName),
   ];
 }
 
@@ -105,8 +119,8 @@ export function isManifest(resolved: ResolvedManifest, document: vscode.TextDocu
 }
 
 /** The document that holds the manifest: the file, or for an `http(s)` manifest the `zenwave:` document the server serves it as. */
-export function manifestDocument(resolved: ResolvedManifest): vscode.Uri | undefined {
-  return resolved.manifestUri ? vscode.Uri.parse(manifestDocumentUri(resolved.manifestUri), true) : undefined;
+export function manifestDocument(resolved: ResolvedManifest, remoteManifestName: string = readArchitectureSettings().remoteManifestName): vscode.Uri | undefined {
+  return resolved.manifestUri ? vscode.Uri.parse(manifestDocumentUri(resolved.manifestUri, remoteManifestName), true) : undefined;
 }
 
 /**

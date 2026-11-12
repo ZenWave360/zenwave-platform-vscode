@@ -11,9 +11,25 @@ import type { ResourceContent, ResourceStat } from './requests.js';
 
 export const ZENWAVE_SCHEME = 'zenwave';
 
-/** The address the server serves a remote manifest under (AR-Q1). The leading dot is a segment no owner id has. */
-export const REMOTE_MANIFEST_ADDRESS = 'zenwave:/.zenwave-manifest.yml';
-export const REMOTE_MANIFEST_PATH = '/.zenwave-manifest.yml';
+/**
+ * File name of a remote manifest when the setting is blank (AR-Q1).
+ * The leading dot is a segment no owner id has.
+ */
+export const DEFAULT_REMOTE_MANIFEST_NAME = '.zenwave-manifest.yml';
+
+/** `zenwave:/<name>` for a remote manifest. A blank name is the default. */
+export function remoteManifestAddress(name: string = DEFAULT_REMOTE_MANIFEST_NAME): string {
+  return `${ZENWAVE_SCHEME}:/${name}`;
+}
+
+/** Path of that address: the document selector pattern for the scheme. */
+export function remoteManifestPath(name: string = DEFAULT_REMOTE_MANIFEST_NAME): string {
+  return `/${name}`;
+}
+
+/** The default remote-manifest address and path. A configured name replaces these where the client builds them. */
+export const REMOTE_MANIFEST_ADDRESS = remoteManifestAddress();
+export const REMOTE_MANIFEST_PATH = remoteManifestPath();
 
 export type ResourceFailureReason = 'too-old' | 'not-declared' | 'unresolved' | 'no-server' | 'failed';
 

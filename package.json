@@ -954,6 +954,21 @@
           "scope": "resource",
           "description": "The architecture manifest for this workspace: a path relative to the workspace folder or absolute, or an http(s) address. **ZenWave: Choose Architecture Manifest…** writes it. When set it is used as-is and nothing is searched for; otherwise project-manifest in .zenwave/config.yml at a workspace folder root is used."
         },
+        "zenwave.architecture.remoteManifestName": {
+          "type": "string",
+          "default": ".zenwave-manifest.yml",
+          "scope": "window",
+          "markdownDescription": "The file name a remote architecture manifest is opened as. Its address is `zenwave:/` followed by this name. The client and the language server accept a plain file name and use `.zenwave-manifest.yml` when the value is not one. Changing this restarts the language server."
+        },
+        "zenwave.architecture.allowedDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "window",
+          "description": "Hosts an absolute http or https entry in the architecture manifest may be fetched from. A value such as github.com matches that host only. A value that starts with *. such as *.githubusercontent.com matches any subdomain of that host, and not the host itself. A redirect is checked on every hop, and a hop to a host that is not listed is refused. An empty list fetches no absolute http or https entry. Changing this restarts the language server."
+        },
         "zenwave.credentials.origins": {
           "type": "array",
           "scope": "application",

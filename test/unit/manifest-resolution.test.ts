@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  architectureSettings,
   chooseManifest,
   describeManifest,
   hasScheme,
   initializationOptions,
   isAbsolutePath,
+  isPlainRemoteManifestName,
   isRemoteManifest,
   literalGlob,
   manifestDocumentUri,
@@ -13,8 +15,11 @@ import {
   parseManifestUrl,
   projectManifestOf,
   relativeSegments,
+  resolveRemoteManifestName,
+  sameArchitectureSettings,
   sameInitialization,
 } from '../../src/lsp/manifest-resolution.js';
+import { DEFAULT_REMOTE_MANIFEST_NAME } from '../../src/lsp/resources.js';
 
 test('project-manifest is read the way zenwave-lsp ZenwaveWorkspaceConfig reads it', () => {
   assert.equal(projectManifestOf('project-manifest: arcadia-editions-architecture/zenwave-architecture.yml\n'),
@@ -95,11 +100,87 @@ test('initialization options carry the shape the server parses, and a changed ma
       configUri: configFolder.config.configUri,
       projectManifestUri: configFolder.config.manifestUri,
       clientCapabilities: { credentialRequest: true },
+      remoteManifestName: '.zenwave-manifest.yml',
+      allowedDomains: [],
     },
   });
-  assert.deepEqual(initializationOptions(chooseManifest([]), false), { zenwave: { clientCapabilities: { credentialRequest: false } } });
+  assert.deepEqual(initializationOptions(chooseManifest([]), false), {
+    zenwave: {
+      clientCapabilities: { credentialRequest: false },
+      remoteManifestName: '.zenwave-manifest.yml',
+      allowedDomains: [],
+    },
+  });
   assert.equal(sameInitialization(config, { ...config, notes: ['x'] }), true);
   assert.equal(sameInitialization(config, chooseManifest([settingFolder])), false);
+});
+
+test('initialization options always send the remote manifest name and the allowed domains', () => {
+  const custom = initializationOptions(chooseManifest([]), true, undefined, {
+    remoteManifestName: ' architecture.yml ',
+    allowedDomains: [' github.com ', '', 'github.com', '*.githubusercontent.com', ' *.githubusercontent.com ', 12, null],
+  });
+  assert.deepEqual(custom.zenwave, {
+    clientCapabilities: { credentialRequest: true },
+    remoteManifestName: 'architecture.yml',
+    allowedDomains: ['github.com', '*.githubusercontent.com'],
+  });
+  // A name that is not a plain file name is replaced before it is sent, so the server is given the same name.
+  const rejectedName = initializationOptions(chooseManifest([]), true, undefined, {
+    remoteManifestName: '../secret.yml',
+    allowedDomains: ['GitHub.com', 'github.com'],
+  });
+  assert.equal(rejectedName.zenwave.remoteManifestName, '.zenwave-manifest.yml');
+  assert.equal('remoteManifestNameWarning' in rejectedName.zenwave, false, 'the warning is logged by the client, not sent');
+  assert.deepEqual(architectureSettings('  ', 'github.com'), {
+    remoteManifestName: '.zenwave-manifest.yml',
+    allowedDomains: [],
+    remoteManifestNameWarning: "remoteManifestName '  ' is not a plain file name; using '.zenwave-manifest.yml'",
+  });
+  assert.deepEqual(architectureSettings(undefined, undefined), {
+    remoteManifestName: '.zenwave-manifest.yml',
+    allowedDomains: [],
+  });
+  assert.equal(architectureSettings(null, []).remoteManifestNameWarning, undefined);
+});
+
+test('a remote manifest name that is not a plain file name falls back and warns, and the selector stays one file', () => {
+  const rejected = [
+    '', ' ', '.', '..', '...', '../secret.yml', 'foo/../bar.yml', 'a/b.yml', 'a\\b.yml', 'a%2e.yml', 'x..y.yml',
+    'a#fragment', 'a?query', 'arch*.yml', 'arch[1].yml', 'pre{a,b}.yml', 'a]b.yml', '*',
+    'a\nb.yml', 'a\rb.yml', 'a\tb.yml', 'a\u0000b.yml', 'a\u007Fb.yml', 'a\u009Fb.yml',
+    'a'.repeat(256),
+  ];
+  const local = (uri: string): { scheme: string; pattern: string } => ({ scheme: 'file', pattern: uri });
+  for (const raw of rejected) {
+    const resolved = resolveRemoteManifestName(raw);
+    assert.equal(resolved.name, DEFAULT_REMOTE_MANIFEST_NAME, JSON.stringify(raw));
+    assert.equal(resolved.warning, `remoteManifestName '${raw}' is not a plain file name; using '${DEFAULT_REMOTE_MANIFEST_NAME}'`, JSON.stringify(raw));
+    assert.equal(manifestDocumentUri('https://example.org/m.yml', raw), 'zenwave:/.zenwave-manifest.yml', JSON.stringify(raw));
+    assert.deepEqual(manifestFilters('https://example.org/m.yml', local, raw), [{ scheme: 'zenwave', pattern: '/.zenwave-manifest.yml' }], JSON.stringify(raw));
+    assert.equal(isPlainRemoteManifestName(raw.trim()), false, JSON.stringify(raw));
+  }
+  const accepted = ['architecture.yml', '.custom.yml', '.zenwave-manifest.yml', 'my manifest.yml', 'a'.repeat(255)];
+  for (const raw of accepted) {
+    const resolved = resolveRemoteManifestName(raw);
+    assert.equal(resolved.name, raw, raw);
+    assert.equal(resolved.warning, undefined, raw);
+    assert.equal(isPlainRemoteManifestName(raw), true, raw);
+  }
+  assert.deepEqual(resolveRemoteManifestName('  architecture.yml  '), { name: 'architecture.yml' });
+  assert.equal(resolveRemoteManifestName(undefined).warning, undefined);
+  assert.equal(resolveRemoteManifestName(12).name, DEFAULT_REMOTE_MANIFEST_NAME);
+  assert.equal(sameArchitectureSettings(architectureSettings('../secret.yml', []), architectureSettings('arch*.yml', [])), true,
+    'two rejected names initialise the server the same way');
+  assert.equal(sameArchitectureSettings(architectureSettings('architecture.yml', []), architectureSettings('*', [])), false);
+});
+
+test('a change of the remote manifest name or the allowed domains is a new initialisation', () => {
+  const current = architectureSettings('.zenwave-manifest.yml', ['github.com']);
+  assert.equal(sameArchitectureSettings(current, architectureSettings('  .zenwave-manifest.yml  ', [' github.com ', 'github.com', ''])), true);
+  assert.equal(sameArchitectureSettings(current, architectureSettings('architecture.yml', ['github.com'])), false);
+  assert.equal(sameArchitectureSettings(current, architectureSettings('.zenwave-manifest.yml', ['github.com', '*.githubusercontent.com'])), false);
+  assert.equal(sameArchitectureSettings(current, architectureSettings('.zenwave-manifest.yml', [])), false);
 });
 
 test('a manifest file name never widens into a glob', () => {
@@ -140,4 +221,8 @@ test('a remote manifest is served as the zenwave: document and selected by exact
   assert.deepEqual(manifestFilters('https://example.org/m.yml', local), [{ scheme: 'zenwave', pattern: '/.zenwave-manifest.yml' }]);
   assert.deepEqual(manifestFilters('file:///m.yml', local), [{ scheme: 'file', pattern: 'file:///m.yml' }]);
   assert.deepEqual(manifestFilters(undefined, local), []);
+  assert.equal(manifestDocumentUri('https://example.org/m.yml', ' architecture.yml '), 'zenwave:/architecture.yml');
+  assert.equal(manifestDocumentUri('file:///m.yml', 'architecture.yml'), 'file:///m.yml');
+  assert.deepEqual(manifestFilters('https://example.org/m.yml', local, 'architecture.yml'), [{ scheme: 'zenwave', pattern: '/architecture.yml' }]);
+  assert.equal(manifestDocumentUri('https://example.org/m.yml', '  '), 'zenwave:/.zenwave-manifest.yml');
 });

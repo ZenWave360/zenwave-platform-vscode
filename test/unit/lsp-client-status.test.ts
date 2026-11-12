@@ -14,7 +14,9 @@ const extensionDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'package.json'), 'utf8')) as {
   activationEvents: string[];
   capabilities: { untrustedWorkspaces: { supported: string; description: string; restrictedConfigurations: string[] } };
-  contributes: { configuration: { properties: Record<string, { scope?: string; default?: unknown }> }; commands: { command: string }[] };
+  contributes: { configuration: { properties: Record<string, {
+    type?: string; scope?: string; default?: unknown; description?: string; markdownDescription?: string; items?: { type?: string };
+  }> }; commands: { command: string; title?: string }[] };
   zenwaveLanguageServer: { package: string; version: string };
 };
 
@@ -117,6 +119,20 @@ test('settings, commands and the trust statement match what the language client 
   assert.match(trust.description, /no language server/);
   assert.match(trust.description, /no credentials/);
   assert.deepEqual(trust.restrictedConfigurations, ['zenwave.lsp.serverPath', 'zenwave.workspace.manifest']);
+  const remoteName = properties['zenwave.architecture.remoteManifestName'];
+  assert.equal(remoteName?.type, 'string');
+  assert.equal(remoteName?.scope, 'window');
+  assert.equal(remoteName?.default, '.zenwave-manifest.yml');
+  assert.match(remoteName?.markdownDescription ?? '', /plain file name/);
+  assert.match(remoteName?.markdownDescription ?? '', /\.zenwave-manifest\.yml/);
+  const domains = properties['zenwave.architecture.allowedDomains'];
+  assert.equal(domains?.type, 'array');
+  assert.equal(domains?.items?.type, 'string');
+  assert.equal(domains?.scope, 'window');
+  assert.deepEqual(domains?.default, []);
+  assert.match(domains?.description ?? '', /github\.com matches that host only/);
+  assert.match(domains?.description ?? '', /\*\.githubusercontent\.com matches any subdomain/);
+  assert.match(domains?.description ?? '', /every hop/);
 });
 
 test('the build fails with instructions when the language server package is not linked', () => {

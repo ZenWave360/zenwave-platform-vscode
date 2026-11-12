@@ -11,16 +11,21 @@ import { askManifest, choiceFromArgument, sessionValue, settingValue } from './m
 import { CREDENTIAL_REQUEST, CredentialBroker } from './credentials.js';
 import type { CredentialAnswer } from './credential-policy.js';
 import {
+  ALLOWED_DOMAINS_SETTING,
   documentSelector,
   isManifest,
   MANIFEST_SETTING,
   manifestWatchers,
+  readArchitectureSettings,
+  REMOTE_MANIFEST_NAME_SETTING,
   resolveWorkspaceManifest,
 } from './manifest.js';
 import {
   describeManifest,
   initializationOptions,
+  sameArchitectureSettings,
   sameInitialization,
+  type ArchitectureSettings,
   type ResolvedManifest,
 } from './manifest-resolution.js';
 import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource } from './plugin-catalogue.js';
@@ -132,6 +137,15 @@ export function registerLanguageServer(
   // An override stands in for a setting no folder can hold; once a folder is open the setting is the place for the choice.
   const currentOverride = (): string | undefined => (vscode.workspace.workspaceFolders?.length ? undefined : manifestOverride);
   let settings = readSettings();
+  let architecture: ArchitectureSettings = readArchitectureSettings();
+  let reportedRemoteManifestWarning: string | undefined;
+  /** Logs a rejected remote-manifest name once per distinct warning. A missing or valid name logs nothing. */
+  function reportRemoteManifestName(settings: ArchitectureSettings): void {
+    const warning = settings.remoteManifestNameWarning;
+    if (warning === reportedRemoteManifestWarning) return;
+    reportedRemoteManifestWarning = warning;
+    if (warning) logger.warn(warning);
+  }
   let absentReason: string | undefined = host ? undefined : 'no language server transport is available in this host';
   let pending: Promise<void> = Promise.resolve();
   let watchers: vscode.FileSystemWatcher[] = [];
@@ -222,6 +236,8 @@ export function registerLanguageServer(
 
   async function prepare(): Promise<boolean> {
     manifest = await resolveWorkspaceManifest(currentOverride());
+    architecture = readArchitectureSettings();
+    reportRemoteManifestName(architecture);
     logger.info(describeManifest(manifest));
     for (const watcher of watchers) watcher.dispose();
     watchers = [];
@@ -243,8 +259,8 @@ export function registerLanguageServer(
     watchers = manifestWatchers(manifest);
     const pluginCatalogue = await loadPluginCatalogue(catalogueSource, logger);
     const options = sharedClientOptions(
-      documentSelector(manifest),
-      initializationOptions(manifest, true, pluginCatalogue),
+      documentSelector(manifest, architecture.remoteManifestName),
+      initializationOptions(manifest, true, pluginCatalogue, architecture),
       logger.outputChannel,
       watchers,
       { didOpen: (document, next) => { sentToServer.push(document.uri.toString()); return next(document); } },
@@ -277,12 +293,17 @@ export function registerLanguageServer(
     });
   }
 
-  /** Re-resolves; restarts only when the server would be initialised differently. */
+  /**
+   * Re-resolves the manifest and the architecture resource settings. Restarts only when the server would be
+   * initialised differently: a new manifest, or a new remote-manifest name or allowed-domain list.
+   */
   function reconsiderManifest(trigger: string): Promise<void> {
     return queue(async () => {
       if (!settings.enabled || !vscode.workspace.isTrusted) return;
       const next = await resolveWorkspaceManifest(currentOverride());
-      if (sameInitialization(manifest, next)) {
+      const nextArchitecture = readArchitectureSettings();
+      reportRemoteManifestName(nextArchitecture);
+      if (sameInitialization(manifest, next) && sameArchitectureSettings(architecture, nextArchitecture)) {
         if (manifest.route !== next.route) logger.info(describeManifest(next));
         manifest = next;
         refresh();
@@ -330,13 +351,17 @@ export function registerLanguageServer(
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
+      // The manifest, the remote manifest's name and the allowed domains are initialization options.
+      // A change of any of them restarts through the same path; trim and duplicates are not a change.
+      const changed = [MANIFEST_SETTING, REMOTE_MANIFEST_NAME_SETTING, ALLOWED_DOMAINS_SETTING]
+        .filter((setting) => event.affectsConfiguration(setting));
       if (event.affectsConfiguration('zenwave.lsp.enabled') || event.affectsConfiguration('zenwave.lsp.serverPath')) {
         const previous = settings;
         settings = readSettings();
         if (!settings.enabled) void stop('zenwave.lsp.enabled was turned off');
         else if (!previous.enabled || previous.serverPath !== settings.serverPath) void start('server settings changed');
-      } else if (event.affectsConfiguration(MANIFEST_SETTING)) {
-        void reconsiderManifest(`${MANIFEST_SETTING} changed`);
+      } else if (changed.length > 0) {
+        void reconsiderManifest(`${changed.join(', ')} changed`);
       }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void reconsiderManifest('workspace folders changed')),
