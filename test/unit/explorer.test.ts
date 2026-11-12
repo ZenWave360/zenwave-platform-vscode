@@ -203,6 +203,24 @@ test('an outline that stays empty ends at the deadline, and one that never answe
   assert.ok(time >= 100 && time < 180, `silent wait ran for ${time}ms`);
 });
 
+test('an always-empty outline is asked with backoff, not every fifty milliseconds, and ends empty', async () => {
+  let time = 0;
+  let asks = 0;
+  const empty = await waitForOutline({
+    ask: async () => { asks++; return []; },
+    deadlineMs: 15_000,
+    pollMs: 50,
+    initialIntervalMs: 100,
+    maxIntervalMs: 2_000,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(empty, { kind: 'empty' });
+  assert.ok(asks <= 12, `always-empty outline asked ${asks} times`);
+  assert.ok(asks >= 8, `always-empty outline asked only ${asks} times`);
+  assert.ok(time >= 15_000);
+});
+
 test('a hung outline is abandoned when the target changes, well before the deadline', async () => {
   let time = 0;
   let stale = false;
@@ -219,6 +237,48 @@ test('a hung outline is abandoned when the target changes, well before the deadl
   assert.deepEqual(outcome, { kind: 'stale' });
   assert.equal(asks, 1);
   assert.equal(time, 30);
+});
+
+test('disposing the tree cancels an in-flight outline wait: no further polling, no further asks', async () => {
+  let cancelled = false;
+  let sleeps = 0;
+  let pollsAfterCancel = 0;
+  let releaseSleep: (() => void) | undefined;
+  const hung = untilSettledOrStale(
+    new Promise<string[]>(() => undefined),
+    () => cancelled,
+    50,
+    () => {
+      sleeps++;
+      if (cancelled) pollsAfterCancel++;
+      return new Promise<void>((resolve) => { releaseSleep = resolve; });
+    },
+  );
+  await new Promise<void>((resolve) => { setImmediate(resolve); });
+  assert.equal(sleeps, 1, 'the hung ask is polled once while it is live');
+  cancelled = true;
+  releaseSleep!();
+  await new Promise<void>((resolve) => { setImmediate(resolve); });
+  assert.deepEqual(await hung, { kind: 'stale' });
+  assert.equal(pollsAfterCancel, 0);
+  assert.equal(sleeps, 1);
+
+  let time = 0;
+  let disposed = false;
+  let asks = 0;
+  const empty = await waitForOutline({
+    ask: async () => { asks++; return []; },
+    deadlineMs: 15_000,
+    pollMs: 50,
+    initialIntervalMs: 100,
+    maxIntervalMs: 2_000,
+    stale: () => disposed,
+    now: () => time,
+    sleep: async (ms) => { time += ms; disposed = true; },
+  });
+  assert.deepEqual(empty, { kind: 'stale' });
+  assert.equal(asks, 1);
+  assert.ok(time < 15_000, `disposed wait ran for ${time}ms`);
 });
 
 test('an abandoned refresh schedules one follow-up and the next run does not overlap it', async () => {

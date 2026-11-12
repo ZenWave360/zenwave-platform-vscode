@@ -47,8 +47,15 @@ const REVEAL_DELAY_MS = 150;
  * leave the previous model within this budget, not after several stacked waits.
  */
 const OUTLINE_WAIT_MS = 15000;
-/** How often a wait notices that the user moved to another document. */
+/** How often a wait notices that the user moved to another document, or that the tree was disposed. */
 const STALE_POLL_MS = 50;
+/**
+ * First retry after an empty Markdown outline. Doubles each time up to
+ * `OUTLINE_RETRY_MAX_MS`, so a heading-less file is asked about ten times in
+ * the 15 s budget instead of once every stale poll.
+ */
+const OUTLINE_RETRY_MS = 100;
+const OUTLINE_RETRY_MAX_MS = 2000;
 
 export interface HierarchyTreeApi {
   readonly state: TreeState;
@@ -118,6 +125,7 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
   private logged: { state: TreeState; uri: string | undefined } | undefined;
   /** Resource-open failures survive tree rendering until the user explicitly refreshes. */
   private readonly openWarnings = new Map<string, string>();
+  private disposed = false;
 
   constructor(
     private readonly name: string,
@@ -168,24 +176,26 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
 
   /** The title-bar refresh deliberately clears resource warnings before re-asking the hierarchy. */
   manualRefresh(): void {
+    if (this.disposed) return;
     this.openWarnings.clear();
     this.changed.fire(undefined);
     this.refresher.request(SWITCH_DELAY_MS);
   }
 
   async openResource(element: unknown): Promise<void> {
+    if (this.disposed) return;
     const explorerNode = element as ExplorerNode | undefined;
     const presentation = explorerNode ? presentNode(explorerNode, this.tree?.documentUri ?? '') : undefined;
     if (!explorerNode || !presentation?.address) return;
     const outcome = await this.server.openResource(presentation.address);
-    if (outcome.kind === 'opened') return;
+    if (this.disposed || outcome.kind === 'opened') return;
     this.openWarnings.set(explorerNode.key, outcome.message);
     this.changed.fire(explorerNode);
   }
 
   private async load(): Promise<void> {
     const current = await this.latestLoad.run(this.resolveTarget, async (target) => {
-      const stale = () => !sameTarget(target, this.resolveTarget());
+      const stale = () => this.disposed || !sameTarget(target, this.resolveTarget());
       const unavailable = this.unavailable(target);
       if (unavailable) return { tree: undefined, state: unavailable };
       if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
@@ -198,8 +208,9 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
     }, sameTarget);
     // A dropped attempt used to return here and leave the previous tree up, with
     // nothing queued when the adopting request had already been consumed.
+    if (this.disposed) return;
     const publish = resumeAbandoned(current, () => this.refresher.request(0));
-    if (!publish) return;
+    if (!publish || this.disposed) return;
     const { target, result: loaded } = publish;
     this.target = target;
     const { tree, state } = loaded;
@@ -214,6 +225,7 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
   }
 
   private show(tree: ExplorerTree | undefined, state: TreeState, uri: string | undefined, message?: string, log?: string): void {
+    if (this.disposed) return;
     this.tree = tree;
     this.state = state;
     if (message !== undefined || tree === undefined) this.view.message = message ?? '';
@@ -230,14 +242,17 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
       this.logger.warn(line);
     }
     this.logged = { state, uri };
-    this.afterShow();
+    if (!this.disposed) this.afterShow();
   }
 
   private async publishState(): Promise<void> {
+    if (this.disposed) return;
     await vscode.commands.executeCommand('setContext', this.contextKey, this.state.kind);
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.refresher.dispose();
     this.view.dispose();
     this.changed.dispose();
@@ -295,14 +310,17 @@ export function registerModelExplorer(
     const uri = target.uri;
     // Markdown's provider registers after the file is shown, and the extension
     // can already report itself active while that provider is still missing.
-    // An empty answer is retried until the budget passes. An API description is
-    // asked once: an immediate empty outline is the document.
+    // An empty answer is retried with backoff until the budget passes, and the
+    // wait stops at the first non-empty outline. An API description is asked
+    // once: an immediate empty outline is the document.
     if (target.outlineKind === 'markdown') {
       const waited = await waitForOutline({
         ask: () => documentSymbols(uri),
         activate: () => activateMarkdown(uri),
         deadlineMs: OUTLINE_WAIT_MS,
         pollMs: STALE_POLL_MS,
+        initialIntervalMs: OUTLINE_RETRY_MS,
+        maxIntervalMs: OUTLINE_RETRY_MAX_MS,
         stale,
       });
       if (waited.kind === 'stale') return SUPERSEDED;

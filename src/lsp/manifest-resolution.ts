@@ -235,8 +235,10 @@ function normalizeRemoteManifestName(value: unknown): string {
 }
 
 /**
- * Host list as the server receives it. Entries are trimmed; empty entries, non-strings and duplicates are
- * dropped. Nothing else is checked: `github.com` and `*.githubusercontent.com` mean what the server says they mean.
+ * Host list as the server receives it. Entries are lowercased, then trimmed; empty entries, non-strings and
+ * duplicates are dropped. Matching on the server is case-insensitive, so `GitHub.com` and `github.com`
+ * initialise it the same way. Nothing else is checked: `github.com` and `*.githubusercontent.com` mean
+ * what the server says they mean.
  */
 function normalizeAllowedDomains(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -244,10 +246,10 @@ function normalizeAllowedDomains(value: unknown): string[] {
   const domains: string[] = [];
   for (const entry of value) {
     if (typeof entry !== 'string') continue;
-    const trimmed = entry.trim();
-    if (trimmed.length === 0 || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    domains.push(trimmed);
+    const normalized = entry.toLowerCase().trim();
+    if (normalized.length === 0 || seen.has(normalized)) continue;
+    seen.add(normalized);
+    domains.push(normalized);
   }
   return domains;
 }
@@ -262,7 +264,7 @@ export function architectureSettings(remoteManifestName: unknown, allowedDomains
   };
 }
 
-/** Whether two readings would initialise the server the same way. Trim, duplicates and a rejected name do not count as a change. */
+/** Whether two readings would initialise the server the same way. Trim, case, duplicates and a rejected name do not count as a change. */
 export function sameArchitectureSettings(left: ArchitectureSettings, right: ArchitectureSettings): boolean {
   return left.remoteManifestName === right.remoteManifestName
     && left.allowedDomains.length === right.allowedDomains.length

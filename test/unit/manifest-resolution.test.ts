@@ -131,6 +131,8 @@ test('initialization options always send the remote manifest name and the allowe
     allowedDomains: ['GitHub.com', 'github.com'],
   });
   assert.equal(rejectedName.zenwave.remoteManifestName, '.zenwave-manifest.yml');
+  assert.deepEqual(rejectedName.zenwave.allowedDomains, ['github.com'],
+    'GitHub.com is lowercased and collapses with github.com before it is sent');
   assert.equal('remoteManifestNameWarning' in rejectedName.zenwave, false, 'the warning is logged by the client, not sent');
   assert.deepEqual(architectureSettings('  ', 'github.com'), {
     remoteManifestName: '.zenwave-manifest.yml',
@@ -178,6 +180,9 @@ test('a remote manifest name that is not a plain file name falls back and warns,
 test('a change of the remote manifest name or the allowed domains is a new initialisation', () => {
   const current = architectureSettings('.zenwave-manifest.yml', ['github.com']);
   assert.equal(sameArchitectureSettings(current, architectureSettings('  .zenwave-manifest.yml  ', [' github.com ', 'github.com', ''])), true);
+  assert.deepEqual(architectureSettings('.zenwave-manifest.yml', ['GitHub.com']).allowedDomains, ['github.com']);
+  assert.equal(sameArchitectureSettings(current, architectureSettings('.zenwave-manifest.yml', ['GitHub.com'])), true,
+    'GitHub.com and github.com initialise the server the same way');
   assert.equal(sameArchitectureSettings(current, architectureSettings('architecture.yml', ['github.com'])), false);
   assert.equal(sameArchitectureSettings(current, architectureSettings('.zenwave-manifest.yml', ['github.com', '*.githubusercontent.com'])), false);
   assert.equal(sameArchitectureSettings(current, architectureSettings('.zenwave-manifest.yml', [])), false);

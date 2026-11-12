@@ -24,8 +24,16 @@ export interface OutlineWaitOptions<T> {
   /** Invoked at most once, after the first empty answer. */
   activate?: () => Promise<unknown>;
   deadlineMs: number;
+  /** How often a hung ask notices that the target moved, or that the tree was disposed. */
   pollMs: number;
-  /** The tree's target changed; the wait must end so the next target can load. */
+  /**
+   * First pause after an empty or failed answer. Doubles after each pause up to
+   * `maxIntervalMs`. Defaults to `pollMs`; without a larger `maxIntervalMs` the
+   * pause stays that length.
+   */
+  initialIntervalMs?: number;
+  maxIntervalMs?: number;
+  /** The tree's target changed, or the tree was disposed; the wait must end. */
   stale?: () => boolean;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -65,7 +73,10 @@ export function untilSettledOrStale<T>(
         finish({ kind: 'stale' });
         return;
       }
-      void sleep(pollMs).then(() => { if (!finished) poll(); });
+      void sleep(pollMs).then(() => {
+        if (finished) return;
+        poll();
+      });
     };
     // A value that is already there is delivered on the microtask queued above.
     void Promise.resolve().then(() => { if (!finished) poll(); });
@@ -74,10 +85,12 @@ export function untilSettledOrStale<T>(
 
 /**
  * Asks until the provider returns symbols, the deadline passes, or the target
- * changes. An empty answer is retried: for Markdown that is the provider not
- * being registered yet, and the next ask sees it once it is. One hung ask does
- * not restart the deadline. `activate` runs once and is not gated on the
- * extension already reporting itself active.
+ * changes. An empty answer is retried with backoff: for Markdown that is the
+ * provider not being registered yet, and the next ask sees it once it is. The
+ * wait stops at the first non-empty outline, so a heading-less file is not
+ * asked on every stale poll. One hung ask does not restart the deadline.
+ * `activate` runs once and is not gated on the extension already reporting
+ * itself active.
  */
 export async function waitForOutline<T>(options: OutlineWaitOptions<T>): Promise<OutlineWait<T>> {
   const now = options.now ?? Date.now;
@@ -86,9 +99,26 @@ export async function waitForOutline<T>(options: OutlineWaitOptions<T>): Promise
   const started = now();
   const pastDeadline = (): boolean => now() - started >= options.deadlineMs;
   const giveUp = (): boolean => targetStale() || pastDeadline();
+  let intervalMs = options.initialIntervalMs ?? options.pollMs;
+  const maxIntervalMs = options.maxIntervalMs ?? intervalMs;
   let activated = false;
   let sawEmpty = false;
   let failure: string | undefined;
+
+  /** True when the wait must end because the tree moved on or was disposed. */
+  const pause = async (): Promise<boolean> => {
+    const remaining = options.deadlineMs - (now() - started);
+    if (remaining <= 0) return targetStale();
+    const waitMs = Math.min(intervalMs, remaining);
+    intervalMs = Math.min(intervalMs * 2, maxIntervalMs);
+    const until = now() + waitMs;
+    while (!giveUp() && now() < until) {
+      const slice = Math.min(options.pollMs, until - now());
+      if (slice <= 0) break;
+      await sleep(slice);
+    }
+    return targetStale();
+  };
 
   while (!pastDeadline()) {
     if (targetStale()) return { kind: 'stale' };
@@ -97,7 +127,7 @@ export async function waitForOutline<T>(options: OutlineWaitOptions<T>): Promise
     if (outcome.kind === 'rejected') {
       failure = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
       if (pastDeadline()) break;
-      await sleep(options.pollMs);
+      if (await pause()) return { kind: 'stale' };
       continue;
     }
     if (outcome.kind === 'value') {
@@ -118,7 +148,7 @@ export async function waitForOutline<T>(options: OutlineWaitOptions<T>): Promise
       }
     }
     if (pastDeadline()) break;
-    await sleep(options.pollMs);
+    if (await pause()) return { kind: 'stale' };
   }
 
   if (targetStale()) return { kind: 'stale' };
