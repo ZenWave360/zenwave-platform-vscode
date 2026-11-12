@@ -564,7 +564,7 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   const hierarchyRequests = model.stats.requests;
   await vscode.window.showTextDocument(markdown);
   await waitFor(() => model.tree?.documentUri === markdown.uri.toString() && model.state.kind === 'ready' && roots(model).length > 0 ? true : undefined,
-    `Model tree did not follow Markdown with its outline: ${model.documentUri} ${JSON.stringify(model.state)}`);
+    `Model tree did not follow Markdown with its outline: shown ${model.documentUri} tree ${model.tree?.documentUri} ${JSON.stringify(model.state)}`);
   await model.settled();
   assert(model.stats.requests === hierarchyRequests, `Following Markdown sent ${model.stats.requests - hierarchyRequests} hierarchy request(s)`);
   const markdownRoots = labels(roots(model)).join();

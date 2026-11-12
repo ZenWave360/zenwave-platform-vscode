@@ -10,7 +10,8 @@ import { DiagramPanels, reflectSelection } from '../../src/explorer/diagram-sele
 import { focusedTreeTarget, followDecision, isApiDescription, isModelDocument, outlineRetarget, tabDocumentUri, targetForTextDocument } from '../../src/explorer/follow.js';
 import { buildTree, findNode, NEUTRAL_ICON, nodeAt, presentNode, walk } from '../../src/explorer/hierarchy-model.js';
 import { describeState, serverUnavailable, stateFromResult, TREE_STATE_KINDS } from '../../src/explorer/tree-state.js';
-import { LatestLoad } from '../../src/explorer/latest-load.js';
+import { LatestLoad, resumeAbandoned } from '../../src/explorer/latest-load.js';
+import { untilSettledOrStale, waitForOutline } from '../../src/explorer/outline-wait.js';
 
 /** Wire samples recorded from @zenwave360/lsp-js 0.1.0-SNAPSHOT (zenwave-lsp d7156e7). */
 const samples = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/lsp-samples');
@@ -127,6 +128,121 @@ test('a load result is discarded when its target becomes stale', async () => {
   target = { uri: 'file:///workspace/second.md', source: 'outline' };
   release!();
   assert.equal(await pending, undefined);
+});
+
+test('a dropped load is asked again, and a finished one is published', () => {
+  let resumes = 0;
+  const resume = (): void => { resumes++; };
+  assert.equal(resumeAbandoned(undefined, resume), undefined);
+  assert.equal(resumeAbandoned({ result: { superseded: true } }, resume), undefined);
+  assert.equal(resumes, 2);
+  assert.deepEqual(resumeAbandoned({ result: { superseded: false, nodes: 3 } }, resume), { result: { superseded: false, nodes: 3 } });
+  assert.equal(resumes, 2);
+});
+
+test('an outline that answers immediately is not held for a poll, and a late rejection is ignored', async () => {
+  let slept = 0;
+  const answered = await untilSettledOrStale(Promise.resolve(['Intro']), () => false, 50, async () => { slept++; });
+  assert.deepEqual(answered, { kind: 'value', value: ['Intro'] });
+  assert.equal(slept, 0);
+
+  const rejections: unknown[] = [];
+  const onRejection = (error: unknown): void => { rejections.push(error); };
+  process.on('unhandledRejection', onRejection);
+  let rejectLate: (error: Error) => void = () => undefined;
+  const hung = new Promise<string[]>((_, reject) => { rejectLate = reject; });
+  const abandoned = await untilSettledOrStale(hung, () => true, 50, async () => { slept++; });
+  assert.deepEqual(abandoned, { kind: 'stale' });
+  assert.equal(slept, 0);
+  rejectLate(new Error('late'));
+  await new Promise((resolve) => setImmediate(resolve));
+  process.off('unhandledRejection', onRejection);
+  assert.deepEqual(rejections, []);
+});
+
+test('markdown keeps asking after an empty answer and activates once, without an isActive gate', async () => {
+  let time = 0;
+  const answers: (readonly string[] | undefined)[] = [undefined, [], ['Intro', 'Fixtures']];
+  let activations = 0;
+  const outcome = await waitForOutline({
+    ask: async () => answers.shift(),
+    activate: async () => { activations++; },
+    deadlineMs: 15_000,
+    pollMs: 50,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(outcome, { kind: 'symbols', symbols: ['Intro', 'Fixtures'] });
+  assert.equal(activations, 1);
+  assert.ok(time < 15_000, `waited ${time}ms`);
+});
+
+test('an outline that stays empty ends at the deadline, and one that never answers does too', async () => {
+  let time = 0;
+  let asks = 0;
+  const empty = await waitForOutline({
+    ask: async () => { asks++; return []; },
+    deadlineMs: 100,
+    pollMs: 40,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(empty, { kind: 'empty' });
+  assert.ok(asks >= 2);
+  assert.ok(time >= 100);
+
+  time = 0;
+  const silent = await waitForOutline<string>({
+    ask: () => new Promise(() => undefined),
+    deadlineMs: 100,
+    pollMs: 40,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(silent, { kind: 'unanswered' });
+  assert.ok(time >= 100 && time < 180, `silent wait ran for ${time}ms`);
+});
+
+test('a hung outline is abandoned when the target changes, well before the deadline', async () => {
+  let time = 0;
+  let stale = false;
+  let asks = 0;
+  const outcome = await waitForOutline({
+    ask: () => { asks++; return new Promise(() => undefined); },
+    activate: async () => { throw new Error('should not activate after the target moved'); },
+    deadlineMs: 5_000,
+    pollMs: 30,
+    stale: () => stale,
+    now: () => time,
+    sleep: async (ms) => { time += ms; stale = true; },
+  });
+  assert.deepEqual(outcome, { kind: 'stale' });
+  assert.equal(asks, 1);
+  assert.equal(time, 30);
+});
+
+test('an abandoned refresh schedules one follow-up and the next run does not overlap it', async () => {
+  const clock = fakeClock();
+  let runs = 0;
+  let overlap = 0;
+  let inFlight = 0;
+  const refresh = new CoalescedRefresh(() => {
+    inFlight++;
+    if (inFlight > 1) overlap++;
+    runs++;
+    const run = runs;
+    return Promise.resolve().then(() => {
+      inFlight--;
+      if (run === 1) resumeAbandoned(undefined, () => refresh.request(0));
+    });
+  }, 50, clock);
+
+  refresh.request(0);
+  await clock.advance(0);
+  assert.equal(runs, 2);
+  assert.equal(overlap, 0);
+  assert.equal(refresh.pending, false);
+  refresh.dispose();
 });
 
 test('nodes present in this client vocabulary, and a kind released later still renders under its name', () => {

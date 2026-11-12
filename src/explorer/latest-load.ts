@@ -16,3 +16,17 @@ export class LatestLoad<Target, Result> {
     return generation === this.generation && sameTarget(target, resolveTarget()) ? { target, result } : undefined;
   }
 }
+
+/**
+ * Publishes a load only when that attempt finished for the target it captured.
+ * A dropped attempt, or one that stopped because the target moved, has to run
+ * again: returning without a follow-up leaves the previous tree on screen.
+ */
+export function resumeAbandoned<T extends { readonly result: { readonly superseded?: boolean } }>(
+  current: T | undefined,
+  resume: () => void,
+): T | undefined {
+  if (current && current.result.superseded !== true) return current;
+  resume();
+  return undefined;
+}

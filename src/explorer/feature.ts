@@ -10,7 +10,8 @@ import { DiagramPanels, reflectSelection, type SelectionReflection } from './dia
 import { focusedTreeTarget, followDecision, outlineRetarget, tabDocumentUri, targetForTextDocument, type FocusedTab, type ModelTreeSource, type OutlineKind, type TextDocumentTarget } from './follow.js';
 import { buildTree, fileName, nodeAt, presentNode, type ExplorerNode, type ExplorerTree } from './hierarchy-model.js';
 import { describeState, sameState, serverUnavailable, stateFromResult, type TreeState } from './tree-state.js';
-import { LatestLoad } from './latest-load.js';
+import { LatestLoad, resumeAbandoned } from './latest-load.js';
+import { untilSettledOrStale, waitForOutline } from './outline-wait.js';
 
 export const EXPLORER_VIEWS = {
   container: 'zenwave',
@@ -42,9 +43,12 @@ const SWITCH_DELAY_MS = 50;
 const REVEAL_DELAY_MS = 150;
 /**
  * How long to wait for a host outline. The Markdown provider in the web host can
- * fail to answer; the tree still has to leave the previous model.
+ * register after the file is shown, or fail to answer; the tree still has to
+ * leave the previous model within this budget, not after several stacked waits.
  */
 const OUTLINE_WAIT_MS = 15000;
+/** How often a wait notices that the user moved to another document. */
+const STALE_POLL_MS = 50;
 
 export interface HierarchyTreeApi {
   readonly state: TreeState;
@@ -88,7 +92,14 @@ interface TreeLoad {
   readonly message?: string;
   /** More precise than the generic state description when a non-server provider failed. */
   readonly log?: string;
+  /**
+   * The attempt stopped because the target changed. Not a tree to publish, even
+   * when the target has since changed back to this document.
+   */
+  readonly superseded?: boolean;
 }
+
+const SUPERSEDED: TreeLoad = { tree: undefined, state: { kind: 'loading' }, superseded: true };
 
 const sameTarget = (left: Target, right: Target): boolean =>
   left.uri === right.uri && left.source === right.source && left.outlineKind === right.outlineKind && left.absent?.kind === right.absent?.kind;
@@ -115,7 +126,7 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
     private readonly server: LanguageServerApi,
     private readonly logger: Logger,
     private readonly resolveTarget: () => Target,
-    private readonly loadTarget: (target: Target) => Promise<TreeLoad>,
+    private readonly loadTarget: (target: Target, stale: () => boolean) => Promise<TreeLoad>,
     private readonly unavailable: (target: Target) => TreeState | undefined,
     /** Called after every update, to add what the tree knows beyond the answer (the Model tree's problem note). */
     private readonly afterShow: () => void = () => undefined,
@@ -174,15 +185,22 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
 
   private async load(): Promise<void> {
     const current = await this.latestLoad.run(this.resolveTarget, async (target) => {
+      const stale = () => !sameTarget(target, this.resolveTarget());
       const unavailable = this.unavailable(target);
       if (unavailable) return { tree: undefined, state: unavailable };
       if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
       if (target.source !== 'outline') this.requests++;
-      return this.loadTarget(target);
+      const loaded = await this.loadTarget(target, stale);
+      // Stopped early, or the target moved during the last tick. Publishing would
+      // either flash a placeholder or put this document's tree under the new one.
+      if (loaded.superseded || stale()) return SUPERSEDED;
+      return loaded;
     }, sameTarget);
-    // A newer load, or a new target, owns the tree now.
-    if (!current) return;
-    const { target, result: loaded } = current;
+    // A dropped attempt used to return here and leave the previous tree up, with
+    // nothing queued when the adopting request had already been consumed.
+    const publish = resumeAbandoned(current, () => this.refresher.request(0));
+    if (!publish) return;
+    const { target, result: loaded } = publish;
     this.target = target;
     const { tree, state } = loaded;
     if (target.uri && state.kind === 'unreadable' && this.tree?.documentUri === target.uri) {
@@ -246,43 +264,93 @@ export function registerModelExplorer(
 ): ModelExplorerApi {
   const diagramPanels = new DiagramPanels();
 
-  const loadServerHierarchy = async (target: Target): Promise<TreeLoad> => {
+  const loadServerHierarchy = async (target: Target, stale: () => boolean): Promise<TreeLoad> => {
     if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
-    const result = await server.requests.hierarchy(target.uri);
+    // The request keeps its own timeout. This only stops waiting when the user
+    // has moved on, so a slow hierarchy cannot hold the single refresh open.
+    const outcome = await untilSettledOrStale(server.requests.hierarchy(target.uri), stale, STALE_POLL_MS);
+    if (outcome.kind === 'stale' || stale()) return SUPERSEDED;
+    if (outcome.kind === 'rejected') {
+      const reason = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      return { tree: undefined, state: { kind: 'failed', reason } };
+    }
+    const result = outcome.value;
     const tree = result.kind === 'ok' ? buildTree(target.uri, result.value) : undefined;
     return { tree, state: stateFromResult(result, tree?.size ?? 0) };
   };
   const serverUnavailableFor = (target: Target): TreeState | undefined =>
     target.source === 'outline' ? undefined : serverUnavailable(server.status, server.advertisedRequests);
-  const loadModelTree = async (target: Target): Promise<TreeLoad> => {
-    if (target.source !== 'outline') return loadServerHierarchy(target);
-    if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
-    const uri = target.uri;
-    const ask = () => symbolsWithin(vscode.commands.executeCommand<readonly DocumentOutlineSymbol[] | undefined>(
-      'vscode.executeDocumentSymbolProvider', vscode.Uri.parse(uri, true),
-    ), OUTLINE_WAIT_MS, () => logger.warn(`Document symbol provider did not answer for ${fileName(uri)} within ${OUTLINE_WAIT_MS}ms`));
-    let outline = await loadDocumentOutline(uri, ask);
-    // The built-in Markdown extension can be inactive when the first focused
-    // Markdown document arrives. Activate it once, then ask its provider again.
-    // A failure here must not abandon the load: an empty answer still replaces
-    // the previous model, and `viewsWelcome` explains the empty outline.
-    if (target.outlineKind === 'markdown' && outline.state.kind === 'outline-empty') {
-      const markdown = vscode.extensions.getExtension('vscode.markdown-language-features');
-      if (markdown && !markdown.isActive) {
-        try {
-          await deadline(markdown.activate(), OUTLINE_WAIT_MS);
-          outline = await loadDocumentOutline(uri, ask);
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          logger.warn(`Markdown outline provider did not activate for ${fileName(uri)}: ${reason}`);
-        }
-      }
-    }
+  const documentSymbols = (uri: string): Promise<readonly DocumentOutlineSymbol[] | undefined> =>
+    Promise.resolve(vscode.commands.executeCommand<readonly DocumentOutlineSymbol[] | undefined>(
+      'vscode.executeDocumentSymbolProvider', vscode.Uri.parse(uri, true)));
+  const fromOutline = (uri: string, outline: Awaited<ReturnType<typeof loadDocumentOutline>>): TreeLoad => {
     const tree = outline.nodes.length > 0 ? buildTree(uri, outline.nodes) : undefined;
     return tree
       ? { tree, state: { kind: 'ready', nodes: tree.size }, ...(outline.log ? { log: outline.log } : {}) }
       : { tree: undefined, state: outline.state, ...(outline.message ? { message: outline.message } : {}), ...(outline.log ? { log: outline.log } : {}) };
   };
+  const loadModelTree = async (target: Target, stale: () => boolean): Promise<TreeLoad> => {
+    if (target.source !== 'outline') return loadServerHierarchy(target, stale);
+    if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
+    const uri = target.uri;
+    // Markdown's provider registers after the file is shown, and the extension
+    // can already report itself active while that provider is still missing.
+    // An empty answer is retried until the budget passes. An API description is
+    // asked once: an immediate empty outline is the document.
+    if (target.outlineKind === 'markdown') {
+      const waited = await waitForOutline({
+        ask: () => documentSymbols(uri),
+        activate: () => activateMarkdown(uri),
+        deadlineMs: OUTLINE_WAIT_MS,
+        pollMs: STALE_POLL_MS,
+        stale,
+      });
+      if (waited.kind === 'stale') return SUPERSEDED;
+      if (waited.kind === 'unanswered') {
+        logger.warn(`Document symbol provider did not answer for ${fileName(uri)} within ${OUTLINE_WAIT_MS}ms`);
+      }
+      if (waited.kind === 'failed') {
+        return fromOutline(uri, {
+          nodes: [],
+          state: { kind: 'failed', reason: waited.reason },
+          log: `document symbol provider failed for ${uri}: ${waited.reason}`,
+        });
+      }
+      const symbols = waited.kind === 'symbols' ? waited.symbols : undefined;
+      return fromOutline(uri, await loadDocumentOutline(uri, async () => symbols));
+    }
+    const started = Date.now();
+    const outcome = await untilSettledOrStale(
+      documentSymbols(uri),
+      () => stale() || Date.now() - started >= OUTLINE_WAIT_MS,
+      STALE_POLL_MS,
+    );
+    if (stale()) return SUPERSEDED;
+    if (outcome.kind === 'stale') {
+      logger.warn(`Document symbol provider did not answer for ${fileName(uri)} within ${OUTLINE_WAIT_MS}ms`);
+      return fromOutline(uri, await loadDocumentOutline(uri, async () => undefined));
+    }
+    if (outcome.kind === 'rejected') {
+      const reason = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      return fromOutline(uri, {
+        nodes: [],
+        state: { kind: 'failed', reason },
+        log: `document symbol provider failed for ${uri}: ${reason}`,
+      });
+    }
+    return fromOutline(uri, await loadDocumentOutline(uri, async () => outcome.value));
+  };
+  /** Starts the built-in Markdown extension once. A failure still leaves the outline wait free to ask again. */
+  async function activateMarkdown(uri: string): Promise<void> {
+    const markdown = vscode.extensions.getExtension('vscode.markdown-language-features');
+    if (!markdown) return;
+    try {
+      await markdown.activate();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn(`Markdown outline provider did not activate for ${fileName(uri)}: ${reason}`);
+    }
+  }
 
   // ── Architecture: the manifest 003 resolved, and nothing else ──────────────
   const architecture = new HierarchyTree('Architecture', EXPLORER_VIEWS.architecture, EXPLORER_CONTEXT_KEYS.architectureTree,
@@ -564,46 +632,6 @@ export function registerModelExplorer(
     model: modelApi as HierarchyTreeApi & { readonly lastReflection: SelectionReflection | undefined },
     diagramPanels,
   };
-}
-
-/**
- * Waits for a host outline. A provider that does not answer yields no symbols, so the
- * tree can leave the previous model; a provider that rejects still fails the load.
- * A late answer after the wait is ignored, including a late rejection.
- */
-function symbolsWithin<T>(pending: PromiseLike<T>, ms: number, onTimeout: () => void): Promise<T | undefined> {
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const result = new Promise<T | undefined>((resolve, reject) => {
-    timer = setTimeout(() => {
-      timedOut = true;
-      onTimeout();
-      resolve(undefined);
-    }, ms);
-    Promise.resolve(pending).then(
-      (value) => { if (!timedOut) resolve(value); },
-      (error: unknown) => { if (!timedOut) reject(error); },
-    );
-  });
-  return result.finally(() => { if (timer !== undefined) clearTimeout(timer); });
-}
-
-/** Rejects when `pending` does not settle in time. A late rejection afterwards is ignored. */
-function deadline<T>(pending: PromiseLike<T>, ms: number): Promise<T> {
-  let settled = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const result = new Promise<T>((resolve, reject) => {
-    timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error(`timed out after ${ms}ms`));
-    }, ms);
-    Promise.resolve(pending).then(
-      (value) => { if (!settled) { settled = true; resolve(value); } },
-      (error: unknown) => { if (!settled) { settled = true; reject(error); } },
-    );
-  });
-  return result.finally(() => { if (timer !== undefined) clearTimeout(timer); });
 }
 
 /** `TabInputText`: one document uri, and none of the fields a custom editor, webview, diff or notebook carries. */
