@@ -163,7 +163,7 @@
         {
           "id": "zenwave",
           "title": "ZenWave",
-          "icon": "$(type-hierarchy)"
+          "icon": "resources/zenwave-brand/zenwave-activitybar.svg"
         }
       ]
     },

@@ -8,7 +8,7 @@ import { CoalescedRefresh, type Scheduler } from '../../src/explorer/coalesce.js
 import { documentSymbolsToHierarchy, loadDocumentOutline, type DocumentSymbolLike, type SymbolInformationLike } from '../../src/explorer/document-symbols.js';
 import { DiagramPanels, reflectSelection } from '../../src/explorer/diagram-selection.js';
 import { focusedTreeTarget, followDecision, isApiDescription, isModelDocument, outlineRetarget, tabDocumentUri, targetForTextDocument } from '../../src/explorer/follow.js';
-import { buildTree, findNode, NEUTRAL_ICON, nodeAt, presentNode, walk } from '../../src/explorer/hierarchy-model.js';
+import { ancestorChain, buildTree, CURSOR_REVEAL, findNode, iconResourceUri, initialExpansion, itemIcon, NEUTRAL_ICON, nodeAt, presentNode, walk } from '../../src/explorer/hierarchy-model.js';
 import { describeState, serverUnavailable, stateFromResult, TREE_STATE_KINDS } from '../../src/explorer/tree-state.js';
 import { LatestLoad, resumeAbandoned } from '../../src/explorer/latest-load.js';
 import { untilSettledOrStale, waitForOutline } from '../../src/explorer/outline-wait.js';
@@ -343,15 +343,17 @@ test('an Arcadia architecture hierarchy keeps resources lazy, typed and visibly 
   const artifacts = presentNode(findNode(tree, byLabel('Artifacts', 'artifacts'))!, MANIFEST);
   const docs = presentNode(findNode(tree, byLabel('Docs', 'docs'))!, MANIFEST);
   const consumers = presentNode(findNode(tree, byLabel('Consumers', 'consumers'))!, MANIFEST);
-  assert.deepEqual([artifacts.icon, docs.icon, consumers.icon], ['package', 'book', 'organization']);
+  assert.deepEqual([artifacts.icon, docs.icon, consumers.icon], ['library', 'output', 'plug']);
 
   const openapi = presentNode(findNode(tree, byLabel('apis/catalog.yml', 'artifact'))!, MANIFEST);
-  assert.deepEqual([openapi.icon, openapi.description, openapi.address, openapi.disabled], [
-    'symbol-interface',
+  assert.deepEqual([openapi.description, openapi.address, openapi.disabled], [
     'apis/catalog.yml · 1.2.3',
     'zenwave:/architecture/catalogue/1.2.3/apis/catalog.yml',
     false,
   ]);
+  const openapiIcon = itemIcon(openapi, false);
+  assert.equal(openapiIcon.themeIcon, 'file', 'ThemeIcon.File, not the openapi codicon');
+  assert.equal('resource' in openapiIcon && openapiIcon.resource, 'zenwave:/architecture/catalogue/1.2.3/apis/catalog.yml');
   const absolute = presentNode(findNode(tree, byLabel('https://schemas.arcadia.example/catalog/openapi.yml', 'artifact'))!, MANIFEST);
   assert.equal(absolute.label, 'https://schemas.arcadia.example/catalog/openapi.yml', 'an absolute URI is shown as the server labelled it');
   assert.equal(absolute.description, 'https://schemas.arcadia.example/catalog/openapi.yml · 2026.11');
@@ -370,6 +372,119 @@ test('an Arcadia architecture hierarchy keeps resources lazy, typed and visibly 
   assert.deepEqual([consumer.label, consumer.address, consumer.disabled], ['Arcadia storefront', undefined, false], 'consumers are plain text');
   const unknown = presentNode(findNode(tree, byLabel('Release notes', 'future-resource'))!, MANIFEST);
   assert.deepEqual([unknown.label, unknown.icon], ['Release notes', NEUTRAL_ICON], 'a future kind remains visible');
+});
+
+test('kind icons, file entries and model-tree expansion follow the owner rule', () => {
+  const architecture = buildTree(MANIFEST, sample('hierarchy-arcadia-manifest.json'));
+  const iconOf = (label: string, kind: string) => presentNode(findNode(architecture, byLabel(label, kind))!, MANIFEST).icon;
+  assert.equal(iconOf('architecture', 'domain'), 'globe');
+  assert.equal(iconOf('catalogue', 'subdomain'), 'folder-library');
+  assert.equal(iconOf('catalog-api', 'service'), 'server');
+  assert.equal(iconOf('Artifacts', 'artifacts'), 'library');
+  assert.equal(iconOf('Docs', 'docs'), 'output');
+  assert.equal(iconOf('Consumers', 'consumers'), 'plug');
+  assert.equal(iconOf('Arcadia storefront', 'consumer'), 'plug');
+
+  const flow = buildTree(FLOW, sample('hierarchy-unopened-zfl.json'));
+  assert.equal(presentNode(findNode(flow, byLabel('createOrder', 'command'))!, FLOW).icon, 'symbol-method-arrow');
+  const orderService = findNode(flow, byLabel('OrderService', 'service'))!;
+  assert.equal(presentNode(orderService, FLOW).icon, 'server');
+  assert.equal(initialExpansion(orderService, 'model'), 'expanded', 'a service is open so its commands show');
+  assert.equal(initialExpansion(orderService.parent!, 'model'), 'expanded', 'the system above the service stays open');
+  assert.equal(initialExpansion(findNode(flow, byLabel('createOrder', 'command'))!, 'model'), 'none');
+  const flowEvents = [...walk(flow.roots)].filter((node) => node.node.kind === 'event');
+  assert.ok(flowEvents.length > 0);
+  assert.ok(flowEvents.every((node) => node.children.length === 0), 'the server sample sends events with no field children');
+
+  const range = { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } };
+  const node = (kind: string, label: string, children: HierarchyNode[] = [], extra: Partial<HierarchyNode> = {}): HierarchyNode => ({
+    id: `${kind}:${label}`, label, kind, sourceUri: ZDL, sourceRange: range,
+    children, relatedResources: [], uiHints: {}, viewNodeIds: [], ...extra,
+  });
+  const api = buildTree(ZDL, [node('api', 'OrdersAsyncAPI')]);
+  assert.equal(presentNode(api.roots[0]!, ZDL).icon, 'symbol-interface');
+  const method = buildTree(ZDL, [node('method', 'createOrder')]);
+  assert.equal(presentNode(method.roots[0]!, ZDL).icon, 'symbol-method-arrow', 'a ZDL service operation is a method');
+
+  const file = (label: string, kind: 'artifact' | 'doc', extra: Partial<HierarchyNode> = {}) =>
+    presentNode(buildTree(MANIFEST, [node(kind, label, [], extra)]).roots[0]!, MANIFEST);
+  const expectFile = (presentation: ReturnType<typeof presentNode>, extension: RegExp) => {
+    const icon = itemIcon(presentation, false);
+    if (!('resource' in icon)) assert.fail(`ThemeIcon.File, got ${icon.themeIcon}`);
+    assert.equal(icon.themeIcon, 'file');
+    assert.match(iconResourceUri(icon.resource).path, extension);
+    const warned = itemIcon(presentation, true);
+    assert.deepEqual(warned, { themeIcon: 'warning', disabled: false }, 'a warning still replaces the file icon');
+  };
+  expectFile(presentNode(findNode(architecture, byLabel('README.md', 'doc'))!, MANIFEST), /README\.md$/);
+  expectFile(file('domain-model.zdl', 'artifact', { uiHints: { type: 'zdl' }, address: 'zenwave:/orders/0.1.0/domain-model.zdl' }), /domain-model\.zdl$/);
+  expectFile(file('place-order.zfl', 'artifact', { uiHints: { type: 'zfl' }, address: 'zenwave:/orders/0.1.0/place-order.zfl' }), /place-order\.zfl$/);
+  expectFile(file('openapi.json', 'artifact', { uiHints: { type: 'openapi' }, address: 'zenwave:/orders/0.1.0/openapi.json' }), /openapi\.json$/);
+  expectFile(file('asyncapi.yaml', 'artifact', { uiHints: { type: 'asyncapi' }, address: 'zenwave:/orders/0.1.0/asyncapi.yaml' }), /asyncapi\.yaml$/);
+  expectFile(file('README.md', 'doc', { address: 'zenwave:/architecture/-/README.md' }), /README\.md$/);
+  expectFile(file('guide.markdown', 'doc', { address: 'zenwave:/architecture/-/docs/guide.markdown' }), /guide\.markdown$/);
+  // The address does not end in the file name, so the entry path supplies it.
+  const absolute = file('https://schemas.arcadia.example/catalog/openapi.yml', 'artifact', {
+    uiHints: { type: 'openapi' }, address: 'zenwave:/architecture/catalogue/2026.11/absolute-uri', version: '2026.11',
+  });
+  expectFile(absolute, /openapi\.yml$/);
+  const absoluteIcon = itemIcon(absolute, false);
+  assert.equal('resource' in absoluteIcon && absoluteIcon.resource, 'https://schemas.arcadia.example/catalog/openapi.yml');
+
+  const relative = file('apis/catalog.yml', 'artifact', { uiHints: { type: 'openapi' } });
+  expectFile(relative, /catalog\.yml$/);
+  assert.equal(iconResourceUri('apis/catalog.yml').scheme, 'file');
+
+  const disabledFile = file('old.yml', 'artifact', { uiHints: { type: 'openapi' }, disabledReason: 'pending' });
+  const disabledIcon = itemIcon(disabledFile, false);
+  assert.equal(disabledFile.fileResource, undefined);
+  assert.deepEqual(disabledIcon, { themeIcon: 'symbol-interface', disabled: true }, 'a disabled file keeps the greyed codicon');
+  const glob = presentNode(findNode(architecture, byLabel('contracts/**/*.yaml', 'artifact'))!, MANIFEST);
+  assert.equal(glob.fileResource, undefined);
+  assert.deepEqual(itemIcon(glob, false), { themeIcon: 'symbol-event', disabled: true });
+
+  const street = node('field', 'street');
+  const address = node('field', 'address', [street]);
+  const status = node('field', 'status');
+  const entity = node('entity', 'Order', [status, address]);
+  const eventField = node('field', 'id');
+  const event = node('event', 'OrderEvent', [eventField]);
+  const input = node('input', 'OrderInput', [node('field', 'name')]);
+  const output = node('output', 'OrderOutput', [node('field', 'total')]);
+  const bareEvent = node('event', 'BareEvent');
+  const command = node('command', 'createOrder');
+  const service = node('service', 'OrderService', [command]);
+  const model = buildTree(ZDL, [
+    node('section', 'entities', [entity]),
+    node('section', 'events', [event, bareEvent]),
+    node('section', 'inputs', [input]),
+    node('section', 'outputs', [output]),
+    node('section', 'services', [service]),
+  ]);
+  const at = (label: string, kind: string) => findNode(model, byLabel(label, kind))!;
+  assert.equal(initialExpansion(at('entities', 'section'), 'model'), 'expanded');
+  assert.equal(initialExpansion(at('Order', 'entity'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderEvent', 'event'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderInput', 'input'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderOutput', 'output'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderService', 'service'), 'model'), 'expanded');
+  assert.equal(initialExpansion(at('status', 'field'), 'model'), 'none', 'a field with no children is a leaf');
+  assert.equal(initialExpansion(at('address', 'field'), 'model'), 'collapsed', 'a field with children starts collapsed');
+  assert.equal(initialExpansion(at('createOrder', 'command'), 'model'), 'none');
+  assert.equal(initialExpansion(at('BareEvent', 'event'), 'model'), 'none', 'an event the server sent without fields has no twistie');
+
+  const domain = findNode(architecture, byLabel('architecture', 'domain'))!;
+  const archService = findNode(architecture, byLabel('catalog-api', 'service'))!;
+  assert.equal(initialExpansion(architecture.roots[0]!, 'architecture'), 'expanded');
+  assert.equal(initialExpansion(domain, 'architecture'), 'expanded', 'the architecture tree still opens its second level');
+  assert.equal(initialExpansion(archService, 'architecture'), 'collapsed');
+  assert.equal(initialExpansion(archService, 'model'), 'expanded');
+
+  const nested = at('street', 'field');
+  assert.deepEqual(ancestorChain(nested).map((item) => item.node.label), ['entities', 'Order', 'address']);
+  assert.deepEqual(ancestorChain(nested).map((item) => initialExpansion(item, 'model')), ['expanded', 'collapsed', 'collapsed']);
+  assert.deepEqual(CURSOR_REVEAL, { select: true, focus: false, expand: true }, 'reveal opens the node and, through getParent, its ancestors');
+  assert.equal(nested.parent, at('address', 'field'), 'getParent is the chain reveal walks');
 });
 
 test('the node at a cursor is the narrowest declaration containing it, in the document the cursor is in', () => {
@@ -576,7 +691,7 @@ test('the container, both views, activation and an explanation for every empty s
     };
   };
   const { contributes } = manifest;
-  assert.ok(contributes.viewsContainers.activitybar.some((container) => container.id === 'zenwave' && container.icon.length > 0));
+  assert.ok(contributes.viewsContainers.activitybar.some((container) => container.id === 'zenwave' && container.icon === 'resources/zenwave-brand/zenwave-activitybar.svg'));
   assert.deepEqual(contributes.views.zenwave?.map((view) => [view.id, view.name]), [['zenwave.architecture', 'Architecture'], ['zenwave.model', 'Model']]);
   for (const view of ['zenwave.architecture', 'zenwave.model']) assert.ok(manifest.activationEvents.includes(`onView:${view}`));
 

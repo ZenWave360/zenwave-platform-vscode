@@ -8,7 +8,7 @@ import { CoalescedRefresh } from './coalesce.js';
 import { loadDocumentOutline, type DocumentOutlineSymbol } from './document-symbols.js';
 import { DiagramPanels, reflectSelection, type SelectionReflection } from './diagram-selection.js';
 import { focusedTreeTarget, followDecision, outlineRetarget, tabDocumentUri, targetForTextDocument, type FocusedTab, type ModelTreeSource, type OutlineKind, type TextDocumentTarget } from './follow.js';
-import { buildTree, fileName, nodeAt, presentNode, type ExplorerNode, type ExplorerTree } from './hierarchy-model.js';
+import { buildTree, CURSOR_REVEAL, fileName, iconResourceUri, initialExpansion, itemIcon, nodeAt, presentNode, type ExplorerNode, type ExplorerTree } from './hierarchy-model.js';
 import { describeState, sameState, serverUnavailable, stateFromResult, type TreeState } from './tree-state.js';
 import { LatestLoad, resumeAbandoned } from './latest-load.js';
 import { untilSettledOrStale, waitForOutline } from './outline-wait.js';
@@ -146,15 +146,27 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
 
   getTreeItem(element: ExplorerNode): vscode.TreeItem {
     const presentation = presentNode(element, this.tree?.documentUri ?? '');
-    const item = new vscode.TreeItem(presentation.label, presentation.collapsible
-      ? element.depth < 2 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed
-      : vscode.TreeItemCollapsibleState.None);
+    const expansion = initialExpansion(element, this.name === 'Model' ? 'model' : 'architecture');
+    const item = new vscode.TreeItem(presentation.label, expansion === 'expanded'
+      ? vscode.TreeItemCollapsibleState.Expanded
+      : expansion === 'collapsed'
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None);
     item.id = element.key;
     if (presentation.description) item.description = presentation.description;
     const warning = this.openWarnings.get(element.key);
     item.tooltip = warning ? `${presentation.tooltip}\n\nWarning: ${warning}` : presentation.tooltip;
-    item.iconPath = new vscode.ThemeIcon(warning ? 'warning' : presentation.icon,
-      presentation.disabled ? new vscode.ThemeColor('disabledForeground') : undefined);
+    const icon = itemIcon(presentation, warning !== undefined);
+    if ('resource' in icon) {
+      // ThemeIcon.File plus a URI whose path ends with the file name. The command
+      // below is what a click runs, so this URI is not opened and nothing is fetched.
+      item.iconPath = vscode.ThemeIcon.File;
+      const target = iconResourceUri(icon.resource);
+      item.resourceUri = vscode.Uri.from({ scheme: target.scheme, path: target.path });
+    } else {
+      item.iconPath = new vscode.ThemeIcon(icon.themeIcon,
+        icon.disabled ? new vscode.ThemeColor('disabledForeground') : undefined);
+    }
     item.contextValue = presentation.contextValue;
     if (presentation.address) {
       item.command = { command: EXPLORER_COMMANDS.openResource, title: 'Open Architecture Resource', arguments: [element] };
@@ -539,7 +551,8 @@ export function registerModelExplorer(
     const active = editor.selection.active;
     const node = nodeAt(tree, uri, { line: active.line, character: active.character });
     if (!node || model.view.selection[0]?.key === node.key) return;
-    await model.view.reveal(node, { select: true, focus: false, expand: true }).then(undefined, () => undefined);
+    // `expand` opens the node in focus. reveal walks getParent and opens those ancestors.
+    await model.view.reveal(node, CURSOR_REVEAL).then(undefined, () => undefined);
   }
 
   async function openNode(element: unknown): Promise<string | undefined> {
