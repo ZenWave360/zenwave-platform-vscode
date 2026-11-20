@@ -265,7 +265,7 @@
           ]
         },
         {
-          "begin": "\\b(policies)\\b(?:\\s*\\(\\s*([A-Za-z_][\\w.]*)\\s*\\))?\\s*(\\{)",
+          "begin": "\\b(policies|rules)\\b(?:\\s*\\(\\s*([A-Za-z_][\\w.]*)\\s*\\))?\\s*(\\{)",
           "beginCaptures": {
             "1": {
               "name": "keyword.control.zdl"
@@ -501,7 +501,7 @@
       ]
     },
     "keywords": {
-      "match": "\\b(import|config|apis|zdl|plugins|policies|disabled|asyncapi|openapi|entity|enum|input|output|event|relationship|ManyToMany|ManyToOne|OneToMany|OneToOne|service|aggregate|id|for|from|to|withEvents|with|lifecycle|initial|inherit)\\b",
+      "match": "\\b(import|config|apis|zdl|plugins|policies|rules|disabled|asyncapi|openapi|entity|enum|input|output|event|relationship|ManyToMany|ManyToOne|OneToMany|OneToOne|service|aggregate|id|for|from|to|withEvents|with|lifecycle|initial|inherit)\\b",
       "name": "keyword.control.zdl"
     },
     "legacyConstants": {

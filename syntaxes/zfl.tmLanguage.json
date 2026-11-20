@@ -298,6 +298,40 @@
           ]
         },
         {
+          "begin": "\\b(rules)\\b(?:\\s*\\(\\s*([A-Za-z_][\\w.]*)\\s*\\))?\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.zfl"
+            },
+            "2": {
+              "name": "variable.parameter.zfl"
+            },
+            "3": {
+              "name": "punctuation.section.block.begin.zfl"
+            }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.zfl"
+            }
+          },
+          "name": "meta.block.flow-rules.zfl",
+          "patterns": [
+            {
+              "match": "^\\s*([A-Za-z_][\\w-]*)\\b",
+              "captures": {
+                "1": {
+                  "name": "entity.other.attribute-name.zfl"
+                }
+              }
+            },
+            {
+              "include": "#common"
+            }
+          ]
+        },
+        {
           "begin": "\\b(end)\\b\\s*(\\{)",
           "beginCaptures": {
             "1": {
@@ -341,7 +375,7 @@
       ]
     },
     "keywords": {
-      "match": "\\b(import|config|flow|systems|zdl|service|commands|events|emits|on|start|when|do|for|command|event|if|else|policy|end|completed|suspended|cancelled|and)\\b",
+      "match": "\\b(import|config|flow|systems|zdl|service|commands|events|emits|on|start|when|do|for|command|event|if|else|policy|rules|end|completed|suspended|cancelled|and)\\b",
       "name": "keyword.control.zfl"
     },
     "numbers": {
