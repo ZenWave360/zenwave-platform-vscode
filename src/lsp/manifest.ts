@@ -9,7 +9,6 @@ import {
   literalGlob,
   manifestDocumentUri,
   manifestFilters,
-  projectManifestOf,
   relativeSegments,
   ALLOWED_DOMAINS_SETTING,
   REMOTE_MANIFEST_NAME_SETTING,
@@ -29,8 +28,6 @@ export function readArchitectureSettings(): ArchitectureSettings {
   return architectureSettings(configuration.get<unknown>('remoteManifestName'), configuration.get<unknown>('allowedDomains'));
 }
 
-const CONFIG_SEGMENTS = ['.zenwave', 'config.yml'] as const;
-
 /** A reference relative to a folder, joined as a URI — never as a file-system path. */
 function referenceUri(folder: vscode.Uri, reference: string): vscode.Uri {
   if (hasScheme(reference)) return vscode.Uri.parse(reference, true);
@@ -38,41 +35,22 @@ function referenceUri(folder: vscode.Uri, reference: string): vscode.Uri {
   return vscode.Uri.joinPath(folder, ...relativeSegments(reference));
 }
 
-async function readText(uri: vscode.Uri): Promise<string | undefined> {
-  try {
-    return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-  } catch {
-    return undefined;
-  }
-}
-
 async function candidatesFor(folder: vscode.WorkspaceFolder): Promise<FolderCandidates> {
   const inspected = vscode.workspace.getConfiguration('zenwave.workspace', folder.uri).inspect<string>('manifest');
   // Only values the user set: a default would make every workspace "configured".
   const value = [inspected?.workspaceFolderValue, inspected?.workspaceValue, inspected?.globalValue]
     .find((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0)?.trim();
-  const configUri = vscode.Uri.joinPath(folder.uri, ...CONFIG_SEGMENTS);
-  const text = await readText(configUri);
-  let config: FolderCandidates['config'];
-  if (text !== undefined) {
-    const manifest = projectManifestOf(text);
-    config = manifest
-      ? { configUri: configUri.toString(), manifestUri: referenceUri(folder.uri, manifest).toString() }
-      : { configUri: configUri.toString(), problem: "has no 'project-manifest'; ignored" };
-  }
   return {
     folderName: folder.name,
     folderUri: folder.uri.toString(),
     ...(value ? { setting: { value, manifestUri: referenceUri(folder.uri, value).toString() } } : {}),
-    ...(config ? { config } : {}),
   };
 }
 
 /**
- * Resolves the workspace's one manifest: setting, then `.zenwave/config.yml` at
- * a folder root, then none. Everything is read through `vscode.workspace.fs`,
- * so the web host resolves the same way; nothing is fetched and no content is
- * read beyond the configuration file itself.
+ * Resolves the workspace's one manifest: the session choice, then the setting,
+ * then none. Only its existence is checked, through `vscode.workspace.fs`; a
+ * `.zenwave/config.yml` is never read.
  */
 export async function resolveWorkspaceManifest(override?: string): Promise<ResolvedManifest> {
   const folders = vscode.workspace.workspaceFolders ?? [];
@@ -124,12 +102,10 @@ export function manifestDocument(resolved: ResolvedManifest, remoteManifestName:
 }
 
 /**
- * Watchers for everything that decides or is the manifest: each folder's
- * `.zenwave/config.yml`, and the resolved manifest file.
+ * Watchers for the resolved manifest file.
  */
 export function manifestWatchers(resolved: ResolvedManifest): vscode.FileSystemWatcher[] {
-  const watchers = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
-    vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, CONFIG_SEGMENTS.join('/'))));
+  const watchers: vscode.FileSystemWatcher[] = [];
   const manifest = manifestPattern(resolved);
   if (manifest) watchers.push(vscode.workspace.createFileSystemWatcher(manifest));
   return watchers;

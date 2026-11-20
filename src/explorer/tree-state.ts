@@ -58,7 +58,7 @@ export function describeState(tree: string, subject: string | undefined, state: 
     case 'loading': return `${tree} tree: waiting for the ZenWave language server to start`;
     case 'no-server': return `${tree} tree is empty: it needs the ZenWave language server, which is not available (${state.reason})`;
     case 'unsupported': return `${tree} tree is empty: the connected ZenWave language server does not offer ${ZENWAVE_REQUESTS.hierarchy}`;
-    case 'no-manifest': return `${tree} tree is empty: no architecture manifest was resolved for this workspace (set zenwave.workspace.manifest or project-manifest in .zenwave/config.yml)`;
+    case 'no-manifest': return `${tree} tree is empty: no architecture manifest was resolved for this workspace (set zenwave.workspace.manifest)`;
     case 'no-model': return `${tree} tree is empty: no ZDL or ZFL document has been focused yet`;
     case 'empty': return `${tree} tree is empty: the language server reports no hierarchy${about}`;
     case 'outline-empty': return `${tree} tree is empty: nothing provides an outline${about}`;

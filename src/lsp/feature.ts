@@ -340,15 +340,6 @@ export function registerLanguageServer(
     return outcome;
   }
 
-  const configWatchers = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
-    vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, '.zenwave/config.yml')));
-  for (const watcher of configWatchers) {
-    context.subscriptions.push(watcher,
-      watcher.onDidCreate((uri) => void reconsiderManifest(`${uri.toString()} created`)),
-      watcher.onDidChange((uri) => void reconsiderManifest(`${uri.toString()} changed`)),
-      watcher.onDidDelete((uri) => void reconsiderManifest(`${uri.toString()} deleted`)));
-  }
-
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       // The manifest, the remote manifest's name and the allowed domains are initialization options.

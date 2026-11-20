@@ -160,9 +160,9 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
   for (const method of EXPECTED_REQUESTS) {
     assert(api.advertisedRequests.includes(method), `Server did not advertise ${method}: ${api.advertisedRequests.join(', ')}`);
   }
-  assert(api.manifest.route === 'config' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml') &&
-    api.manifest.configUri?.endsWith('/.zenwave/config.yml'), `Manifest not resolved from .zenwave/config.yml: ${JSON.stringify(api.manifest)}`);
-  console.log(`PASS: ${api.transport} server connected, customRequests discovered, manifest resolved from .zenwave/config.yml`);
+  assert(api.manifest.route === 'setting' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml'),
+    `Manifest not resolved from .vscode/settings.json: ${JSON.stringify(api.manifest)}`);
+  console.log(`PASS: ${api.transport} server connected, customRequests discovered, manifest resolved from the workspace setting`);
 
   const broken = await vscode.workspace.openTextDocument(await fixture('lsp/broken.zdl'));
   await vscode.window.showTextDocument(broken);
@@ -1011,20 +1011,19 @@ async function explorerOnDisk(api: LanguageServerApi, explorer: ModelExplorerApi
   await treeState(model, 'ready', 'Model tree after the server restarted');
   console.log('PASS: with the server stopped both trees say they need it, and repopulate when it returns');
 
-  const config = await fixture('.zenwave/config.yml');
-  const configText = await vscode.workspace.fs.readFile(config);
+  const manifestSetting = vscode.workspace.getConfiguration('zenwave');
   try {
-    await vscode.workspace.fs.delete(config);
-    await waitFor(() => api.manifest.route === 'none', `Deleting .zenwave/config.yml did not unresolve the manifest: ${JSON.stringify(api.manifest)}`);
+    await manifestSetting.update('workspace.manifest', undefined, vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.manifest.route === 'none', `Removing zenwave.workspace.manifest did not unresolve the manifest: ${JSON.stringify(api.manifest)}`);
     await connected(api, 'Restarted without a manifest');
     await treeState(architecture, 'no-manifest', 'Architecture tree without a manifest');
     assert(roots(architecture).length === 0, 'Architecture tree has nodes without a manifest');
     await treeState(model, 'ready', 'Model tree without a manifest');
     assert(model.documentUri === checkout.uri.toString() && node(model, 'Orders', 'system'), 'Model tree stopped working without a manifest');
   } finally {
-    await vscode.workspace.fs.writeFile(config, configText);
+    await manifestSetting.update('workspace.manifest', 'zenwave-architecture.yml', vscode.ConfigurationTarget.Workspace);
   }
-  await waitFor(() => api.manifest.route === 'config', 'Restored .zenwave/config.yml was not resolved');
+  await waitFor(() => api.manifest.route === 'setting', 'Restored zenwave.workspace.manifest was not resolved');
   await connected(api, 'Restarted with the manifest restored');
   await treeState(architecture, 'ready', 'Architecture tree with the manifest restored');
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -1067,12 +1066,13 @@ async function languageServerSettings(api: LanguageServerApi): Promise<void> {
     await connected(api, 'Re-enabled');
     console.log('PASS: an invalid serverPath fails once with its reason, and zenwave.lsp.enabled turns the server off and on');
   } finally {
-    await workspace.update('workspace.manifest', undefined, vscode.ConfigurationTarget.Workspace);
+    await workspace.update('workspace.manifest', 'zenwave-architecture.yml', vscode.ConfigurationTarget.Workspace);
     await workspace.update('lsp.serverPath', undefined, vscode.ConfigurationTarget.Workspace);
     await workspace.update('lsp.enabled', undefined, vscode.ConfigurationTarget.Workspace);
     await workspace.update('lsp.trace.server', undefined, vscode.ConfigurationTarget.Workspace);
   }
-  await waitFor(() => api.manifest.route === 'config', 'Manifest resolution did not return to .zenwave/config.yml');
+  await waitFor(() => api.manifest.route === 'setting' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml'),
+    'Manifest resolution did not return to the fixture setting');
   await connected(api, 'Restored configuration');
 }
 

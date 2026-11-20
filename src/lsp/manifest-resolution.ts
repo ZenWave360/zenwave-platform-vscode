@@ -12,45 +12,22 @@ export const REMOTE_MANIFEST_NAME_SETTING = 'zenwave.architecture.remoteManifest
 /** `zenwave.architecture.allowedDomains`. Hosts an absolute http(s) manifest entry may be fetched from. */
 export const ALLOWED_DOMAINS_SETTING = 'zenwave.architecture.allowedDomains';
 
-export type ManifestRoute = 'setting' | 'override' | 'config' | 'none';
+export type ManifestRoute = 'setting' | 'override' | 'none';
 
 export interface FolderCandidates {
   readonly folderName: string;
   readonly folderUri: string;
   /** `zenwave.workspace.manifest` as it applies to this folder, already resolved to a URI. */
   readonly setting?: { readonly value: string; readonly manifestUri: string };
-  /** A `.zenwave/config.yml` at this folder's root. */
-  readonly config?: { readonly configUri: string; readonly manifestUri?: string; readonly problem?: string };
 }
 
 export interface ResolvedManifest {
   readonly route: ManifestRoute;
   readonly manifestUri?: string;
-  readonly configUri?: string;
   /** The workspace folder that supplied it. */
   readonly folderName?: string;
   /** What was found and not used, and anything wrong with what was found. */
   readonly notes: readonly string[];
-}
-
-/**
- * The value of `project-manifest` in a `.zenwave/config.yml`.
- *
- * Mirrors zenwave-lsp `ZenwaveWorkspaceConfig.parseScalar` exactly — first
- * line starting with the key, inline ` #` comment removed, trimmed — so the
- * client and the server never disagree about which manifest a configuration
- * names.
- */
-export function projectManifestOf(text: string): string | undefined {
-  for (const raw of text.split(/\r?\n/)) {
-    const comment = raw.indexOf(' #');
-    const line = (comment >= 0 ? raw.slice(0, comment) : raw).trimEnd();
-    if (line.trimStart().startsWith('project-manifest:')) {
-      const value = line.slice(line.indexOf(':') + 1).trim();
-      return value.length > 0 ? value : undefined;
-    }
-  }
-  return undefined;
 }
 
 /** Whether a manifest is an `http(s)` address: the server serves it under `zenwave:` and it is read-only (LC-R3, AR-R11). */
@@ -107,7 +84,7 @@ export function relativeSegments(reference: string): string[] {
 }
 
 /**
- * Setting first, then configuration, then nothing — and one manifest for the
+ * The session choice, then the setting, then nothing — and one manifest for the
  * whole workspace. When more than one folder offers one, the first folder in
  * workspace order wins and every other offer is named in `notes`, so a
  * multi-root workspace never picks silently.
@@ -118,14 +95,9 @@ export function chooseManifest(folders: readonly FolderCandidates[], override?: 
     // A session choice (no folder is open to hold a setting): it takes the setting's place and is never written to a file.
     for (const folder of folders) {
       if (folder.setting) notes.push(`zenwave.workspace.manifest in folder "${folder.folderName}" names ${folder.setting.manifestUri}; ignored, the session choice comes first`);
-      if (folder.config?.manifestUri) notes.push(`${folder.config.configUri} not consulted: a manifest was chosen for this session`);
     }
     return { route: 'override', manifestUri: override, notes };
   }
-  for (const folder of folders) {
-    if (folder.config?.problem) notes.push(`${folder.config.configUri}: ${folder.config.problem}`);
-  }
-
   const settings = folders.filter((folder) => folder.setting);
   if (settings.length > 0) {
     const chosen = settings[0]!;
@@ -134,26 +106,9 @@ export function chooseManifest(folders: readonly FolderCandidates[], override?: 
         notes.push(`zenwave.workspace.manifest in folder "${other.folderName}" names ${other.setting!.manifestUri}; ignored, folder "${chosen.folderName}" comes first`);
       }
     }
-    for (const other of folders.filter((folder) => folder.config?.manifestUri)) {
-      notes.push(`${other.config!.configUri} not consulted: zenwave.workspace.manifest is set`);
-    }
     return { route: 'setting', manifestUri: chosen.setting!.manifestUri, folderName: chosen.folderName, notes };
   }
 
-  const configs = folders.filter((folder) => folder.config?.manifestUri);
-  if (configs.length > 0) {
-    const chosen = configs[0]!;
-    for (const other of configs.slice(1)) {
-      notes.push(`${other.config!.configUri} names ${other.config!.manifestUri}; ignored, folder "${chosen.folderName}" comes first`);
-    }
-    return {
-      route: 'config',
-      manifestUri: chosen.config!.manifestUri!,
-      configUri: chosen.config!.configUri,
-      folderName: chosen.folderName,
-      notes,
-    };
-  }
   return { route: 'none', notes };
 }
 
@@ -161,8 +116,7 @@ export function describeManifest(resolved: ResolvedManifest): string {
   const how = {
     setting: `from the zenwave.workspace.manifest setting (folder "${resolved.folderName}")`,
     override: 'chosen with Choose Architecture Manifest… for this session (not saved)',
-    config: `from ${resolved.configUri}`,
-    none: 'none found: no zenwave.workspace.manifest setting and no .zenwave/config.yml at a workspace folder root; starting without a manifest',
+    none: 'none found: no zenwave.workspace.manifest setting; starting without a manifest',
   }[resolved.route];
   const lines = [resolved.manifestUri ? `Architecture manifest: ${resolved.manifestUri}, ${how}` : `Architecture manifest: ${how}`];
   for (const note of resolved.notes) lines.push(`  note: ${note}`);
@@ -171,7 +125,7 @@ export function describeManifest(resolved: ResolvedManifest): string {
 
 /** Whether two resolutions would initialise the server differently. */
 export function sameInitialization(left: ResolvedManifest, right: ResolvedManifest): boolean {
-  return left.manifestUri === right.manifestUri && left.configUri === right.configUri;
+  return left.manifestUri === right.manifestUri;
 }
 
 /** The remote-manifest name and the allowed domains the server is initialised with (AN/4.5). */
@@ -272,7 +226,7 @@ export function sameArchitectureSettings(left: ArchitectureSettings, right: Arch
 }
 
 /**
- * What the server is initialised with. `configUri` and `projectManifestUri` are omitted when absent.
+ * What the server is initialised with. `projectManifestUri` is omitted when absent.
  * `remoteManifestName` and `allowedDomains` are always sent (AN/4.5). The catalogue sits at the top level
  * beside `zenwave`, where the server reads it.
  */
@@ -283,7 +237,6 @@ export function initializationOptions(
   architecture?: { readonly remoteManifestName?: unknown; readonly allowedDomains?: unknown },
 ): {
   zenwave: {
-    configUri?: string;
     projectManifestUri?: string;
     clientCapabilities: { credentialRequest: boolean };
     remoteManifestName: string;
@@ -294,7 +247,6 @@ export function initializationOptions(
   const resources = architectureSettings(architecture?.remoteManifestName, architecture?.allowedDomains);
   return {
     zenwave: {
-      ...(resolved.configUri ? { configUri: resolved.configUri } : {}),
       ...(resolved.manifestUri ? { projectManifestUri: resolved.manifestUri } : {}),
       clientCapabilities: { credentialRequest },
       remoteManifestName: resources.remoteManifestName,

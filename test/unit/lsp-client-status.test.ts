@@ -98,8 +98,7 @@ test('ESLint enforces which host may import which vscode-languageclient entry', 
 });
 
 test('the extension starts only for ZenWave workspaces and documents, or when its views are opened, never at startup', () => {
-  assert.deepEqual(manifest.activationEvents.sort(), ['onFileSystem:zenwave', 'onLanguage:zdl', 'onLanguage:zfl', 'onLanguage:zw', 'onView:zenwave.architecture', 'onView:zenwave.model',
-    'workspaceContains:.zenwave/config.yml']);
+  assert.deepEqual(manifest.activationEvents.sort(), ['onFileSystem:zenwave', 'onLanguage:zdl', 'onLanguage:zfl', 'onLanguage:zw', 'onView:zenwave.architecture', 'onView:zenwave.model']);
 });
 
 test('settings, commands and the trust statement match what the language client does', () => {

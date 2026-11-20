@@ -22,8 +22,7 @@
   catalogue shipped with the extension, on desktop and in the browser.
 - The ZenWave language server (`@zenwave360/lsp-js`) shipped with the extension:
   a Node child process on the desktop, a Web Worker in the browser, for ZDL, ZFL
-  and the architecture manifest resolved from `zenwave.workspace.manifest` or
-  `.zenwave/config.yml`. Status bar indication, restart command, `zenwave.lsp.*`
+  and the architecture manifest resolved from `zenwave.workspace.manifest`. Status bar indication, restart command, `zenwave.lsp.*`
   settings, and credential commands for content the server may ask for.
 - Restricted Mode now also holds back the language server, content resolution
   and credentials; trusting the workspace enables them without a reload.

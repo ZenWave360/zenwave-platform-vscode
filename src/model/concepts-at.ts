@@ -1,6 +1,6 @@
 import type { ConceptsAt } from '../lsp/requests.js';
 
-export const NO_ARCHITECTURE_MESSAGE = 'ZenWave cannot identify concepts here because no architecture is resolved for this workspace. Set zenwave.workspace.manifest, or add project-manifest to .zenwave/config.yml.';
+export const NO_ARCHITECTURE_MESSAGE = 'ZenWave cannot identify concepts here because no architecture is resolved for this workspace. Set zenwave.workspace.manifest.';
 
 export type ConceptsAtPresentation =
   | { readonly kind: 'no-architecture'; readonly message: string }

@@ -13,21 +13,12 @@ import {
   manifestDocumentUri,
   manifestFilters,
   parseManifestUrl,
-  projectManifestOf,
   relativeSegments,
   resolveRemoteManifestName,
   sameArchitectureSettings,
   sameInitialization,
 } from '../../src/lsp/manifest-resolution.js';
 import { DEFAULT_REMOTE_MANIFEST_NAME } from '../../src/lsp/resources.js';
-
-test('project-manifest is read the way zenwave-lsp ZenwaveWorkspaceConfig reads it', () => {
-  assert.equal(projectManifestOf('project-manifest: arcadia-editions-architecture/zenwave-architecture.yml\n'),
-    'arcadia-editions-architecture/zenwave-architecture.yml');
-  assert.equal(projectManifestOf('# comment\nproperties:\n  a: b\nproject-manifest: m.yml # the manifest\r\n'), 'm.yml');
-  assert.equal(projectManifestOf('project-manifest:\n'), undefined);
-  assert.equal(projectManifestOf('other: x'), undefined);
-});
 
 test('references are classified without file-system path handling', () => {
   assert.equal(hasScheme('https://example.com/m.yml'), true);
@@ -43,38 +34,14 @@ const settingFolder = {
   folderName: 'a', folderUri: 'file:///c%3A/a',
   setting: { value: 'arch.yml', manifestUri: 'file:///c%3A/a/arch.yml' },
 };
-const configFolder = {
-  folderName: 'b', folderUri: 'file:///d%3A/b',
-  config: { configUri: 'file:///d%3A/b/.zenwave/config.yml', manifestUri: 'file:///d%3A/b/architecture/zenwave-architecture.yml' },
-};
-
-test('the setting is authoritative and nothing else is used', () => {
-  const resolved = chooseManifest([configFolder, settingFolder]);
+test('the setting is authoritative, and the first folder that has one wins', () => {
+  const second = { folderName: 'b', folderUri: 'file:///d%3A/b', setting: { value: 'other.yml', manifestUri: 'file:///d%3A/b/other.yml' } };
+  const resolved = chooseManifest([{ folderName: 'x', folderUri: 'file:///x' }, settingFolder, second]);
   assert.equal(resolved.route, 'setting');
   assert.equal(resolved.manifestUri, 'file:///c%3A/a/arch.yml');
-  assert.equal(resolved.configUri, undefined);
-  assert.ok(resolved.notes.some((note) => note.includes('not consulted')));
-  assert.match(describeManifest(resolved), /from the zenwave\.workspace\.manifest setting \(folder "a"\)/);
-});
-
-test('a folder configuration is used when no setting names a manifest', () => {
-  const resolved = chooseManifest([{ folderName: 'x', folderUri: 'file:///x' }, configFolder]);
-  assert.deepEqual(resolved, {
-    route: 'config', manifestUri: configFolder.config.manifestUri, configUri: configFolder.config.configUri, folderName: 'b', notes: [],
-  });
-  assert.match(describeManifest(resolved), /zenwave-architecture\.yml, from file:\/\/\/d%3A\/b\/\.zenwave\/config\.yml/);
-});
-
-test('multi-root folders without a common ancestor resolve once, first folder wins, and the rest is said', () => {
-  const second = {
-    folderName: 'c', folderUri: 'file:///e%3A/c',
-    config: { configUri: 'file:///e%3A/c/.zenwave/config.yml', manifestUri: 'file:///e%3A/c/other.yml' },
-  };
-  const resolved = chooseManifest([configFolder, second]);
-  assert.equal(resolved.manifestUri, configFolder.config.manifestUri);
   assert.equal(resolved.notes.length, 1);
-  assert.match(resolved.notes[0]!, /other\.yml; ignored, folder "b" comes first/);
-  assert.match(describeManifest(resolved), /note: /);
+  assert.match(resolved.notes[0]!, /other\.yml; ignored, folder "a" comes first/);
+  assert.match(describeManifest(resolved), /from the zenwave\.workspace\.manifest setting \(folder "a"\)/);
 });
 
 test('the same setting inherited by every folder is not reported as a conflict', () => {
@@ -82,23 +49,20 @@ test('the same setting inherited by every folder is not reported as a conflict',
   assert.deepEqual(resolved.notes, []);
 });
 
-test('no configuration starts without a manifest and says so', () => {
-  const resolved = chooseManifest([{
-    folderName: 'x', folderUri: 'file:///x', config: { configUri: 'file:///x/.zenwave/config.yml', problem: "has no 'project-manifest'; ignored" },
-  }]);
+test('no setting starts without a manifest and says so', () => {
+  const resolved = chooseManifest([{ folderName: 'x', folderUri: 'file:///x' }]);
   assert.equal(resolved.route, 'none');
   assert.equal(resolved.manifestUri, undefined);
   assert.match(describeManifest(resolved), /starting without a manifest/);
-  assert.match(describeManifest(resolved), /has no 'project-manifest'/);
+  assert.doesNotMatch(describeManifest(resolved), /config\.yml/);
   assert.deepEqual(chooseManifest([]), { route: 'none', notes: [] });
 });
 
 test('initialization options carry the shape the server parses, and a changed manifest means a new initialisation', () => {
-  const config = chooseManifest([configFolder]);
+  const config = chooseManifest([settingFolder]);
   assert.deepEqual(initializationOptions(config, true), {
     zenwave: {
-      configUri: configFolder.config.configUri,
-      projectManifestUri: configFolder.config.manifestUri,
+      projectManifestUri: settingFolder.setting.manifestUri,
       clientCapabilities: { credentialRequest: true },
       remoteManifestName: '.zenwave-manifest.yml',
       allowedDomains: [],
@@ -112,7 +76,7 @@ test('initialization options carry the shape the server parses, and a changed ma
     },
   });
   assert.equal(sameInitialization(config, { ...config, notes: ['x'] }), true);
-  assert.equal(sameInitialization(config, chooseManifest([settingFolder])), false);
+  assert.equal(sameInitialization(config, chooseManifest([])), false);
 });
 
 test('initialization options always send the remote manifest name and the allowed domains', () => {
@@ -193,8 +157,8 @@ test('a manifest file name never widens into a glob', () => {
   assert.equal(literalGlob('arch[1]*{a,b}.yml'), 'arch?1???a?b?.yml');
 });
 
-test('a session choice takes the place of the setting, outranks the configuration and is described as unsaved', () => {
-  const resolved = chooseManifest([configFolder, settingFolder], 'https://example.org/zenwave-architecture.yml');
+test('a session choice takes the place of the setting, outranks the setting and is described as unsaved', () => {
+  const resolved = chooseManifest([settingFolder], 'https://example.org/zenwave-architecture.yml');
   assert.equal(resolved.route, 'override');
   assert.equal(resolved.manifestUri, 'https://example.org/zenwave-architecture.yml');
   assert.ok(resolved.notes.some((note) => note.includes('session choice comes first')));
@@ -202,10 +166,9 @@ test('a session choice takes the place of the setting, outranks the configuratio
   assert.deepEqual(chooseManifest([], 'https://example.org/m.yml').notes, []);
 });
 
-test('the order is override, setting, configuration, none', () => {
-  assert.equal(chooseManifest([configFolder, settingFolder], 'file:///o.yml').route, 'override');
-  assert.equal(chooseManifest([configFolder, settingFolder]).route, 'setting');
-  assert.equal(chooseManifest([configFolder]).route, 'config');
+test('the order is override, setting, none', () => {
+  assert.equal(chooseManifest([settingFolder], 'file:///o.yml').route, 'override');
+  assert.equal(chooseManifest([settingFolder]).route, 'setting');
   assert.equal(chooseManifest([]).route, 'none');
 });
 

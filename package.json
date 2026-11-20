@@ -86,7 +86,6 @@
     "onLanguage:zw",
     "onLanguage:zfl",
     "onFileSystem:zenwave",
-    "workspaceContains:.zenwave/config.yml",
     "onView:zenwave.architecture",
     "onView:zenwave.model"
   ],
@@ -201,7 +200,7 @@
       },
       {
         "view": "zenwave.architecture",
-        "contents": "No architecture manifest was found for this workspace. Name one with `project-manifest` in `.zenwave/config.yml` at a workspace folder root, or with the setting.\n[Configure Architecture Manifest](command:workbench.action.openSettings?%5B%22zenwave.workspace.manifest%22%5D)",
+        "contents": "No architecture manifest was found for this workspace. Name one with the `zenwave.workspace.manifest` setting.\n[Configure Architecture Manifest](command:workbench.action.openSettings?%5B%22zenwave.workspace.manifest%22%5D)",
         "when": "zenwave.architectureTreeState == no-manifest"
       },
       {
@@ -952,7 +951,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "The architecture manifest for this workspace: a path relative to the workspace folder or absolute, or an http(s) address. **ZenWave: Choose Architecture Manifest…** writes it. When set it is used as-is and nothing is searched for; otherwise project-manifest in .zenwave/config.yml at a workspace folder root is used."
+          "description": "The architecture manifest for this workspace: a path relative to the workspace folder or absolute, or an http(s) address. **ZenWave: Choose Architecture Manifest…** writes it. When set it is used as-is and nothing is searched for."
         },
         "zenwave.architecture.remoteManifestName": {
           "type": "string",

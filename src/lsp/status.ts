@@ -67,7 +67,7 @@ export function presentStatus(
   if ('reason' in status) lines.push(`Why: ${status.reason}`);
   lines.push(manifest.manifestUri
     ? `Architecture manifest: ${manifest.manifestUri}`
-    : 'No architecture manifest is configured: set zenwave.workspace.manifest, or add .zenwave/config.yml with project-manifest');
+    : 'No architecture manifest is configured: set zenwave.workspace.manifest');
   if (hostKind === 'web') lines.push('This is a browser host: ZenWave SDK code generation is not available here.');
   lines.push('Select for details and actions.');
   return { text: `${icon} ZenWave${host}`, tooltip: lines.join('\n'), warning: status.kind === 'failed' };

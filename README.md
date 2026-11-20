@@ -94,7 +94,7 @@ Most organizations cannot answer a simple question: which APIs and events exist,
 
 Describe your systems, bounded contexts, APIs and models in an **architecture manifest**, a YAML file. The extension reads it and lets you explore everything it declares. It works as an API portal and an event catalog, inside your editor and next to the models it describes.
 
-Point the extension to your manifest with the `zenwave.workspace.manifest` setting, or with `project-manifest` in `.zenwave/config.yml`. The language server validates the manifest too.
+Point the extension to your manifest with the `zenwave.workspace.manifest` setting. The language server validates the manifest too.
 
 > 📸 **Screenshot:** the architecture explorer listing systems and bounded contexts, with one API selected and its details open.
 
