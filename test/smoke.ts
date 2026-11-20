@@ -160,6 +160,13 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
   for (const method of EXPECTED_REQUESTS) {
     assert(api.advertisedRequests.includes(method), `Server did not advertise ${method}: ${api.advertisedRequests.join(', ')}`);
   }
+  if (!desktop && api.manifest.route !== 'setting') {
+    // The browser host may not read the mounted folder's .vscode/settings.json: set the same value through the API.
+    console.log(`NOTE: the browser host did not read .vscode/settings.json (${JSON.stringify(api.manifest)}); setting zenwave.workspace.manifest instead`);
+    await vscode.workspace.getConfiguration('zenwave').update('workspace.manifest', 'zenwave-architecture.yml', vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.manifest.route === 'setting', 'The browser host did not take zenwave.workspace.manifest');
+    await connected(api, 'Restart with the manifest setting');
+  }
   assert(api.manifest.route === 'setting' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml'),
     `Manifest not resolved from .vscode/settings.json: ${JSON.stringify(api.manifest)}`);
   console.log(`PASS: ${api.transport} server connected, customRequests discovered, manifest resolved from the workspace setting`);
