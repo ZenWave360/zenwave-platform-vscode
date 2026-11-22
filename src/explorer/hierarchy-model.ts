@@ -206,14 +206,8 @@ function fileEntryResource(item: HierarchyNode, disabled: boolean): string | und
  */
 const DECLARATION_KINDS = new Set([
   'aggregate', 'api', 'command', 'entity', 'enum', 'event', 'field',
-  'flow', 'method', 'policy', 'service', 'start', 'system',
+  'flow', 'method', 'policy', 'rule', 'service', 'start', 'system',
 ]);
-
-/**
- * Kinds where a cursor on the name resolves to the hierarchy id (`@zenwave360/lsp-js` 0.1.0-next.13.1).
- * Entity, enum, aggregate, service and event names resolve to nothing; field and method names resolve to a neighbour.
- */
-const REFERENCES_KINDS = new Set(['api', 'flow', 'system']);
 
 /**
  * How a node reads in a VS Code tree. The server's label is the default; this
@@ -260,8 +254,6 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
   const parentKind = node.parent?.node.kind;
   const located = Boolean(item.sourceUri && item.sourceRange);
   const declaration = located && DECLARATION_KINDS.has(kind) && parentKind !== 'policy' && parentKind !== 'outcome';
-  // Only these names resolve to the node's own id under a text cursor, so Go to References can ask for that id.
-  const references = declaration && REFERENCES_KINDS.has(kind);
   const fileResource = fileEntryResource(item, disabledReason !== undefined);
   return {
     label,
@@ -275,7 +267,6 @@ export function presentNode(node: ExplorerNode, treeDocumentUri: string): NodePr
       `zenwave.hierarchy.${kind.replace(/[^A-Za-z0-9-]/g, '_')}`,
       related ? 'related' : '',
       declaration ? 'declaration' : '',
-      references ? 'references' : '',
     ].filter((part) => part.length > 0).join('.'),
     collapsible: node.children.length > 0,
     ...(address && !disabledReason ? { address } : {}),

@@ -12,7 +12,6 @@ import type { RequestResult } from './supervisor.js';
 export const ZENWAVE_REQUESTS = {
   hierarchy: 'zenwave/hierarchy',
   forwardReferences: 'zenwave/forwardReferences',
-  reverseReferences: 'zenwave/reverseReferences',
   organizeZflServices: 'zenwave/organizeZflServices',
   eventFlowViews: 'zenwave/eventFlowViews',
   preview: 'zenwave/preview',
@@ -71,7 +70,7 @@ export interface RelatedResource {
   readonly relationType?: string;
 }
 
-/** `zenwave/forwardReferences` and `zenwave/reverseReferences` answer these. */
+/** `zenwave/forwardReferences` answers these. */
 export type NavigationTarget = RelatedResource;
 
 export interface HierarchyNode {
@@ -201,11 +200,6 @@ export class ZenwaveRequests {
   async forwardReferences(uri: string, semanticId: string): Promise<RequestResult<readonly NavigationTarget[]>> {
     return expect(ZENWAVE_REQUESTS.forwardReferences,
       await this.issuer.request(ZENWAVE_REQUESTS.forwardReferences, { uri, semanticId }), isArray);
-  }
-
-  async reverseReferences(uri: string, semanticId: string): Promise<RequestResult<readonly NavigationTarget[]>> {
-    return expect(ZENWAVE_REQUESTS.reverseReferences,
-      await this.issuer.request(ZENWAVE_REQUESTS.reverseReferences, { uri, semanticId }), isArray);
   }
 
   /**

@@ -26,9 +26,10 @@
   settings, and credential commands for content the server may ask for.
 - Restricted Mode now also holds back the language server, content resolution
   and credentials; trusting the workspace enables them without a reload.
-- ZenWave: Go to What This References / Go to What References This, from the
+- ZenWave: Go to What This References, from the
   editor context menu and the palette. Offered only while a language server
-  supporting them is connected.
+  supporting it is connected. Find References (Shift+F12) is the way to see
+  what references an element.
 - A ZFL document shows Add missing and Full above its systems block. Add missing
   adds what the flows use and removes nothing. Full also removes what no flow
   uses, and asks first. ZenWave: Add Missing ZFL Services and ZenWave: Organize

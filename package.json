@@ -63,7 +63,7 @@
   },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
-    "version": "0.1.0-next.35.1"
+    "version": "0.1.0-next.36.1"
   },
   "zenwaveEventFlowWebview": {
     "package": "@zenwave360/vistas-eventflow-webview",
@@ -722,12 +722,12 @@
       "view/item/context": [
         {
           "command": "zenwave.explorer.goToDefinition",
-          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.definitionAvailable",
           "group": "inline@1"
         },
         {
           "command": "zenwave.explorer.goToReferences",
-          "when": "view == zenwave.model && viewItem =~ /\\.references(\\.|$)/ && zenwave.languageServerAvailable",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.referencesAvailable",
           "group": "inline@2"
         },
         {
@@ -1140,7 +1140,7 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.0.0",
-    "@zenwave360/lsp-js": "0.1.0-next.35.1",
+    "@zenwave360/lsp-js": "0.1.0-next.36.1",
     "@zenwave360/vistas-eventflow-webview": "0.0.0-next-20261110162033",
     "adm-zip": "^0.6.1",
     "esbuild": "^0.23.0",

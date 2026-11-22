@@ -312,9 +312,8 @@ test('nodes present in this client vocabulary, and a kind released later still r
   const orders = presentNode(findNode(tree, byLabel('Orders', 'system'))!, FLOW);
   assert.equal(orders.label, 'Orders');
   assert.equal(orders.description, 'model.zdl', 'a node declared elsewhere names that document');
-  assert.equal(orders.contextValue, 'zenwave.hierarchy.system.related.declaration.references');
+  assert.equal(orders.contextValue, 'zenwave.hierarchy.system.related.declaration');
   assert.match(orders.contextValue, /\.declaration(\.|$)/, 'a declaration can offer navigation actions');
-  assert.match(orders.contextValue, /\.references(\.|$)/, 'a system name resolves, so Go to References is offered');
   assert.ok(!/\.declaration(\.|$)/.test(presentNode(tree.roots[0]!, FLOW).contextValue), 'a structural section does not offer declaration actions');
   const policy = presentNode(findNode(tree, byLabel('OrderCreated', 'policy'))!, FLOW);
   assert.equal(policy.description, 'do notifyCustomer');
@@ -709,8 +708,10 @@ test('the container, both views, activation and an explanation for every empty s
   const definition = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToDefinition');
   assert.equal(definition?.group, 'inline@1');
   const references = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToReferences');
-  // Go to References is Find References at the node's location: it needs the server, not the retired reverse request.
-  assert.ok((references?.when ?? '').includes('zenwave.languageServerAvailable'));
+  // Go to Definition and Go to References are Find-style standard requests: gated on what the server advertised, on every declaration.
+  assert.ok((definition?.when ?? '').includes('zenwave.definitionAvailable'));
+  assert.ok((references?.when ?? '').includes('zenwave.referencesAvailable'));
+  assert.match(references?.when ?? '', /viewItem =~ \/\\.declaration/);
   assert.ok(!(references?.when ?? '').includes('reverseReferences'));
   assert.equal(references?.group, 'inline@2');
   const refresh = contributes.menus['view/title']?.find((entry) => entry.command === 'zenwave.explorer.refresh');
@@ -784,7 +785,6 @@ function assertMenuMarkers(menus: Record<string, { command: string; when?: strin
           let expected = true;
           if (expression.source.includes('related')) expected = expected && marker(value, 'related');
           if (expression.source.includes('declaration')) expected = expected && marker(value, 'declaration');
-          if (expression.source.includes('references')) expected = expected && marker(value, 'references');
           assert.equal(expression.test(value), expected, `${entry.command} ${expression} against ${value}`);
           checked++;
         }
@@ -793,10 +793,10 @@ function assertMenuMarkers(menus: Record<string, { command: string; when?: strin
   }
   assert.ok(checked > 0, 'no viewItem clause was evaluated');
   const orders = values.find((value) => value.startsWith('zenwave.hierarchy.system'));
-  assert.equal(orders, 'zenwave.hierarchy.system.related.declaration.references');
+  assert.equal(orders, 'zenwave.hierarchy.system.related.declaration');
   assert.ok(values.includes('zenwave.hierarchy.event'), 'a policy event is not a declaration');
   assert.ok(values.includes('zenwave.hierarchy.relationship'), 'a relationship bucket is not a declaration');
-  assert.ok(values.includes('zenwave.hierarchy.field.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.field') && marker(value, 'references')));
-  assert.ok(values.includes('zenwave.hierarchy.method.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.method') && marker(value, 'references')));
-  assert.ok(values.includes('zenwave.hierarchy.entity.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.entity') && marker(value, 'references')));
+  assert.ok(values.includes('zenwave.hierarchy.field.declaration'));
+  assert.ok(values.includes('zenwave.hierarchy.method.declaration'));
+  assert.ok(values.includes('zenwave.hierarchy.entity.declaration'));
 }

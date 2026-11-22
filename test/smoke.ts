@@ -149,7 +149,7 @@ async function connected(api: LanguageServerApi, message: string): Promise<void>
   assert(api.status.kind === 'connected', `${message}: ${JSON.stringify(api.status)}`);
 }
 
-const EXPECTED_REQUESTS = ['zenwave/hierarchy', 'zenwave/forwardReferences', 'zenwave/reverseReferences',
+const EXPECTED_REQUESTS = ['zenwave/hierarchy', 'zenwave/forwardReferences',
   'zenwave/organizeZflServices', 'zenwave/eventFlowViews', 'zenwave/preview', 'zenwave/symbolAt'];
 
 /** The real @zenwave360/lsp-js server, over IPC on the desktop and in a Web Worker in the browser. */
@@ -217,8 +217,6 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
     `symbolAt: ${JSON.stringify(symbol)}`);
   const forward = await api.requests.forwardReferences(symbol.value!.uri, symbol.value!.semanticId);
   assert(forward.kind === 'ok', `forwardReferences: ${JSON.stringify(forward)}`);
-  const reverse = await api.requests.reverseReferences(symbol.value!.uri, symbol.value!.semanticId);
-  assert(reverse.kind === 'ok', `reverseReferences: ${JSON.stringify(reverse)}`);
   const hierarchy = await api.requests.hierarchy(uri);
   assert(hierarchy.kind === 'ok' && hierarchy.value.length > 0, `hierarchy: ${JSON.stringify(hierarchy).slice(0, 300)}`);
   const organized = await api.requests.organizeZflServices(uri);
@@ -495,24 +493,24 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
     `Commands under their service: ${labels(service?.children)}`);
   const ordersItem = await model.provider.getTreeItem(orders);
   assert(ordersItem.description === 'model.zdl' && (ordersItem.iconPath as vscode.ThemeIcon).id === 'server-environment' &&
-    ordersItem.contextValue === 'zenwave.hierarchy.system.related.declaration.references', `Orders item: ${String(ordersItem.description)} ${(ordersItem.iconPath as vscode.ThemeIcon).id} ${ordersItem.contextValue}`);
+    ordersItem.contextValue === 'zenwave.hierarchy.system.related.declaration', `Orders item: ${String(ordersItem.description)} ${(ordersItem.iconPath as vscode.ThemeIcon).id} ${ordersItem.contextValue}`);
   const context = async (item: ExplorerNode): Promise<string> => String((await model.provider.getTreeItem(item)).contextValue ?? '');
   const has = (value: string, name: string): boolean => new RegExp(`\\.${name}(?:\\.|$)`).test(value);
   const checkoutFlow = node(model, 'CheckoutFlow', 'flow');
   assert(checkoutFlow, 'CheckoutFlow is not in the tree');
   const flowContext = await context(checkoutFlow);
-  assert(has(flowContext, 'declaration') && has(flowContext, 'references'), `CheckoutFlow: ${flowContext}`);
+  assert(has(flowContext, 'declaration'), `CheckoutFlow: ${flowContext}`);
   assert(service, 'OrderService is not in the tree');
   const serviceContext = await context(service);
-  assert(has(serviceContext, 'declaration') && !has(serviceContext, 'references'), `OrderService: ${serviceContext}`);
+  assert(has(serviceContext, 'declaration'), `OrderService: ${serviceContext}`);
   const createOrder = service.children.find((child) => child.node.kind === 'command' && child.node.label === 'createOrder');
   assert(createOrder, `createOrder is not a command under OrderService: ${labels(service.children)}`);
   const commandContext = await context(createOrder);
-  assert(has(commandContext, 'declaration') && !has(commandContext, 'references'), `createOrder: ${commandContext}`);
+  assert(has(commandContext, 'declaration'), `createOrder: ${commandContext}`);
   const policyEvent = model.tree && findNode(model.tree, (candidate) => candidate.parent?.node.kind === 'policy' && candidate.node.kind === 'event');
   assert(policyEvent, 'No event under a policy');
   const policyEventContext = await context(policyEvent);
-  assert(!has(policyEventContext, 'declaration') && !has(policyEventContext, 'references'), `A policy event is not a declaration: ${policyEventContext}`);
+  assert(!has(policyEventContext, 'declaration'), `A policy event is not a declaration: ${policyEventContext}`);
   console.log('PASS: model tree names checkout.zfl, shows the system declared in its @zdl model and each command under its service');
 
   // Go to References follows the hierarchy id. A cursor on the name `Orders` in the flow resolves to that id;
@@ -527,12 +525,32 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   assert(ordersSymbol.kind === 'ok' && ordersSymbol.value?.semanticId === orders.node.id,
     `symbolAt on the Orders name: ${JSON.stringify(ordersSymbol)} vs ${orders.node.id}`);
   // Go to References runs Find References at the node's source location (ME-R9): the document opens with the cursor on it.
+  const closedUser = await fixture('lsp/indexed/closed-user.zfl');
+  assert(!vscode.workspace.textDocuments.some((open) => open.uri.toString() === closedUser.toString()), 'closed-user.zfl must not be open in this session');
+  const sourceUri = vscode.Uri.parse(orders.node.sourceUri, true);
   await vscode.window.showTextDocument(checkoutDocument);
   await vscode.commands.executeCommand('zenwave.explorer.goToReferences', orders);
   const fromTree = vscode.window.activeTextEditor;
-  assert(fromTree !== undefined && fromTree.document.uri.toString() === vscode.Uri.parse(orders.node.sourceUri).toString() &&
+  assert(fromTree !== undefined && fromTree.document.uri.toString() === sourceUri.toString() &&
     fromTree.selection.active.line === orders.node.sourceRange.start.line && fromTree.selection.active.character === orders.node.sourceRange.start.character,
     `Go to References from the tree did not place the cursor on the node: ${fromTree?.document.uri.toString()} ${JSON.stringify(fromTree?.selection.active)} vs ${JSON.stringify(orders.node.sourceRange)}`);
+  // The same action on a command, whose stored position is on its name, answers with real locations,
+  // including a use in a file nobody opened (the background index, end to end).
+  await vscode.commands.executeCommand('closeReferenceSearch');
+  const commandUri = vscode.Uri.parse(createOrder.node.sourceUri!, true);
+  const commandStart = new vscode.Position(createOrder.node.sourceRange!.start.line, createOrder.node.sourceRange!.start.character);
+  let last: vscode.Location[] = [];
+  const found = await waitFor(async () => {
+    last = await vscode.commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', commandUri, commandStart) ?? [];
+    // A Web Worker server cannot read the workspace's files: the background index is a desktop (ipc) feature (NAV-R20).
+    const expected = api.transport === 'ipc' ? closedUser : checkoutUri;
+    return last.some((location) => location.uri.toString() === expected.toString()) ? last : undefined;
+  }, `Find References on createOrder (${commandUri.toString()}:${commandStart.line}:${commandStart.character}) did not include the closed file ${closedUser.toString()}`, 30000)
+    .catch((error: unknown) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; last answer=${JSON.stringify(last.map((location) => [location.uri.toString(), location.range.start.line]))}`);
+    });
+  assert(found.length > 0 && api.transport !== 'none' && !vscode.workspace.textDocuments.some((open) => open.uri.toString() === closedUser.toString()),
+    'The closed file stayed closed while Find References listed it');
   await vscode.commands.executeCommand('closeReferenceSearch');
   console.log('PASS: Go to References on the Orders system runs Find References at its source location');
 

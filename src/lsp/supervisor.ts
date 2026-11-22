@@ -58,6 +58,21 @@ export function advertisedRequests(initializeResult: unknown): ReadonlySet<strin
     : []);
 }
 
+/** Whether the server advertised the standard `textDocument/definition` (`definitionProvider`). */
+export function definitionAdvertised(initializeResult: unknown): boolean {
+  return providerAdvertised(initializeResult, 'definitionProvider');
+}
+
+/** Whether the server advertised the standard `textDocument/references` (`referencesProvider`). */
+export function referencesAdvertised(initializeResult: unknown): boolean {
+  return providerAdvertised(initializeResult, 'referencesProvider');
+}
+
+function providerAdvertised(initializeResult: unknown, name: string): boolean {
+  const provider = object(object(initializeResult)?.capabilities)?.[name];
+  return provider === true || object(provider) !== undefined;
+}
+
 /** Whether the server advertised `capabilities.experimental.previewModes`, so `zenwave/preview` takes `mode` (LVR-R17). */
 export function previewModesAdvertised(initializeResult: unknown): boolean {
   return experimentalOf(initializeResult)?.previewModes === true;

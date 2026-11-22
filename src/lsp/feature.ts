@@ -32,7 +32,7 @@ import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource
 import { openResource, registerResourceProvider, type OpenResourceOutcome } from './resource-provider.js';
 import { ZenwaveRequests } from './requests.js';
 import { languageServerStatus, presentStatus, type LanguageServerStatus } from './status.js';
-import { advertisedFlowLanes, advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, LspSupervisor, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
+import { advertisedFlowLanes, advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, definitionAdvertised, LspSupervisor, referencesAdvertised, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
 
 /** Context keys for `when` clauses. */
 export const LSP_CONTEXT_KEYS = {
@@ -45,6 +45,9 @@ export const LSP_CONTEXT_KEYS = {
   previewModesAvailable: 'zenwave.previewModesAvailable',
   /** An architecture manifest was resolved for the workspace. */
   manifestAvailable: 'zenwave.manifestAvailable',
+  /** The connected server advertised `definitionProvider` / `referencesProvider`. */
+  definitionAvailable: 'zenwave.definitionAvailable',
+  referencesAvailable: 'zenwave.referencesAvailable',
 } as const;
 
 export const LSP_COMMANDS = {
@@ -206,6 +209,8 @@ export function registerLanguageServer(
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.languageServerRequests, current.kind === 'connected' ? advertised : []);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.organizeModesAvailable, organizeModes);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.previewModesAvailable, previewModes);
+    void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.definitionAvailable, current.kind === 'connected' && definitionAdvertised(supervisor.initializeResult));
+    void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.referencesAvailable, current.kind === 'connected' && referencesAdvertised(supervisor.initializeResult));
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.manifestAvailable, manifest.manifestUri !== undefined);
     if (notify) changed.fire();
   }
