@@ -592,6 +592,8 @@ export function registerModelExplorer(
     const target = gestureTarget(element);
     const source = sourcePosition(target);
     if (!target || !source) return undefined;
+    // The server must know the document before it can resolve in it (web host, `zenwave:` documents).
+    await vscode.workspace.openTextDocument(source.uri).then(() => undefined, () => undefined);
     const found = await Promise.resolve(vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[] | undefined>(
       'vscode.executeDefinitionProvider', source.uri, source.position)).then((result) => result ?? [], () => []);
     const locations = found.map((entry) => 'targetUri' in entry

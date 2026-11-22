@@ -66,10 +66,10 @@ Open the ZenWave view from the Activity Bar. The Model tree shows the elements o
 - **F12** with a node selected goes to its definition, and **Shift+F12** finds its references, as in a text editor. For a command in a flow, the definition is its method in the ZDL.
 - **Right-click** a node for **Go to Definition**, **Find References**, **Forward References** and **Open Related**. Only the ones that apply to that node are shown, and only when the language server can answer them. The same two buttons, go to definition and references, appear on hover.
 
-**Ctrl+click does not go to the definition in the tree.** VS Code does not tell an extension which keys were held when a tree item was clicked, so Ctrl+click does what a plain click does: select the node and show its source. Use F12, the buttons or the right-click menu instead. The editor and the diagram keep Ctrl+click.
+**Ctrl+click does not go to the definition in the tree** (an exception to NAV-R1's gesture table). VS Code does not tell an extension which keys were held when a tree item was clicked, so Ctrl+click does what a plain click does: select the node and show its source. Use F12, the buttons or the right-click menu instead. The text editor keeps Ctrl+click.
 
 ## Diagrams
 
-In the EventFlow diagram, click a node to select it, and Ctrl+click it to go to its definition. Right-click for the same menu as in the Model tree.
+Selecting a node in the Model tree highlights it in the open EventFlow diagram. The diagram has no navigation menu of its own yet, and Ctrl+click on a diagram node does not go to the definition: use the Model tree or the text for that.
 
 The Mermaid diagrams in the preview are pictures. Clicking them does nothing; use the text or the Model tree to navigate.
