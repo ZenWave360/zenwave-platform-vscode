@@ -850,3 +850,27 @@ test('the lanes setting and command are contributed', () => {
   assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === 'zenwave.eventflow.lanes'));
   assert.ok(!manifest.contributes.menus['editor/title'].some((entry: { command: string }) => entry.command === 'zenwave.eventflow.lanes'));
 });
+
+test('renderBundle carries the variant tree the server built, and a line of it can be the chosen variant (EF-R25)', async () => {
+  const variantTree = [{
+    outcome: 'completed',
+    nodes: [{ id: 'branch:completed:0', steps: ['S'], title: 'from S to completed', count: 2, children: [
+      { id: 'happy', steps: ['a'], title: 'from S → a to completed', count: 1, children: [] },
+      { id: 'out-of-stock', steps: ['b'], title: 'from S → b to completed', count: 1, children: [] },
+    ] }],
+  }];
+  const h = harness(() => ({ kind: 'ok', value: { flowGraph: { schema: 'g' }, serviceGraph: { schema: 's' }, variants: VARIANTS, variantTree } }), undefined, URI, true);
+  h.session.receive(READY);
+  await h.session.refresh();
+  assert.deepEqual(h.session.lastRenderBundle?.variantTree, variantTree);
+
+  h.session.receive({ type: 'variantChanged', payload: { variant: 'branch:completed:0' } });
+  await settle();
+  assert.deepEqual(h.asked.at(-1), { textDocument: { uri: URI }, variant: 'branch:completed:0' }, 'a line is asked for like a variant');
+  assert.equal(h.session.lastRenderBundle?.variant, 'branch:completed:0');
+
+  const old = harness(() => withVariants(), undefined, URI, true);
+  old.session.receive(READY);
+  await old.session.refresh();
+  assert.equal('variantTree' in (old.session.lastRenderBundle ?? {}), false, 'an older server sends no tree and none is invented');
+});

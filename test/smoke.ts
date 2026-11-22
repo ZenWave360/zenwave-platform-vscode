@@ -715,7 +715,7 @@ const isDiagramTab = (tab: vscode.Tab | undefined, uri: string): boolean =>
   tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === 'zenwave.eventflow' && tab.input.uri.toString() === uri;
 const isTextTab = (tab: vscode.Tab | undefined, uri: string): boolean => tab?.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri;
 
-interface Graphs { readonly flowGraph: { readonly nodes: readonly { readonly id: string; readonly label?: string }[] }; readonly serviceGraph: { readonly nodes: readonly { readonly id: string }[] }; readonly variants?: readonly { readonly id: string; readonly title: string }[] }
+interface Graphs { readonly flowGraph: { readonly nodes: readonly { readonly id: string; readonly label?: string }[] }; readonly serviceGraph: { readonly nodes: readonly { readonly id: string }[] }; readonly variants?: readonly { readonly id: string; readonly title: string }[]; readonly variantTree?: readonly { readonly outcome: string; readonly nodes: readonly { readonly id: string; readonly count: number; readonly children: readonly unknown[] }[] }[] }
 
 /** The diagram editor for a document once its page said it loaded and rendered a diagram, with no state shown over it. */
 async function renderedDiagram(eventflow: EventFlowApi, uri: string): Promise<EventFlowEditorApi> {
@@ -784,6 +784,31 @@ async function eventflowDiagrams(api: LanguageServerApi, explorer: ModelExplorer
     return JSON.stringify([...probe.nodeIds].sort()) === JSON.stringify(flowIds) ? probe : undefined;
   }, `The page did not draw the server's flow nodes: ${JSON.stringify((await flow.probe()).nodeIds)} vs ${JSON.stringify(flowIds)}`, 30000);
   console.log(`PASS: renderBundle carries zenwave/eventFlowViews verbatim and the page draws all ${drawn.nodeIds.length} flow nodes`);
+
+  // EF-R25: the tree reaches the page as the server built it, and a line with children is asked for like a variant and lays its variants out together.
+  assert(JSON.stringify((posted as { variantTree?: unknown }).variantTree) === JSON.stringify(views.variantTree) && (views.variantTree?.length ?? 0) > 1,
+    `renderBundle does not carry the variant tree: ${JSON.stringify((posted as { variantTree?: unknown }).variantTree)?.slice(0, 200)}`);
+  const treeLine = views.variantTree!.flatMap((group) => group.nodes).find((node) => node.children.length > 0 && node.count > 1);
+  assert(treeLine, 'The place-order flow has no tree line with several variants');
+  const asked = flow.session.lastRenderBundle;
+  flow.session.receive({ type: 'variantChanged', payload: { variant: treeLine.id } });
+  const together = await waitFor(() => {
+    const bundle = flow.session.lastRenderBundle as { variant?: string | null; flowGraph?: { nodes: readonly unknown[] } } | undefined;
+    return bundle !== asked && bundle?.variant === treeLine.id ? bundle : undefined;
+  }, `Choosing the tree line ${treeLine.id} did not draw its variants`, 30000);
+  assert(together.flowGraph!.nodes.length > 0 && together.flowGraph!.nodes.length < views.flowGraph.nodes.length, `A tree line shows ${together.flowGraph!.nodes.length} of ${views.flowGraph.nodes.length} nodes`);
+  const beforeFull = flow.session.lastRenderBundle;
+  flow.session.receive({ type: 'variantChanged', payload: { variant: null } });
+  await waitFor(() => flow.session.lastRenderBundle !== beforeFull && (flow.session.lastRenderBundle as { variant?: string | null }).variant === null ? true : undefined, 'The full diagram did not come back', 30000);
+  await waitFor(async () => JSON.stringify([...(await flow.probe()).nodeIds].sort()) === JSON.stringify(flowIds) ? true : undefined, 'The page did not draw the full diagram again', 30000);
+  // MP-R36: the tree answer carries leaves only; a line's sequence is asked for by its id and is the alt blocks of its variants.
+  const lazy = await api.requests.preview(placeOrder, 'SEPARATE_VARIANTS', undefined, true);
+  assert(lazy.kind === 'ok' && !lazy.value.representations.some((item) => item.id.startsWith('branch:')) && (lazy.value.sequenceTree?.length ?? 0) > 1,
+    `The tree answer is not leaves only: ${lazy.kind === 'ok' ? lazy.value.representations.length : lazy.kind}`);
+  const oneLine = await api.requests.preview(placeOrder, 'SEPARATE_VARIANTS', undefined, true, treeLine.id);
+  assert(oneLine.kind === 'ok' && oneLine.value.representations.length === 1 && oneLine.value.representations[0]!.id === treeLine.id && oneLine.value.representations[0]!.content.includes('alt '),
+    `The line ${treeLine.id} was not answered as alt blocks: ${JSON.stringify(oneLine).slice(0, 200)}`);
+  console.log(`PASS: the variant tree reaches the page, and choosing the line ${treeLine.id} draws its ${treeLine.count} variants together (${together.flowGraph!.nodes.length} nodes)`);
 
   // EF-R24: Systems lanes from the palette command, drawn in server bands, then back to no lanes.
   assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.lanes', placeOrderUri, 'systems'), 'The lanes command found no diagram');
@@ -1310,7 +1335,7 @@ const baseName = (url: string): string => url.slice(url.lastIndexOf('/') + 1);
 /** What the server answers for a document right now (the reference the page is compared with). */
 async function serverPreview(api: LanguageServerApi, uri: string, mode?: 'ALT_BLOCKS' | 'SEPARATE_VARIANTS'): Promise<Preview> {
   return waitFor(async () => {
-    const result = await api.requests.preview(uri, mode);
+    const result = await api.requests.preview(uri, mode, undefined, mode === 'SEPARATE_VARIANTS');
     return result.kind === 'ok' ? result.value : undefined;
   }, `zenwave/preview did not answer for ${uri}`, 30000);
 }
@@ -1551,9 +1576,14 @@ async function editsAndChoices(api: LanguageServerApi, flow: PreviewEditorApi, a
   assert(kept !== undefined && separate.representations.some((item) => item.id === kept) && outcomeOf(kept) === 'rejected', `The outcome did not survive the mode change: ${kept} in ${separate.representations.map((item) => item.id).join()}`);
   const separateProbe = await waitFor(async () => {
     const answer = await flow.probe();
-    return answer.renderModeSelector.value === 'SEPARATE_VARIANTS' && answer.diagramSelector.options.map((option) => option.label).join('|') === separate.representations.map((item) => item.title).join('|') ? answer : undefined;
+    return answer.renderModeSelector.value === 'SEPARATE_VARIANTS' && separate.representations.every((item) => answer.diagramSelector.options.some((option) => option.value === item.id)) && answer.diagramSelector.groups.length > 0 ? answer : undefined;
   }, 'The selectors do not show the server answer for the separate variants', 30000);
   assert(separateProbe.diagramSelector.value === kept, `The diagram selector does not show ${kept}: ${separateProbe.diagramSelector.value}`);
+  // MP-R36: each option's tooltip is the full title of what it shows, and follows the set when it changes.
+  assert(separateProbe.diagramSelector.options.every((option) => option.title.length > 0), `An option has no tooltip: ${JSON.stringify(separateProbe.diagramSelector.options)}`);
+  // MP-R36: the selector is grouped by outcome, in the order of the server's tree, and each line of the tree is an option.
+  assert((separate.sequenceTree?.length ?? 0) > 0 && separateProbe.diagramSelector.groups.join() === separate.sequenceTree!.map((group) => group.outcome).join(),
+    `The selector groups ${separateProbe.diagramSelector.groups.join()} are not the server's outcomes ${separate.sequenceTree?.map((group) => group.outcome).join()}`);
   await vscode.commands.executeCommand('zenwave.preview.selectRenderMode', { documentUri: checkout, renderMode: 'ALT_BLOCKS' });
   await waitFor(() => flow.session.renderMode === 'ALT_BLOCKS' && flow.session.data.kind === 'rendered' && flow.session.representations.length === server.representations.length ? true : undefined, 'Going back to alt blocks did not ask again', 30000);
   assert(flow.session.selectedId !== undefined && outcomeOf(flow.session.selectedId) === 'rejected', `The outcome did not survive the way back: ${flow.session.selectedId}`);
