@@ -59,6 +59,12 @@ test('the tooltip and the toolbar show the full title, and a line with several v
   assert.equal(chosenTitle(layout, 'nope'), undefined);
 });
 
+test('a variant that ends at a line with others under it is a leaf that adds no steps (EF-R25)', () => {
+  const ends: VariantTreeGroup[] = [{ outcome: 'x', nodes: [{ id: 'branch:x:1', steps: ['A', 'x'], title: 't', count: 2, children: [leaf('v0', [], 'from A → x to x'), leaf('v1', ['y'], 'from A → x → y to x')] }] }];
+  const layout = sequenceSelector([rep('v0', 'V0', 'x'), rep('v1', 'V1', 'x')], ends)!;
+  assert.deepEqual(layout.groups[0]!.options.map((option) => [option.value, option.label]), [['branch:x:1', nbsp('A → x (2)')], ['v0', nbsp('├─ (ends here)')], ['v1', nbsp('└─ y')]]);
+});
+
 test('long runs are shortened with an ellipsis', () => {
   assert.equal(runLabel(['a', 'b', 'c']), 'a → b → c');
   assert.equal(runLabel(['StartOrderCheckout', 'StockReservedResult', 'authorizePayment', 'authorized']), 'StartOrderCheckout → … → authorized');

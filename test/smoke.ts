@@ -784,6 +784,13 @@ async function eventflowDiagrams(api: LanguageServerApi, explorer: ModelExplorer
   flow.session.receive({ type: 'variantChanged', payload: { variant: null } });
   await waitFor(() => flow.session.lastRenderBundle !== beforeFull && (flow.session.lastRenderBundle as { variant?: string | null }).variant === null ? true : undefined, 'The full diagram did not come back', 30000);
   await waitFor(async () => JSON.stringify([...(await flow.probe()).nodeIds].sort()) === JSON.stringify(flowIds) ? true : undefined, 'The page did not draw the full diagram again', 30000);
+  // MP-R36: the tree answer carries leaves only; a line's sequence is asked for by its id and is the alt blocks of its variants.
+  const lazy = await api.requests.preview(placeOrder, 'SEPARATE_VARIANTS', undefined, true);
+  assert(lazy.kind === 'ok' && !lazy.value.representations.some((item) => item.id.startsWith('branch:')) && (lazy.value.sequenceTree?.length ?? 0) > 1,
+    `The tree answer is not leaves only: ${lazy.kind === 'ok' ? lazy.value.representations.length : lazy.kind}`);
+  const oneLine = await api.requests.preview(placeOrder, 'SEPARATE_VARIANTS', undefined, true, treeLine.id);
+  assert(oneLine.kind === 'ok' && oneLine.value.representations.length === 1 && oneLine.value.representations[0]!.id === treeLine.id && oneLine.value.representations[0]!.content.includes('alt '),
+    `The line ${treeLine.id} was not answered as alt blocks: ${JSON.stringify(oneLine).slice(0, 200)}`);
   console.log(`PASS: the variant tree reaches the page, and choosing the line ${treeLine.id} draws its ${treeLine.count} variants together (${together.flowGraph!.nodes.length} nodes)`);
 
   // EF-R24: Systems lanes from the palette command, drawn in server bands, then back to no lanes.
@@ -1552,7 +1559,7 @@ async function editsAndChoices(api: LanguageServerApi, flow: PreviewEditorApi, a
   assert(kept !== undefined && separate.representations.some((item) => item.id === kept) && outcomeOf(kept) === 'rejected', `The outcome did not survive the mode change: ${kept} in ${separate.representations.map((item) => item.id).join()}`);
   const separateProbe = await waitFor(async () => {
     const answer = await flow.probe();
-    return answer.renderModeSelector.value === 'SEPARATE_VARIANTS' && answer.diagramSelector.options.map((option) => option.value).sort().join() === separate.representations.map((item) => item.id).sort().join() ? answer : undefined;
+    return answer.renderModeSelector.value === 'SEPARATE_VARIANTS' && separate.representations.every((item) => answer.diagramSelector.options.some((option) => option.value === item.id)) && answer.diagramSelector.groups.length > 0 ? answer : undefined;
   }, 'The selectors do not show the server answer for the separate variants', 30000);
   assert(separateProbe.diagramSelector.value === kept, `The diagram selector does not show ${kept}: ${separateProbe.diagramSelector.value}`);
   // MP-R36: the selector is grouped by outcome, in the order of the server's tree, and each line of the tree is an option.

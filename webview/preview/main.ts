@@ -367,7 +367,7 @@ function fillLayout(select: HTMLSelectElement, layout: SelectorLayout, value: st
   };
   const wanted = [...layout.loose, ...layout.groups.flatMap((group) => group.options)];
   const same = select.options.length === wanted.length && select.querySelectorAll('optgroup').length === layout.groups.length &&
-    wanted.every((item, index) => select.options[index]?.value === item.value && select.options[index]?.textContent === item.label);
+    wanted.every((item, index) => select.options[index]?.value === item.value && select.options[index]?.textContent === item.label && select.options[index]?.title === item.title);
   if (!same) {
     select.replaceChildren(...layout.loose.map(option), ...layout.groups.map((group) => {
       const node = document.createElement('optgroup');
