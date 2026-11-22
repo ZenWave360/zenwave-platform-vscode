@@ -39,6 +39,7 @@ const SEPARATE: Preview = {
 function harness(answer: (mode: SequenceRenderMode | undefined) => RequestResult<Preview> | Promise<RequestResult<Preview>>, options: { hasRenderMode?: boolean; uri?: string; fileName?: string } = {}) {
   const posted: OutboundMessage[] = [];
   const asked: (SequenceRenderMode | undefined)[] = [];
+  const treeAsked: (boolean | undefined)[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
   const markdownContext: boolean[] = [];
@@ -46,14 +47,14 @@ function harness(answer: (mode: SequenceRenderMode | undefined) => RequestResult
     documentUri: options.uri ?? ZFL,
     fileName: options.fileName ?? 'checkout.zfl',
     hasRenderMode: options.hasRenderMode ?? true,
-    preview: async (_uri, mode) => { asked.push(mode); return answer(mode); },
+    preview: async (_uri, mode, _previewMode, tree) => { asked.push(mode); treeAsked.push(tree); return answer(mode); },
     post: async (message) => { posted.push(message); return true; },
     runCommand: (command) => { commands.push(command); },
     setContext: (key, value) => { assert.equal(key, PREVIEW_MARKDOWN_CONTEXT_KEY); markdownContext.push(value); },
     log: { info: (line) => logs.push(line), warn: (line) => logs.push(line), debug: (line) => logs.push(line) },
   });
   const renders = () => posted.flatMap((message) => message.type === 'zenwave.preview.render' ? [message.payload] : []);
-  return { session, posted, asked, logs, commands, renders, markdownContext };
+  return { session, posted, asked, treeAsked, logs, commands, renders, markdownContext };
 }
 
 const ok = (value: Preview): RequestResult<Preview> => ({ kind: 'ok', value });
@@ -675,4 +676,51 @@ test('the second preview is found by view type when its column is not known yet,
     tabs: () => [first], revealExisting: () => { revealed = true; }, close: async () => { throw new Error('closed the existing preview'); },
   }), false);
   assert.equal(revealed, false);
+});
+
+const TREE: Preview = {
+  representations: [
+    { ...mermaid('flowchart', 'Flowchart') },
+    { ...mermaid('sequence:completed:0', 'Sequence: from S → a to completed'), outcome: 'completed' },
+    { ...mermaid('sequence:completed:1', 'Sequence: from S → b to completed'), outcome: 'completed' },
+    { ...mermaid('branch:completed:0', 'Sequence: from S to completed (2 variants)'), outcome: 'completed' },
+  ],
+  defaultRepresentationId: 'sequence:completed:0',
+  sequenceTree: [{
+    outcome: 'completed',
+    nodes: [{
+      id: 'branch:completed:0', steps: ['S'], title: 'from S to completed', count: 2,
+      children: [
+        { id: 'sequence:completed:0', steps: ['a'], title: 'from S → a to completed', count: 1, children: [] },
+        { id: 'sequence:completed:1', steps: ['b'], title: 'from S → b to completed', count: 1, children: [] },
+      ],
+    }],
+  }],
+};
+
+test('Separate variants asks for the variant tree and relays it with the outcomes; Alt blocks does not ask (MP-R36)', async () => {
+  const { session, renders, asked, treeAsked } = harness((mode) => ok(mode === 'SEPARATE_VARIANTS' ? TREE : ALT));
+  session.receive(READY);
+  await session.refresh();
+  assert.deepEqual(treeAsked, [undefined], 'Alt blocks, the default, asks as before');
+  assert.equal(renders().at(-1)?.sequenceTree, undefined);
+
+  await session.receive({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } });
+  await settle();
+  assert.deepEqual(asked, [undefined, 'SEPARATE_VARIANTS'].map((mode) => mode === undefined ? 'ALT_BLOCKS' : mode));
+  assert.equal(treeAsked.at(-1), true);
+  const render = renders().at(-1);
+  assert.deepEqual(render?.sequenceTree, TREE.sequenceTree);
+  assert.deepEqual(render?.representations.map((item) => item.outcome), [undefined, 'completed', 'completed', 'completed']);
+});
+
+test('a line of the tree is a representation, so choosing it is an ordinary selection that survives a refresh (MP-R36, MP-R12)', async () => {
+  const { session, renders } = harness(() => ok(TREE));
+  await session.receive({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } });
+  session.receive(READY);
+  await session.refresh();
+  assert.equal(session.selectRepresentation('branch:completed:0'), true);
+  assert.equal(renders().at(-1)?.selectedId, 'branch:completed:0');
+  await session.refresh();
+  assert.equal(renders().at(-1)?.selectedId, 'branch:completed:0');
 });

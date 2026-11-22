@@ -44,3 +44,6 @@
   a renderer shipped in the extension, offers a diagram selector and, for ZFL, a
   render mode, follows edits and the colour theme, and explains why it has nothing
   to show. The menu is now also offered for `.zdl` files and is hidden in diff editors.
+- The variant dropdown of an EventFlow diagram and the Sequence Diagrams selector of a ZFL preview are trees grouped by
+  outcome: lines show only the steps they add, a line with branches shows all the variants under it together, and the
+  full title of the choice is in the toolbar. Needs a language server that builds the variant tree; an older one keeps the flat list.

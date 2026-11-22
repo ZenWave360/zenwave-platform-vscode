@@ -1,4 +1,4 @@
-import type { Preview, PreviewMode, SequenceRenderMode } from '../lsp/requests.js';
+import type { Preview, PreviewMode, SequenceRenderMode, VariantTreeGroup } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import type { StatePresentation } from '../eventflow/protocol.js';
 import type { SessionLog } from '../eventflow/session.js';
@@ -20,7 +20,7 @@ export interface PreviewSessionPorts {
   /** Whether the document has sequence variants, so the render mode means something for it (ZFL). */
   readonly hasRenderMode: boolean;
   /** `languageServer.requests.preview`. */
-  preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode): Promise<RequestResult<Preview>>;
+  preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode, sequenceTree?: boolean): Promise<RequestResult<Preview>>;
   /** Whether this document can show ZDL Diagrams: a ZDL, and a server that advertised `previewModes` (MP-R25). Asked each time, as the server can reconnect. */
   diagramsAvailable?(): boolean;
   /** `webview.postMessage`. */
@@ -69,6 +69,8 @@ export class PreviewSession {
   /** The last good set, in the server's order. */
   representations: readonly PageRepresentation[] = [];
   defaultRepresentationId: string | undefined;
+  /** The last good set's variants as a tree grouped by outcome, for Separate variants (MP-R36). Absent for Alt blocks and older servers. */
+  sequenceTree: readonly VariantTreeGroup[] | undefined;
   /** Where the page was scrolled to last, for a following preview that comes back to this file (MP-R31). */
   scrollTop = 0;
   /** The scroll the page is still to apply after `attach`; each render carries it until the page reports from it. */
@@ -166,7 +168,9 @@ export class PreviewSession {
     const renderMode = this.ports.hasRenderMode ? this.renderMode : undefined;
     const result = await (mode === 'diagrams'
       ? this.ports.preview(this.ports.documentUri, renderMode, mode)
-      : this.ports.preview(this.ports.documentUri, renderMode));
+      : renderMode === 'SEPARATE_VARIANTS'
+        ? this.ports.preview(this.ports.documentUri, renderMode, undefined, true)
+        : this.ports.preview(this.ports.documentUri, renderMode));
     if (this.disposed || this.again || generation !== this.generation) return;
     const data = previewStateFromResult(result);
     this.record(data);
@@ -178,8 +182,10 @@ export class PreviewSession {
       this.representations = representations.map((item) => ({
         id: item.id, title: item.title, format: item.format, content: item.content,
         ...(mode === 'diagrams' && item.group !== undefined ? { group: item.group } : {}),
+        ...(mode !== 'diagrams' && item.outcome !== undefined ? { outcome: item.outcome } : {}),
       }));
       this.defaultRepresentationId = defaultRepresentationId;
+      this.sequenceTree = mode === 'diagrams' ? undefined : result.value.sequenceTree;
       if (choice) {
         if (this.selectedId !== undefined && choice.id !== this.selectedId) {
           this.ports.log.debug(`Preview of ${this.ports.fileName}: ${this.selectedId} is gone; showing ${choice.id} (${choice.reason})`);
@@ -351,6 +357,7 @@ export class PreviewSession {
       showRenderMode: this.ports.hasRenderMode,
       groups: this.groups,
       ...(this.selectedGroup === undefined ? {} : { selectedGroup: this.selectedGroup }),
+      ...(this.sequenceTree === undefined ? {} : { sequenceTree: this.sequenceTree }),
       ...(this.restore === undefined ? {} : { restore: this.restore }),
     };
     this.lastRender = payload;

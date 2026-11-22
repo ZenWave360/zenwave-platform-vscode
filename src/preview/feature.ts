@@ -134,7 +134,7 @@ class PreviewEditor implements PreviewEditorApi, vscode.Disposable {
         documentUri: uri.toString(),
         fileName: fileName(uri),
         hasRenderMode: hasRenderMode(uri),
-        preview: (target, renderMode, mode) => this.deps.server.requests.preview(target, renderMode, mode),
+        preview: (target, renderMode, mode, sequenceTree) => this.deps.server.requests.preview(target, renderMode, mode, sequenceTree),
         diagramsAvailable: () => hasDiagrams(uri) && this.deps.server.previewModes,
         // A session that is not the one on screen, or a panel that is gone, has nobody to tell. While the editor's first
         // session is being built there is no other on screen, so its first state goes out as it did before MP-R31.
