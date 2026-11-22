@@ -31,6 +31,7 @@ const NBSP = ' ';
 const MAX_STEPS = 3;
 
 export function runLabel(steps: readonly string[]): string {
+  if (steps.length === 0) return '(ends here)';
   const shown = steps.length > MAX_STEPS ? [steps[0], '…', steps[steps.length - 1]] : steps;
   return shown.join(' → ');
 }

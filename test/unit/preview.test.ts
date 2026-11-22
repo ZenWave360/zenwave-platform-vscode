@@ -36,10 +36,11 @@ const SEPARATE: Preview = {
   defaultRepresentationId: 'sequence:completed:0',
 };
 
-function harness(answer: (mode: SequenceRenderMode | undefined) => RequestResult<Preview> | Promise<RequestResult<Preview>>, options: { hasRenderMode?: boolean; uri?: string; fileName?: string } = {}) {
+function harness(answer: (mode: SequenceRenderMode | undefined) => RequestResult<Preview> | Promise<RequestResult<Preview>>, options: { hasRenderMode?: boolean; uri?: string; fileName?: string } = {}, lines?: (id: string) => RequestResult<Preview> | undefined) {
   const posted: OutboundMessage[] = [];
   const asked: (SequenceRenderMode | undefined)[] = [];
   const treeAsked: (boolean | undefined)[] = [];
+  const lineAsked: (string | undefined)[] = [];
   const logs: string[] = [];
   const commands: string[] = [];
   const markdownContext: boolean[] = [];
@@ -47,14 +48,17 @@ function harness(answer: (mode: SequenceRenderMode | undefined) => RequestResult
     documentUri: options.uri ?? ZFL,
     fileName: options.fileName ?? 'checkout.zfl',
     hasRenderMode: options.hasRenderMode ?? true,
-    preview: async (_uri, mode, _previewMode, tree) => { asked.push(mode); treeAsked.push(tree); return answer(mode); },
+    preview: async (_uri, mode, _previewMode, tree, representationId) => {
+      asked.push(mode); treeAsked.push(tree); lineAsked.push(representationId);
+      return representationId === undefined ? answer(mode) : (lines?.(representationId) ?? failure('unsupportedDocument'));
+    },
     post: async (message) => { posted.push(message); return true; },
     runCommand: (command) => { commands.push(command); },
     setContext: (key, value) => { assert.equal(key, PREVIEW_MARKDOWN_CONTEXT_KEY); markdownContext.push(value); },
     log: { info: (line) => logs.push(line), warn: (line) => logs.push(line), debug: (line) => logs.push(line) },
   });
   const renders = () => posted.flatMap((message) => message.type === 'zenwave.preview.render' ? [message.payload] : []);
-  return { session, posted, asked, treeAsked, logs, commands, renders, markdownContext };
+  return { session, posted, asked, treeAsked, lineAsked, logs, commands, renders, markdownContext };
 }
 
 const ok = (value: Preview): RequestResult<Preview> => ({ kind: 'ok', value });
@@ -684,7 +688,6 @@ const TREE: Preview = {
     { ...mermaid('flowchart', 'Flowchart') },
     { ...mermaid('sequence:completed:0', 'Sequence: from S → a to completed'), outcome: 'completed' },
     { ...mermaid('sequence:completed:1', 'Sequence: from S → b to completed'), outcome: 'completed' },
-    { ...mermaid('branch:completed:0', 'Sequence: from S to completed (2 variants)'), outcome: 'completed' },
   ],
   defaultRepresentationId: 'sequence:completed:0',
   sequenceTree: [{
@@ -697,6 +700,11 @@ const TREE: Preview = {
       ],
     }],
   }],
+};
+
+const LINE: Preview = {
+  representations: [{ ...mermaid('branch:completed:0', 'Sequence: from S to completed (2 variants)'), outcome: 'completed' }],
+  defaultRepresentationId: 'branch:completed:0',
 };
 
 test('Separate variants asks for the variant tree and relays it with the outcomes; Alt blocks does not ask (MP-R36)', async () => {
@@ -712,16 +720,37 @@ test('Separate variants asks for the variant tree and relays it with the outcome
   assert.equal(treeAsked.at(-1), true);
   const render = renders().at(-1);
   assert.deepEqual(render?.sequenceTree, TREE.sequenceTree);
-  assert.deepEqual(render?.representations.map((item) => item.outcome), [undefined, 'completed', 'completed', 'completed']);
+  assert.deepEqual(render?.representations.map((item) => item.outcome), [undefined, 'completed', 'completed']);
 });
 
-test('a line of the tree is a representation, so choosing it is an ordinary selection that survives a refresh (MP-R36, MP-R12)', async () => {
-  const { session, renders } = harness(() => ok(TREE));
+test('a line of the tree is fetched when chosen, not before, and an edit keeps it (MP-R36, MP-R12)', async () => {
+  const { session, renders, lineAsked } = harness(() => ok(TREE), {}, (id) => id === 'branch:completed:0' ? ok(LINE) : undefined);
   await session.receive({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } });
   session.receive(READY);
   await session.refresh();
+  assert.deepEqual(lineAsked.filter((id) => id !== undefined), [], 'the answer carries leaves only, and no line is asked for yet');
+  assert.equal(renders().at(-1)?.representations.some((item) => item.id === 'branch:completed:0'), false);
+
   assert.equal(session.selectRepresentation('branch:completed:0'), true);
+  await settle();
+  assert.deepEqual(lineAsked.filter((id) => id !== undefined), ['branch:completed:0']);
   assert.equal(renders().at(-1)?.selectedId, 'branch:completed:0');
+  assert.ok(renders().at(-1)?.representations.some((item) => item.id === 'branch:completed:0' && item.content.includes('sequenceDiagram')));
+
   await session.refresh();
-  assert.equal(renders().at(-1)?.selectedId, 'branch:completed:0');
+  assert.equal(renders().at(-1)?.selectedId, 'branch:completed:0', 'the chosen line is asked for again after an edit');
+  assert.deepEqual(lineAsked.filter((id) => id !== undefined), ['branch:completed:0', 'branch:completed:0']);
+});
+
+test('a line the server cannot give leaves the selection where it was, and the page is told (MP-R36)', async () => {
+  const { session, renders } = harness(() => ok(TREE), {}, () => undefined);
+  await session.receive({ type: 'zenwave.preview.selectRenderMode', payload: { mode: 'SEPARATE_VARIANTS' } });
+  session.receive(READY);
+  await session.refresh();
+  const before = renders().length;
+  assert.equal(session.selectRepresentation('branch:completed:0'), true);
+  await settle();
+  assert.equal(renders().length, before + 1, 'the page is sent the state again, so its selector goes back');
+  assert.equal(renders().at(-1)?.selectedId, 'sequence:completed:0');
+  assert.equal(session.selectRepresentation('branch:nope:0'), false, 'an id that is neither a representation nor a line is refused');
 });

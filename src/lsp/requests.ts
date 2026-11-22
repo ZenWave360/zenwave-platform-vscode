@@ -161,7 +161,7 @@ export type PreviewMode = 'docs' | 'diagrams';
 export interface Preview {
   readonly representations: readonly PreviewRepresentation[];
   readonly defaultRepresentationId: string;
-  /** Only when asked with `sequenceTree` and the sequences are separate variants (MP-R36): the variants as a tree; a line's id is a representation's. */
+  /** Only when asked with `sequenceTree` and the sequences are separate variants (MP-R36): the variants as a tree. A leaf's id is a representation's; a line with branches is asked for by `representationId` when chosen. */
   readonly sequenceTree?: readonly VariantTreeGroup[];
 }
 
@@ -256,12 +256,13 @@ export class ZenwaveRequests {
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));
   }
 
-  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode, sequenceTree?: boolean): Promise<RequestResult<Preview>> {
+  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode, sequenceTree?: boolean, representationId?: string): Promise<RequestResult<Preview>> {
     const params = {
       textDocument: { uri },
       ...(sequenceRenderMode === undefined ? {} : { sequenceRenderMode }),
       ...(mode === undefined ? {} : { mode }),
       ...(sequenceTree === true ? { sequenceTree } : {}),
+      ...(representationId === undefined ? {} : { representationId }),
     };
     return expect(ZENWAVE_REQUESTS.preview, await this.issuer.request(ZENWAVE_REQUESTS.preview, params),
       (value) => isObject(value) && Array.isArray(value.representations) && typeof value.defaultRepresentationId === 'string');
