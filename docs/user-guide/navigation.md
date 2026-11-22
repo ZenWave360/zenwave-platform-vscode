@@ -62,9 +62,11 @@ The breadcrumbs above the editor show where the cursor is, for example the aggre
 
 Open the ZenWave view from the Activity Bar. The Model tree shows the elements of the model you are editing.
 
-- **Click** a node to select it and show its source.
-- **Ctrl+click** a node to go to its definition. For a command in a flow, that is its method in the ZDL.
-- **Right-click** a node for **Go to Definition**, **Find References**, **Forward References** and **Open Related**. Only the ones that apply are shown.
+- **Click** a node to select it and show its source. The editor opens at the declaration and keeps the keyboard in the tree.
+- **F12** with a node selected goes to its definition, and **Shift+F12** finds its references, as in a text editor. For a command in a flow, the definition is its method in the ZDL.
+- **Right-click** a node for **Go to Definition**, **Find References**, **Forward References** and **Open Related**. Only the ones that apply to that node are shown, and only when the language server can answer them. The same two buttons, go to definition and references, appear on hover.
+
+**Ctrl+click does not go to the definition in the tree.** VS Code does not tell an extension which keys were held when a tree item was clicked, so Ctrl+click does what a plain click does: select the node and show its source. Use F12, the buttons or the right-click menu instead. The editor and the diagram keep Ctrl+click.
 
 ## Diagrams
 

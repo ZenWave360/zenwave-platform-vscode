@@ -359,6 +359,11 @@
         "icon": "$(references)"
       },
       {
+        "command": "zenwave.explorer.forwardReferences",
+        "title": "Forward References",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.explorer.openRelated",
         "title": "Open Related Resource...",
         "category": "ZenWave",
@@ -590,6 +595,10 @@
           "when": "false"
         },
         {
+          "command": "zenwave.explorer.forwardReferences",
+          "when": "false"
+        },
+        {
           "command": "zenwave.explorer.openManifest",
           "when": "zenwave.manifestAvailable"
         },
@@ -731,9 +740,24 @@
           "group": "inline@2"
         },
         {
+          "command": "zenwave.explorer.goToDefinition",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.definitionAvailable",
+          "group": "1_navigation@1"
+        },
+        {
+          "command": "zenwave.explorer.goToReferences",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.referencesAvailable",
+          "group": "1_navigation@2"
+        },
+        {
+          "command": "zenwave.explorer.forwardReferences",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests",
+          "group": "1_navigation@3"
+        },
+        {
           "command": "zenwave.explorer.openRelated",
           "when": "(view == zenwave.architecture || view == zenwave.model) && viewItem =~ /\\.related(\\.|$)/",
-          "group": "navigation"
+          "group": "1_navigation@4"
         }
       ],
       "editor/title": [
@@ -1117,6 +1141,16 @@
       }
     ],
     "keybindings": [
+      {
+        "command": "zenwave.explorer.goToDefinition",
+        "key": "f12",
+        "when": "focusedView == zenwave.model && zenwave.definitionAvailable"
+      },
+      {
+        "command": "zenwave.explorer.goToReferences",
+        "key": "shift+f12",
+        "when": "focusedView == zenwave.model && zenwave.referencesAvailable"
+      },
       {
         "command": "zenwave.preview.open",
         "key": "ctrl+shift+v",

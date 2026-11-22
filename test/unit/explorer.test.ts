@@ -717,10 +717,43 @@ test('the container, both views, activation and an explanation for every empty s
   const refresh = contributes.menus['view/title']?.find((entry) => entry.command === 'zenwave.explorer.refresh');
   assert.deepEqual([refresh?.when, refresh?.group], ['view == zenwave.architecture || view == zenwave.model', 'navigation']);
   const palette = Object.fromEntries((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
-  for (const command of ['zenwave.explorer.openNode', 'zenwave.explorer.openResource', 'zenwave.explorer.openRelated', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences']) {
+  for (const command of ['zenwave.explorer.openNode', 'zenwave.explorer.openResource', 'zenwave.explorer.openRelated', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences']) {
     assert.equal(palette[command], 'false', `${command} is reachable from the Command Palette`);
   }
   assertMenuMarkers(contributes.menus);
+});
+
+test('the node menu offers the four ways out in NAV-R3 order, each only where it applies and the server answers it', () => {
+  const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8')) as {
+    contributes: {
+      menus: Record<string, { command: string; when?: string; group?: string }[]>;
+      keybindings: { command: string; key: string; mac?: string; when: string }[];
+    };
+  };
+  const menu = (manifest.contributes.menus['view/item/context'] ?? []).filter((entry) => entry.group?.startsWith('1_navigation@'));
+  const ordered = [...menu].sort((a, b) => Number(a.group!.split('@')[1]) - Number(b.group!.split('@')[1]));
+  assert.deepEqual(ordered.map((entry) => entry.command), [
+    'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences', 'zenwave.explorer.openRelated',
+  ]);
+  const when = (command: string): string => menu.find((entry) => entry.command === command)?.when ?? '';
+  assert.match(when('zenwave.explorer.goToDefinition'), /view == zenwave.model/);
+  assert.match(when('zenwave.explorer.goToDefinition'), /zenwave.definitionAvailable/);
+  assert.match(when('zenwave.explorer.goToReferences'), /zenwave.referencesAvailable/);
+  const forward = when('zenwave.explorer.forwardReferences');
+  assert.ok(forward.includes("'zenwave/symbolAt' in zenwave.languageServerRequests") && forward.includes("'zenwave/forwardReferences' in zenwave.languageServerRequests"));
+  assert.match(forward, /zenwave.languageServerAvailable/);
+  for (const command of ['zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences']) {
+    assert.match(when(command), /viewItem =~ \/\\.declaration/, `${command} is for declarations only`);
+  }
+  assert.match(when('zenwave.explorer.openRelated'), /viewItem =~ \/\\.related/);
+  // The inline buttons are unchanged (ME-R9).
+  const inline = (manifest.contributes.menus['view/item/context'] ?? []).filter((entry) => entry.group?.startsWith('inline@'));
+  assert.deepEqual(inline.map((entry) => [entry.command, entry.group]), [['zenwave.explorer.goToDefinition', 'inline@1'], ['zenwave.explorer.goToReferences', 'inline@2']]);
+
+  // F12 and Shift+F12 on the focused Model tree, gated like the buttons; a keybinding carries no node, so the command reads the selection.
+  const keys = manifest.contributes.keybindings.filter((binding) => binding.command.startsWith('zenwave.explorer.'));
+  assert.deepEqual(keys.map((binding) => [binding.command, binding.key]), [['zenwave.explorer.goToDefinition', 'f12'], ['zenwave.explorer.goToReferences', 'shift+f12']]);
+  for (const binding of keys) assert.match(binding.when, /^focusedView == zenwave.model && zenwave\.(definition|references)Available$/);
 });
 
 /** A context value the presenter builds, plus every order of its markers. An end-anchored regex fails one of them. */

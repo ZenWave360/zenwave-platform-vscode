@@ -1,4 +1,6 @@
 ### Added
+- Model tree: right-click a node for Go to Definition, Find References, Forward References and Open Related,
+  and press F12 or Shift+F12 on the selected node for definition and references.
 - ZDL and ZFL language support: file associations, TextMate grammars, and editor
   configuration for comments, brackets, folding and indentation.
 - Dual extension host support — runs in both desktop VS Code and browser-based

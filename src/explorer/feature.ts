@@ -3,7 +3,8 @@ import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
 import { manifestDocument } from '../lsp/manifest.js';
 import { isRemoteManifest } from '../lsp/manifest-resolution.js';
-import { openLocation, toLocation } from '../model/navigation.js';
+import { MODEL_ACTION_COMMANDS } from '../model/actions.js';
+import { openLocation, presentLocations, toLocation } from '../model/navigation.js';
 import { CoalescedRefresh } from './coalesce.js';
 import { loadDocumentOutline, type DocumentOutlineSymbol } from './document-symbols.js';
 import { DiagramPanels, reflectSelection, type SelectionReflection } from './diagram-selection.js';
@@ -25,6 +26,7 @@ export const EXPLORER_COMMANDS = {
   openResource: 'zenwave.explorer.openResource',
   goToDefinition: 'zenwave.explorer.goToDefinition',
   goToReferences: 'zenwave.explorer.goToReferences',
+  forwardReferences: 'zenwave.explorer.forwardReferences',
   openRelated: 'zenwave.explorer.openRelated',
   openManifest: 'zenwave.explorer.openManifest',
 } as const;
@@ -564,6 +566,61 @@ export function registerModelExplorer(
     return editor.document.uri.toString();
   }
 
+  /**
+   * The node a gesture is about. A menu or an inline button passes it; a keybinding (F12, Shift+F12) passes nothing
+   * (microsoft/vscode#130880), so the focused tree's selection stands in.
+   */
+  function gestureTarget(element: unknown): ExplorerNode | undefined {
+    const given = element as ExplorerNode | undefined;
+    if (given?.node) return given;
+    return model.view.selection[0];
+  }
+
+  /** Where a node's declaration starts, as the position the standard navigation requests are asked at. */
+  function sourcePosition(target: ExplorerNode | undefined): { uri: vscode.Uri; position: vscode.Position } | undefined {
+    const item = target?.node;
+    if (!item?.sourceUri || !item.sourceRange) return undefined;
+    const start = item.sourceRange.start;
+    return { uri: vscode.Uri.parse(item.sourceUri, true), position: new vscode.Position(start.line, start.character) };
+  }
+
+  /**
+   * Go to Definition on a node (NAV-R1): the editor's definition at the node's source position, so a flow command reaches
+   * its ZDL method. A declaration that is its own definition, or a server without an answer, reveals the source instead.
+   */
+  async function goToDefinition(element: unknown): Promise<string | undefined> {
+    const target = gestureTarget(element);
+    const source = sourcePosition(target);
+    if (!target || !source) return undefined;
+    const found = await Promise.resolve(vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[] | undefined>(
+      'vscode.executeDefinitionProvider', source.uri, source.position)).then((result) => result ?? [], () => []);
+    const locations = found.map((entry) => 'targetUri' in entry
+      ? new vscode.Location(entry.targetUri, entry.targetSelectionRange ?? entry.targetRange)
+      : entry);
+    if (locations.length === 0) return openNode(target);
+    if (locations.length === 1) return (await openLocation(locations[0]!)).document.uri.toString();
+    await presentLocations(new vscode.Location(source.uri, new vscode.Range(source.position, source.position)), locations, '');
+    return source.uri.toString();
+  }
+
+  async function goToReferences(element: unknown): Promise<unknown> {
+    const source = sourcePosition(gestureTarget(element));
+    if (!source) return undefined;
+    // Find References at the node's source location: the same answer as Shift+F12 on the declaration.
+    const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(source.uri));
+    editor.selection = new vscode.Selection(source.position, source.position);
+    editor.revealRange(new vscode.Range(source.position, source.position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    return vscode.commands.executeCommand('editor.action.goToReferences');
+  }
+
+  /** Forward References of a node: the model action of the editor menu, asked at the node's source position. */
+  async function forwardReferences(element: unknown): Promise<unknown> {
+    const source = sourcePosition(gestureTarget(element));
+    if (!source) return undefined;
+    return vscode.commands.executeCommand(MODEL_ACTION_COMMANDS.forwardReferences, source.uri,
+      { line: source.position.line, character: source.position.character });
+  }
+
   async function openRelated(element: unknown, choice?: unknown): Promise<OpenRelatedOutcome> {
     const resources = (element as ExplorerNode | undefined)?.node.relatedResources ?? [];
     if (resources.length === 0) {
@@ -643,18 +700,9 @@ export function registerModelExplorer(
     vscode.commands.registerCommand(EXPLORER_COMMANDS.refresh, () => manualRefreshAll()),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openNode, openNode),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openResource, (element: unknown) => architecture.openResource(element)),
-    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToDefinition, openNode),
-    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, async (element: unknown) => {
-      const item = (element as ExplorerNode | undefined)?.node;
-      if (!item?.sourceUri || !item.sourceRange) return undefined;
-      // Find References at the node's source location: the same answer as Shift+F12 on the declaration.
-      const start = item.sourceRange.start;
-      const position = new vscode.Position(start.line, start.character);
-      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.parse(item.sourceUri, true)));
-      editor.selection = new vscode.Selection(position, position);
-      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-      return vscode.commands.executeCommand('editor.action.goToReferences');
-    }),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToDefinition, goToDefinition),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, goToReferences),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.forwardReferences, forwardReferences),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openRelated, openRelated),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openManifest, openManifest),
   );

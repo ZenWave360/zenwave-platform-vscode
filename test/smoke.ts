@@ -406,7 +406,7 @@ async function modelActionsOnDisk(api: LanguageServerApi): Promise<void> {
   await connected(api, 'Re-enabled after model actions');
 }
 
-const EXPLORER_COMMANDS = ['zenwave.explorer.refresh', 'zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.openManifest'];
+const EXPLORER_COMMANDS = ['zenwave.explorer.refresh', 'zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.openManifest', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences'];
 
 const labels = (nodes: readonly ExplorerNode[] | undefined): string[] => (nodes ?? []).map((item) => item.node.label);
 const roots = (tree: HierarchyTreeApi): ExplorerNode[] => (tree.tree?.roots ?? []) as ExplorerNode[];
@@ -615,6 +615,23 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   await model.settled();
   assert(model.documentUri === checkout, `Navigating inside the ZDL retargeted the tree: ${model.documentUri}`);
   console.log('PASS: selecting a system opens the ZDL declaring it at the declaration, and the tree keeps showing the flow');
+
+  // The gestures of NAV-R1/R3 on a node. A keybinding (F12, Shift+F12) passes no node: the focused tree's selection is used.
+  await vscode.window.showTextDocument(checkoutDocument, vscode.ViewColumn.One);
+  await vscode.commands.executeCommand('zenwave.model.focus');
+  await model.view.reveal(declared, { select: true, focus: true });
+  await waitFor(() => model.view.selection[0]?.key === declared.key, 'The service was not selected in the tree');
+  await vscode.commands.executeCommand('zenwave.explorer.goToDefinition');
+  const gestured = vscode.window.activeTextEditor;
+  assert(gestured?.document.uri.toString() === zdl && gestured.selection.active.line === declared.node.sourceRange.start.line,
+    `Go to Definition (F12) on the selected node: ${gestured?.document.uri.toString()} ${JSON.stringify(gestured?.selection.active)}`);
+  const forwardFromNode = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.explorer.forwardReferences', declared);
+  assert(forwardFromNode !== undefined && !['no-server', 'unsupported', 'failed', 'no-document'].includes(forwardFromNode.kind),
+    `Forward References from a node: ${JSON.stringify(forwardFromNode)}`);
+  await vscode.commands.executeCommand('closeReferenceSearch');
+  // Without an argument nor a selection nothing happens.
+  assert(await vscode.commands.executeCommand('zenwave.explorer.forwardReferences', { node: { sourceUri: '' } }) === undefined, 'a node without a source answered');
+  console.log('PASS: the node gestures run on the selected tree item (F12) and Forward References answers from a node');
 
   const related = node(model, 'Orders', 'system')!;
   const back = related.node.relatedResources.findIndex((resource) => resource.relationType === 'referenced-by');

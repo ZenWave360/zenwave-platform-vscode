@@ -508,7 +508,8 @@ test('the Copy as Markdown button follows the editor that is active, whatever or
 });
 
 test('the preview keybindings are scoped to model editors and cannot reach the built-in Markdown preview', () => {
-  const bindings = manifest.contributes.keybindings as { command: string; key: string; mac?: string; when: string }[];
+  const bindings = (manifest.contributes.keybindings as { command: string; key: string; mac?: string; when: string }[])
+    .filter((binding) => binding.command.startsWith('zenwave.preview.'));
   assert.deepEqual(bindings.map((binding) => [binding.command, binding.key, binding.mac]), [
     ['zenwave.preview.open', 'ctrl+shift+v', 'cmd+shift+v'],
     ['zenwave.preview.openToSide', 'ctrl+k v', 'cmd+k v'],
