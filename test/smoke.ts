@@ -258,9 +258,10 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
 async function modelActions(api: LanguageServerApi): Promise<void> {
   await connected(api, 'Model actions');
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['zenwave.model.forwardReferences', 'zenwave.model.reverseReferences', 'zenwave.zfl.organizeServices', 'zenwave.zfl.addMissingServices']) {
+  for (const command of ['zenwave.model.forwardReferences', 'zenwave.zfl.organizeServices', 'zenwave.zfl.addMissingServices']) {
     assert(commands.includes(command), `${command} was not registered`);
   }
+  assert(!commands.includes('zenwave.model.reverseReferences'), 'reverseReferences is retired: Find References is the only who-uses-this');
   assert(commands.includes('zenwave.model.conceptsAt'), 'conceptsAt was not registered');
   assert(!api.advertisedRequests.includes('zenwave/conceptAt'), 'The bundled server unexpectedly advertises conceptAt');
   const manifest = vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON as {
@@ -289,15 +290,10 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   const fromCursor = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences');
   assert(fromCursor.kind === 'navigated', `forwardReferences from the cursor: ${JSON.stringify(fromCursor)}`);
   await vscode.window.showTextDocument(checkout);
-  const reverse = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences', checkout.uri, { line: 14, character: 30 });
-  // lsp-js d7156e7 reports no reverse references for any concept of these fixtures (zenwave-specs 001 task 2.19).
-  // When the server starts finding them, this assertion is the one to update.
-  assert(reverse.kind === 'none' && reverse.targets.length === 0, `reverseReferences: ${JSON.stringify(reverse)}`);
-  assert(vscode.window.activeTextEditor?.document.uri.toString() === checkout.uri.toString(), 'No reverse references must not navigate');
   const blank = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences', checkout.uri, { line: 8, character: 0 });
   assert(blank.kind === 'no-symbol', `A blank line must resolve to nothing, quietly: ${JSON.stringify(blank)}`);
   assert(vscode.window.activeTextEditor?.document.uri.toString() === checkout.uri.toString(), 'A blank line must not navigate');
-  console.log(`PASS: forward references open the declaring ZDL directly; no reverse references is reported as none; a blank line does nothing`);
+  console.log(`PASS: forward references open the declaring ZDL directly; a blank line does nothing`);
 
   const flow = await vscode.workspace.openTextDocument({ language: 'zfl', content: checkoutText });
   const flowEditor = await vscode.window.showTextDocument(flow);
@@ -530,18 +526,15 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   const ordersSymbol = await api.requests.symbolAt(checkout, { line: ordersNameLine, character: ordersNameCharacter });
   assert(ordersSymbol.kind === 'ok' && ordersSymbol.value?.semanticId === orders.node.id,
     `symbolAt on the Orders name: ${JSON.stringify(ordersSymbol)} vs ${orders.node.id}`);
-  const fromEditor = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences');
-  const fromTree = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.explorer.goToReferences', orders);
-  assert(fromTree !== undefined && fromEditor !== undefined && fromTree.kind === fromEditor.kind && fromTree.kind !== 'no-symbol',
-    `Go to References from the tree: ${JSON.stringify(fromTree)}; from the name: ${JSON.stringify(fromEditor)}`);
-  const treeTargets = 'targets' in fromTree ? fromTree.targets : undefined;
-  const editorTargets = 'targets' in fromEditor ? fromEditor.targets : undefined;
-  assert(treeTargets !== undefined && JSON.stringify(treeTargets) === JSON.stringify(editorTargets),
-    `Go to References targets differ: tree ${JSON.stringify(treeTargets)} editor ${JSON.stringify(editorTargets)}`);
-  const atDeclaration = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences', vscode.Uri.parse(orders.node.sourceUri), orders.node.sourceRange.start);
-  // Since zenwave-lsp resolves ZDL positions on the right line (001 task 2.21), the stored position resolves to Orders too.
-  assert(atDeclaration.kind === fromEditor.kind, `The position stored on Orders resolves differently from its name: ${JSON.stringify(atDeclaration)} vs ${JSON.stringify(fromEditor)}`);
-  console.log('PASS: Go to References on the Orders system matches a cursor on its name, and its stored position');
+  // Go to References runs Find References at the node's source location (ME-R9): the document opens with the cursor on it.
+  await vscode.window.showTextDocument(checkoutDocument);
+  await vscode.commands.executeCommand('zenwave.explorer.goToReferences', orders);
+  const fromTree = vscode.window.activeTextEditor;
+  assert(fromTree !== undefined && fromTree.document.uri.toString() === vscode.Uri.parse(orders.node.sourceUri).toString() &&
+    fromTree.selection.active.line === orders.node.sourceRange.start.line && fromTree.selection.active.character === orders.node.sourceRange.start.character,
+    `Go to References from the tree did not place the cursor on the node: ${fromTree?.document.uri.toString()} ${JSON.stringify(fromTree?.selection.active)} vs ${JSON.stringify(orders.node.sourceRange)}`);
+  await vscode.commands.executeCommand('closeReferenceSearch');
+  console.log('PASS: Go to References on the Orders system runs Find References at its source location');
 
   const placeOrderUri = await fixture('place-order-flow.zfl');
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(placeOrderUri));

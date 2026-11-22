@@ -709,8 +709,9 @@ test('the container, both views, activation and an explanation for every empty s
   const definition = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToDefinition');
   assert.equal(definition?.group, 'inline@1');
   const references = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToReferences');
-  assert.ok((references?.when ?? '').includes("'zenwave/symbolAt' in zenwave.languageServerRequests"));
-  assert.ok((references?.when ?? '').includes("'zenwave/reverseReferences' in zenwave.languageServerRequests"));
+  // Go to References is Find References at the node's location: it needs the server, not the retired reverse request.
+  assert.ok((references?.when ?? '').includes('zenwave.languageServerAvailable'));
+  assert.ok(!(references?.when ?? '').includes('reverseReferences'));
   assert.equal(references?.group, 'inline@2');
   const refresh = contributes.menus['view/title']?.find((entry) => entry.command === 'zenwave.explorer.refresh');
   assert.deepEqual([refresh?.when, refresh?.group], ['view == zenwave.architecture || view == zenwave.model', 'navigation']);

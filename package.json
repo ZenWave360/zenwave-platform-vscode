@@ -63,7 +63,7 @@
   },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
-    "version": "0.1.0-next.33.1"
+    "version": "0.1.0-next.35.1"
   },
   "zenwaveEventFlowWebview": {
     "package": "@zenwave360/vistas-eventflow-webview",
@@ -321,11 +321,6 @@
         "category": "ZenWave"
       },
       {
-        "command": "zenwave.model.reverseReferences",
-        "title": "Go to What References This",
-        "category": "ZenWave"
-      },
-      {
         "command": "zenwave.zfl.organizeServices",
         "title": "Organize ZFL Services in Full",
         "category": "ZenWave"
@@ -559,10 +554,6 @@
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests"
         },
         {
-          "command": "zenwave.model.reverseReferences",
-          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests"
-        },
-        {
           "command": "zenwave.model.conceptsAt",
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/conceptAt' in zenwave.languageServerRequests"
         },
@@ -706,11 +697,6 @@
           "group": "navigation@90"
         },
         {
-          "command": "zenwave.model.reverseReferences",
-          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
-          "group": "navigation@91"
-        },
-        {
           "command": "zenwave.model.conceptsAt",
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/conceptAt' in zenwave.languageServerRequests",
           "group": "navigation@92"
@@ -741,7 +727,7 @@
         },
         {
           "command": "zenwave.explorer.goToReferences",
-          "when": "view == zenwave.model && viewItem =~ /\\.references(\\.|$)/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
+          "when": "view == zenwave.model && viewItem =~ /\\.references(\\.|$)/ && zenwave.languageServerAvailable",
           "group": "inline@2"
         },
         {
@@ -1154,7 +1140,7 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.0.0",
-    "@zenwave360/lsp-js": "0.1.0-next.33.1",
+    "@zenwave360/lsp-js": "0.1.0-next.35.1",
     "@zenwave360/vistas-eventflow-webview": "0.0.0-next-20261110162033",
     "adm-zip": "^0.6.1",
     "esbuild": "^0.23.0",

@@ -644,11 +644,16 @@ export function registerModelExplorer(
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openNode, openNode),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openResource, (element: unknown) => architecture.openResource(element)),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.goToDefinition, openNode),
-    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, (element: unknown) => {
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, async (element: unknown) => {
       const item = (element as ExplorerNode | undefined)?.node;
-      // The hierarchy id is the semantic id. A position in the declaration is not: symbolAt there is null or a neighbour.
-      if (!item?.sourceUri || !item.id.includes('#')) return undefined;
-      return vscode.commands.executeCommand('zenwave.model.reverseReferences', vscode.Uri.parse(item.sourceUri, true), item.sourceRange?.start, item.id);
+      if (!item?.sourceUri || !item.sourceRange) return undefined;
+      // Find References at the node's source location: the same answer as Shift+F12 on the declaration.
+      const start = item.sourceRange.start;
+      const position = new vscode.Position(start.line, start.character);
+      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.parse(item.sourceUri, true)));
+      editor.selection = new vscode.Selection(position, position);
+      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      return vscode.commands.executeCommand('editor.action.goToReferences');
     }),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openRelated, openRelated),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openManifest, openManifest),

@@ -11,7 +11,6 @@ import { minimalReplacement, withLineEnding } from './text-replacement.js';
 
 export const MODEL_ACTION_COMMANDS = {
   forwardReferences: 'zenwave.model.forwardReferences',
-  reverseReferences: 'zenwave.model.reverseReferences',
   conceptsAt: 'zenwave.model.conceptsAt',
   /** Full organise. Confirms first; an older server is sent no mode. */
   organizeServices: 'zenwave.zfl.organizeServices',
@@ -38,11 +37,8 @@ export type ConceptsAtOutcome =
   | { readonly kind: 'shown' | 'empty' | 'no-architecture'; readonly concepts?: ConceptsAt['concepts'] }
   | { readonly kind: 'no-document' | 'no-server' | 'unsupported' | 'failed'; readonly message: string };
 
-type Direction = 'forwardReferences' | 'reverseReferences';
-
-const FEATURE: Record<Direction | OrganizeAction, string> = {
+const FEATURE: Record<'forwardReferences' | OrganizeAction, string> = {
   forwardReferences: 'Go to what this references',
-  reverseReferences: 'Go to what references this',
   full: 'Organize ZFL services',
   additive: 'Add missing ZFL services',
 };
@@ -148,10 +144,8 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     return vscode.window.visibleTextEditors.find((editor) => editor.document.uri.toString() === uri.toString());
   }
 
-  async function followReferences(direction: Direction, uriArgument?: unknown, positionArgument?: unknown, semanticIdArgument?: unknown): Promise<ReferencesOutcome> {
-    const feature = FEATURE[direction];
-    // A hierarchy id (`documentUri#path`) is already the symbol the reference requests take.
-    const semanticId = typeof semanticIdArgument === 'string' && semanticIdArgument.includes('#') ? semanticIdArgument : undefined;
+  async function followReferences(uriArgument?: unknown, positionArgument?: unknown): Promise<ReferencesOutcome> {
+    const feature = FEATURE.forwardReferences;
     const uri = uriArgument instanceof vscode.Uri ? uriArgument : undefined;
     const editor = editorFor(uri);
     const document = editor?.document ?? (uri ? await vscode.workspace.openTextDocument(uri) : undefined);
@@ -160,48 +154,26 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     }
     const position = isPosition(positionArgument)
       ? new vscode.Position(positionArgument.line, positionArgument.character)
-      : semanticId ? undefined : editor?.selection.active;
-    if (!semanticId && !position) return report('no-document', `${feature} needs a position in the document.`, 'info');
+      : editor?.selection.active;
+    if (!position) return report('no-document', `${feature} needs a position in the document.`, 'info');
 
-    const problem = unavailable(feature, semanticId
-      ? [ZENWAVE_REQUESTS[direction]]
-      : [ZENWAVE_REQUESTS.symbolAt, ZENWAVE_REQUESTS[direction]]);
+    const problem = unavailable(feature, [ZENWAVE_REQUESTS.symbolAt, ZENWAVE_REQUESTS.forwardReferences]);
     if (problem) return problem;
 
-    let symbolUri: string;
-    let symbolSemanticId: string;
-    let anchor: vscode.Location;
-    if (semanticId) {
-      symbolUri = semanticId.slice(0, semanticId.lastIndexOf('#'));
-      symbolSemanticId = semanticId;
-      // The position, when one was passed, is only where the peek view anchors. It is not looked up.
-      anchor = toLocation({
-        uri: document.uri.toString(),
-        ...(position ? { range: { start: { line: position.line, character: position.character }, end: { line: position.line, character: position.character } } } : {}),
-      });
-    } else if (position) {
-      const symbol = await server.requests.symbolAt(document.uri.toString(), { line: position.line, character: position.character });
-      if (symbol.kind !== 'ok') return requestProblem(feature, symbol);
-      if (symbol.value === null) {
-        // Whitespace, a comment, nothing declared or referenced: nothing to follow, and not an error.
-        logger.debug(`${feature}: no symbol at ${document.uri.toString()}:${position.line + 1}:${position.character + 1}`);
-        return { kind: 'no-symbol' };
-      }
-      symbolUri = symbol.value.uri;
-      symbolSemanticId = symbol.value.semanticId;
-      anchor = toLocation({ uri: symbol.value.uri, ...(symbol.value.range ? { range: symbol.value.range } : {}) });
-    } else {
-      return report('no-document', `${feature} needs a position in the document.`, 'info');
+    const symbol = await server.requests.symbolAt(document.uri.toString(), { line: position.line, character: position.character });
+    if (symbol.kind !== 'ok') return requestProblem(feature, symbol);
+    if (symbol.value === null) {
+      // Whitespace, a comment, nothing declared or referenced: nothing to follow, and not an error.
+      logger.debug(`${feature}: no symbol at ${document.uri.toString()}:${position.line + 1}:${position.character + 1}`);
+      return { kind: 'no-symbol' };
     }
-    const references = await server.requests[direction](symbolUri, symbolSemanticId);
+    const anchor = toLocation({ uri: symbol.value.uri, ...(symbol.value.range ? { range: symbol.value.range } : {}) });
+    const references = await server.requests.forwardReferences(symbol.value.uri, symbol.value.semanticId);
     if (references.kind !== 'ok') return requestProblem(feature, references);
 
-    const where = `line ${anchor.range.start.line + 1}`;
-    const none = direction === 'forwardReferences'
-      ? `The ZenWave language server reports nothing that the symbol at ${where} references.`
-      : `The ZenWave language server reports nothing that references the symbol at ${where}.`;
+    const none = `The ZenWave language server reports nothing that the symbol at line ${anchor.range.start.line + 1} references.`;
     const kind = await presentLocations(anchor, references.value.map(toLocation), none);
-    logger.debug(`${feature}: ${symbolSemanticId} → ${references.value.length} target(s)`);
+    logger.debug(`${feature}: ${symbol.value.semanticId} → ${references.value.length} target(s)`);
     return { kind, targets: references.value };
   }
 
@@ -333,9 +305,7 @@ export function registerModelActions(context: vscode.ExtensionContext, server: L
     vscode.languages.registerCodeLensProvider({ language: 'zfl' }, codeLenses),
     server.onDidChange(() => codeLenses.refresh()),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.forwardReferences,
-      (uri?: unknown, position?: unknown) => followReferences('forwardReferences', uri, position)),
-    vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.reverseReferences,
-      (uri?: unknown, position?: unknown, semanticId?: unknown) => followReferences('reverseReferences', uri, position, semanticId)),
+      (uri?: unknown, position?: unknown) => followReferences(uri, position)),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.conceptsAt,
       (uri?: unknown, position?: unknown) => conceptsAt(uri, position)),
     vscode.commands.registerCommand(MODEL_ACTION_COMMANDS.organizeServices,

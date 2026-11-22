@@ -94,12 +94,13 @@ test('each model action is offered only with a connected server advertising its 
   };
   const expectations: Record<string, { requests: string[]; language: RegExp; title: string; capability?: RegExp; hidesCapability?: boolean }> = {
     'zenwave.model.forwardReferences': { requests: ['zenwave/symbolAt', 'zenwave/forwardReferences'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, title: 'Go to What This References' },
-    'zenwave.model.reverseReferences': { requests: ['zenwave/symbolAt', 'zenwave/reverseReferences'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, title: 'Go to What References This' },
     'zenwave.model.conceptsAt': { requests: ['zenwave/conceptAt'], language: /editorLangId =~ \/\^\(zdl\|zw\|zfl\)\$\//, title: 'Show Concepts at Position' },
     'zenwave.zfl.organizeServices': { requests: ['zenwave/organizeZflServices'], language: /editorLangId == zfl/, title: 'Organize ZFL Services in Full', hidesCapability: true },
     'zenwave.zfl.addMissingServices': { requests: ['zenwave/organizeZflServices'], language: /editorLangId == zfl/, title: 'Add Missing ZFL Services', capability: /zenwave\.organizeModesAvailable/ },
   };
   const titles = new Map(manifest.contributes.commands.map((item) => [item.command, item.title]));
+  // Find References (Shift+F12) is the only "who uses this" (NAV-R19): no command, menu entry or keybinding for the reverse request.
+  assert.ok(!JSON.stringify(manifest.contributes).includes('zenwave.model.reverseReferences'), 'reverseReferences is retired');
   for (const [command, expected] of Object.entries(expectations)) {
     assert.equal(titles.get(command), expected.title, `${command} title`);
     for (const menu of ['commandPalette', 'editor/context']) {

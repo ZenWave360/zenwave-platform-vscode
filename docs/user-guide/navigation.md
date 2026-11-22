@@ -38,10 +38,7 @@ If something has several definitions, VS Code shows a list to pick from. If the 
 
 Put the cursor on a command, event, rule or type and press **Shift+F12**. The results show every file that uses it, open or not.
 
-Two more commands are in the editor's right-click menu:
-
-- **ZenWave: Go to What This References** lists what the element under the cursor points to.
-- **ZenWave: Go to What References This** lists what points to it.
+One more command is in the editor's right-click menu: **ZenWave: Go to What This References** lists what the element under the cursor points to.
 
 ## Find your way inside a file
 
