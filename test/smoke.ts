@@ -1579,6 +1579,8 @@ async function editsAndChoices(api: LanguageServerApi, flow: PreviewEditorApi, a
     return answer.renderModeSelector.value === 'SEPARATE_VARIANTS' && separate.representations.every((item) => answer.diagramSelector.options.some((option) => option.value === item.id)) && answer.diagramSelector.groups.length > 0 ? answer : undefined;
   }, 'The selectors do not show the server answer for the separate variants', 30000);
   assert(separateProbe.diagramSelector.value === kept, `The diagram selector does not show ${kept}: ${separateProbe.diagramSelector.value}`);
+  // MP-R36: each option's tooltip is the full title of what it shows, and follows the set when it changes.
+  assert(separateProbe.diagramSelector.options.every((option) => option.title.length > 0), `An option has no tooltip: ${JSON.stringify(separateProbe.diagramSelector.options)}`);
   // MP-R36: the selector is grouped by outcome, in the order of the server's tree, and each line of the tree is an option.
   assert((separate.sequenceTree?.length ?? 0) > 0 && separateProbe.diagramSelector.groups.join() === separate.sequenceTree!.map((group) => group.outcome).join(),
     `The selector groups ${separateProbe.diagramSelector.groups.join()} are not the server's outcomes ${separate.sequenceTree?.map((group) => group.outcome).join()}`);
