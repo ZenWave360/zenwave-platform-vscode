@@ -101,6 +101,8 @@ export interface EventFlowViews {
   readonly serviceGraph: ViewModel;
   /** The flow's variants, in the server's order; absent from a server that does not list them. */
   readonly variants?: readonly FlowVariant[];
+  /** The variants grouped by end outcome as a prefix tree of steps (EF-R25); absent from a server that does not build it. */
+  readonly variantTree?: readonly VariantTreeGroup[];
   /** Echoed when `lanes` was sent to a server that advertised `flowLanes` (EF-R24). */
   readonly lanes?: 'systems' | 'services';
   /** Present when `positions` was sent to a server that advertised `savedPositions` (LVR-R18). */
@@ -114,6 +116,27 @@ export type SavedPositionsAnswer =
 export interface FlowVariant {
   readonly id: string;
   readonly title: string;
+  /** The end outcome, and the start followed by the choices taken, from a server that builds the variant tree. */
+  readonly outcome?: string;
+  readonly steps?: readonly string[];
+}
+
+/**
+ * A line of the variant tree (EF-R25, MP-R36): `steps` are those it adds to its parent, `title` is the full title of the
+ * path down to it, `count` the variants under it. A leaf's id is its variant's id; any other id stands for all its variants.
+ */
+export interface VariantTreeNode {
+  readonly id: string;
+  readonly steps: readonly string[];
+  readonly title: string;
+  readonly count: number;
+  readonly children: readonly VariantTreeNode[];
+}
+
+/** The variants that end in one outcome. Groups come in the order of the flow's `end`. */
+export interface VariantTreeGroup {
+  readonly outcome: string;
+  readonly nodes: readonly VariantTreeNode[];
 }
 
 /** `mode` of `zenwave/organizeZflServices`. Absent on the wire means `full`. */
@@ -128,6 +151,8 @@ export interface PreviewRepresentation {
   readonly content: string;
   /** The kind of element, in `diagrams` mode only (LVR-R17). */
   readonly group?: string;
+  /** The end outcome of a ZFL sequence diagram (MP-R36). */
+  readonly outcome?: string;
 }
 
 /** What `zenwave/preview` is asked for: the page (`docs`, the default) or one diagram per element (`diagrams`). */
@@ -136,6 +161,8 @@ export type PreviewMode = 'docs' | 'diagrams';
 export interface Preview {
   readonly representations: readonly PreviewRepresentation[];
   readonly defaultRepresentationId: string;
+  /** Only when asked with `sequenceTree` and the sequences are separate variants (MP-R36): the variants as a tree; a line's id is a representation's. */
+  readonly sequenceTree?: readonly VariantTreeGroup[];
 }
 
 export interface SymbolAt {
@@ -229,11 +256,12 @@ export class ZenwaveRequests {
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));
   }
 
-  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode): Promise<RequestResult<Preview>> {
+  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode, sequenceTree?: boolean): Promise<RequestResult<Preview>> {
     const params = {
       textDocument: { uri },
       ...(sequenceRenderMode === undefined ? {} : { sequenceRenderMode }),
       ...(mode === undefined ? {} : { mode }),
+      ...(sequenceTree === true ? { sequenceTree } : {}),
     };
     return expect(ZENWAVE_REQUESTS.preview, await this.issuer.request(ZENWAVE_REQUESTS.preview, params),
       (value) => isObject(value) && Array.isArray(value.representations) && typeof value.defaultRepresentationId === 'string');

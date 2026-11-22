@@ -7,6 +7,7 @@
  * to the page (see `page.ts`); the upstream page ignores unknown message types.
  */
 
+import type { VariantTreeGroup } from '../lsp/requests.js';
 import { validatePositions, type Positions } from './positions.js';
 
 /** The custom editor's view type. */
@@ -46,7 +47,9 @@ export type PageMessage =
        */
       readonly diagramId: string;
       /** Only when the server advertised `flowVariants`; the dropdown is absent otherwise (EF-R12). */
-      readonly variants?: readonly { readonly id: string; readonly title: string }[];
+      readonly variants?: readonly { readonly id: string; readonly title: string; readonly outcome?: string; readonly steps?: readonly string[] }[];
+      /** The variants as a tree grouped by outcome, when the server built one (EF-R25). Sent with `variants`. */
+      readonly variantTree?: readonly VariantTreeGroup[];
       /** The variant `flowGraph` shows, or `null` for the full diagram. Sent with `variants`. */
       readonly variant?: string | null;
       /** Only for the full diagram, when the server advertised `savedPositions` (EF-R14). */

@@ -398,7 +398,13 @@ export class DiagramSession {
       displaySettings: this.shownSettings(),
       lanesSupported: this.ports.flowLanes(),
       diagramId: this.ports.documentUri,
-      ...(this.ports.flowVariants() ? { variants: this.lastGood.variants ?? [], variant: this.variant } : {}),
+      ...(this.ports.flowVariants()
+        ? {
+          variants: this.lastGood.variants ?? [],
+          ...(this.lastGood.variantTree === undefined ? {} : { variantTree: this.lastGood.variantTree }),
+          variant: this.variant,
+        }
+        : {}),
       ...(this.lastSaved ? { savedPositions: this.lastSaved } : {}),
     };
     this.lastRenderBundle = payload;

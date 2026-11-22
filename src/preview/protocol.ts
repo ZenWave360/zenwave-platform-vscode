@@ -6,6 +6,7 @@
  * so there is no protocol version to pin: it is built from the same commit.
  */
 import type { StatePresentation } from '../eventflow/protocol.js';
+import type { VariantTreeGroup } from '../lsp/requests.js';
 
 /** The Sequence Diagrams view type, retained for existing editor associations. */
 export const PREVIEW_VIEW_TYPE = 'zenwave.preview';
@@ -51,6 +52,8 @@ export interface PageRepresentation {
   readonly content: string;
   /** The kind of element, when the server grouped the set (`diagrams` mode); absent otherwise. */
   readonly group?: string;
+  /** The end outcome of a ZFL sequence diagram (MP-R36); the selector groups by it. */
+  readonly outcome?: string;
 }
 
 /** A short fingerprint of a representation's content, so the page and a test can say which content is drawn without carrying it. */
@@ -72,6 +75,8 @@ export interface RenderPayload {
   readonly groups: readonly string[];
   /** The kind shown now; the Element selector lists that kind's representations. Absent when not grouped. */
   readonly selectedGroup?: string;
+  /** Separate variants as a tree of steps grouped by outcome (MP-R36). The ids of its lines are representations'. Absent for Alt blocks. */
+  readonly sequenceTree?: readonly VariantTreeGroup[];
   /** Where to put the scroll once this page is drawn: a following preview that shows another file again (MP-R31). The page applies each key once. */
   readonly restore?: { readonly key: number; readonly top: number };
 }
@@ -126,7 +131,13 @@ export interface PreviewProbe {
   readonly scripts: readonly string[];
   readonly renderModeSelector: { readonly visible: boolean; readonly value: string; readonly options: readonly string[] };
   readonly groupSelector: { readonly visible: boolean; readonly value: string; readonly options: readonly string[] };
-  readonly diagramSelector: { readonly visible: boolean; readonly value: string; readonly options: readonly { readonly value: string; readonly label: string }[] };
+  readonly diagramSelector: {
+    readonly visible: boolean;
+    readonly value: string;
+    readonly options: readonly { readonly value: string; readonly label: string }[];
+    /** The labels of its <optgroup>s, in order: the outcomes when the selector is grouped (MP-R36). */
+    readonly groups: readonly string[];
+  };
   /** The id of the representation drawn now, if any. */
   readonly renderedId: string | undefined;
   /** `contentHash` of the content drawn now. */
