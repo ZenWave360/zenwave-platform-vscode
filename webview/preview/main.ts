@@ -515,7 +515,7 @@ function probe(requestId: number, followLink?: string, copyMermaid?: number): vo
       diagramSelector: {
         visible: !diagramField.hidden && !controls.hidden,
         value: diagramSelect.value,
-        options: [...diagramSelect.options].map((option) => ({ value: option.value, label: option.textContent ?? '' })),
+        options: [...diagramSelect.options].map((option) => ({ value: option.value, label: option.textContent ?? '', title: option.title })),
         groups: [...diagramSelect.querySelectorAll('optgroup')].map((group) => group.label),
       },
       renderedId: drawn?.id,

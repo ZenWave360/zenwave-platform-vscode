@@ -134,7 +134,7 @@ export interface PreviewProbe {
   readonly diagramSelector: {
     readonly visible: boolean;
     readonly value: string;
-    readonly options: readonly { readonly value: string; readonly label: string }[];
+    readonly options: readonly { readonly value: string; readonly label: string; readonly title: string }[];
     /** The labels of its <optgroup>s, in order: the outcomes when the selector is grouped (MP-R36). */
     readonly groups: readonly string[];
   };
