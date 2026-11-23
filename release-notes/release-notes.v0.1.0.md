@@ -1,0 +1,51 @@
+### Added
+- Model tree: right-click a node for Go to Definition, Find References, Forward References and Open Related,
+  and press F12 or Shift+F12 on the selected node for definition and references.
+- ZDL and ZFL language support: file associations, TextMate grammars, and editor
+  configuration for comments, brackets, folding and indentation.
+- Dual extension host support — runs in both desktop VS Code and browser-based
+  VS Code (vscode.dev, github.dev).
+- Host capability detection, so features that cannot work in the current host are
+  hidden rather than presented and broken. Detected capabilities are logged to
+  the ZenWave output channel.
+- A ZenWave container in the activity bar with an Architecture tree (the domains and
+  subdomains of the workspace's architecture manifest) and a Model tree (the model
+  in front of you), built from what the language server knows; each says what is
+  missing when it has nothing to show.
+- An EventFlow diagram for ZFL flows, from the ZenWave icon in a flow's editor title
+  bar, beside the text or in its place: it follows edits as you type, switches
+  between the flow and service views and humanized labels (`zenwave.eventflow.defaultView`,
+  `zenwave.eventflow.humanizeLabels`), and says why when it has nothing to draw.
+- `.zw` files are their own language, and the extension uses the ZenWave brand icons.
+- Duplicate plugin declarations of the same type each have their own Run CodeLens and run independently.
+- Run CodeLens actions for enabled ZenWave SDK plugin declarations in trusted
+  desktop workspaces, with task-backed execution and configurable environment.
+- Plugin and option completion and hover help from a ZenWave SDK plugin
+  catalogue shipped with the extension, on desktop and in the browser.
+- The ZenWave language server (`@zenwave360/lsp-js`) shipped with the extension:
+  a Node child process on the desktop, a Web Worker in the browser, for ZDL, ZFL
+  and the architecture manifest resolved from `zenwave.workspace.manifest`. Status bar indication, restart command, `zenwave.lsp.*`
+  settings, and credential commands for content the server may ask for.
+- Restricted Mode now also holds back the language server, content resolution
+  and credentials; trusting the workspace enables them without a reload.
+- ZenWave: Go to What This References, from the
+  editor context menu and the palette. Offered only while a language server
+  supporting it is connected. Find References (Shift+F12) is the way to see
+  what references an element.
+- A ZFL document shows Add missing and Full above its systems block. Add missing
+  adds what the flows use and removes nothing. Full also removes what no flow
+  uses, and asks first. ZenWave: Add Missing ZFL Services and ZenWave: Organize
+  ZFL Services in Full do the same from the palette, including when the document
+  has no systems block yet. Each rewrite is one undoable edit. Add missing is
+  offered only when the language server advertises organize modes; an older
+  server keeps Full, and is sent no mode.
+- A read-only preview of ZDL, ZW and ZFL models (a ZW file shows its plugin
+  configuration, resolved), from the editor title bar's ZenWave
+  menu, the palette (**ZenWave: Open Preview**, **Open Preview to the Side**) and
+  `Ctrl+Shift+V` / `Ctrl+K V`. It draws the language server's Mermaid diagrams with
+  a renderer shipped in the extension, offers a diagram selector and, for ZFL, a
+  render mode, follows edits and the colour theme, and explains why it has nothing
+  to show. The menu is now also offered for `.zdl` files and is hidden in diff editors.
+- The variant dropdown of an EventFlow diagram and the Sequence Diagrams selector of a ZFL preview are trees grouped by
+  outcome: lines show only the steps they add, a line with branches shows all the variants under it together, and the
+  full title of the choice is in the toolbar. Needs a language server that builds the variant tree; an older one keeps the flat list.
