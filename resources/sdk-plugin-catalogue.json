@@ -627,7 +627,7 @@
           "name": "targetFolder",
           "description": "Target folder to generate code to.",
           "type": "File",
-          "defaultValue": "`target\\generated-sources\\avro`",
+          "defaultValue": "`target/generated-sources/avro`",
           "values": []
         },
         "authentication": {
