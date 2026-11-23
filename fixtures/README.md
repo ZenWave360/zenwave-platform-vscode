@@ -7,7 +7,7 @@ grammar changes can be eyeballed against a model that uses most of the language.
 They are a snapshot, not a synced copy. If the language grows, refresh them.
 
 The folder is also a configured ZenWave workspace, so the language client has a
-manifest to resolve: `.zenwave/config.yml` names `zenwave-architecture.yml`.
+manifest to resolve: `.vscode/settings.json` sets `zenwave.workspace.manifest` to `zenwave-architecture.yml`.
 `lsp/` holds the models the smoke test asks the real language server about,
 taken from the `@zenwave360/lsp-js` wire tests (zenwave-lsp `lsp-js/npm/test`
 and the lsp-hierarchy samples): a ZDL with an unknown entity (`broken.zdl`), a

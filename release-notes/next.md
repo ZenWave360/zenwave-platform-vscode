@@ -1,4 +1,6 @@
 ### Added
+- Model tree: right-click a node for Go to Definition, Find References, Forward References and Open Related,
+  and press F12 or Shift+F12 on the selected node for definition and references.
 - ZDL and ZFL language support: file associations, TextMate grammars, and editor
   configuration for comments, brackets, folding and indentation.
 - Dual extension host support — runs in both desktop VS Code and browser-based
@@ -22,14 +24,14 @@
   catalogue shipped with the extension, on desktop and in the browser.
 - The ZenWave language server (`@zenwave360/lsp-js`) shipped with the extension:
   a Node child process on the desktop, a Web Worker in the browser, for ZDL, ZFL
-  and the architecture manifest resolved from `zenwave.workspace.manifest` or
-  `.zenwave/config.yml`. Status bar indication, restart command, `zenwave.lsp.*`
+  and the architecture manifest resolved from `zenwave.workspace.manifest`. Status bar indication, restart command, `zenwave.lsp.*`
   settings, and credential commands for content the server may ask for.
 - Restricted Mode now also holds back the language server, content resolution
   and credentials; trusting the workspace enables them without a reload.
-- ZenWave: Go to What This References / Go to What References This, from the
+- ZenWave: Go to What This References, from the
   editor context menu and the palette. Offered only while a language server
-  supporting them is connected.
+  supporting it is connected. Find References (Shift+F12) is the way to see
+  what references an element.
 - A ZFL document shows Add missing and Full above its systems block. Add missing
   adds what the flows use and removes nothing. Full also removes what no flow
   uses, and asks first. ZenWave: Add Missing ZFL Services and ZenWave: Organize
@@ -44,3 +46,6 @@
   a renderer shipped in the extension, offers a diagram selector and, for ZFL, a
   render mode, follows edits and the colour theme, and explains why it has nothing
   to show. The menu is now also offered for `.zdl` files and is hidden in diff editors.
+- The variant dropdown of an EventFlow diagram and the Sequence Diagrams selector of a ZFL preview are trees grouped by
+  outcome: lines show only the steps they add, a line with branches shows all the variants under it together, and the
+  full title of the choice is in the toolbar. Needs a language server that builds the variant tree; an older one keeps the flat list.

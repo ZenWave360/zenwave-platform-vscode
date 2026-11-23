@@ -14,7 +14,9 @@ const extensionDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'package.json'), 'utf8')) as {
   activationEvents: string[];
   capabilities: { untrustedWorkspaces: { supported: string; description: string; restrictedConfigurations: string[] } };
-  contributes: { configuration: { properties: Record<string, { scope?: string; default?: unknown }> }; commands: { command: string }[] };
+  contributes: { configuration: { properties: Record<string, {
+    type?: string; scope?: string; default?: unknown; description?: string; markdownDescription?: string; items?: { type?: string };
+  }> }; commands: { command: string; title?: string }[] };
   zenwaveLanguageServer: { package: string; version: string };
 };
 
@@ -96,8 +98,7 @@ test('ESLint enforces which host may import which vscode-languageclient entry', 
 });
 
 test('the extension starts only for ZenWave workspaces and documents, or when its views are opened, never at startup', () => {
-  assert.deepEqual(manifest.activationEvents.sort(), ['onLanguage:zdl', 'onLanguage:zfl', 'onLanguage:zw', 'onView:zenwave.architecture', 'onView:zenwave.model',
-    'workspaceContains:.zenwave/config.yml']);
+  assert.deepEqual(manifest.activationEvents.sort(), ['onFileSystem:zenwave', 'onLanguage:zdl', 'onLanguage:zfl', 'onLanguage:zw', 'onView:zenwave.architecture', 'onView:zenwave.model']);
 });
 
 test('settings, commands and the trust statement match what the language client does', () => {
@@ -108,14 +109,29 @@ test('settings, commands and the trust statement match what the language client 
   assert.equal(properties['zenwave.lsp.serverPath']?.scope, 'machine-overridable');
   assert.equal(properties['zenwave.credentials.origins']?.scope, 'application', 'a repository must not authorise an origin');
   const commands = manifest.contributes.commands.map((command) => command.command);
-  for (const command of ['zenwave.lsp.restart', 'zenwave.lsp.showStatus', 'zenwave.credentials.record', 'zenwave.credentials.clear']) {
+  for (const command of ['zenwave.lsp.restart', 'zenwave.lsp.showStatus', 'zenwave.credentials.record', 'zenwave.credentials.clear', 'zenwave.manifest.choose', 'zenwave.resource.open']) {
     assert.ok(commands.includes(command), command);
   }
+  assert.equal(manifest.contributes.commands.find((command) => command.command === 'zenwave.manifest.choose')?.title, 'Choose Architecture Manifest…');
   const trust = manifest.capabilities.untrustedWorkspaces;
   assert.equal(trust.supported, 'limited');
   assert.match(trust.description, /no language server/);
   assert.match(trust.description, /no credentials/);
   assert.deepEqual(trust.restrictedConfigurations, ['zenwave.lsp.serverPath', 'zenwave.workspace.manifest']);
+  const remoteName = properties['zenwave.architecture.remoteManifestName'];
+  assert.equal(remoteName?.type, 'string');
+  assert.equal(remoteName?.scope, 'window');
+  assert.equal(remoteName?.default, '.zenwave-manifest.yml');
+  assert.match(remoteName?.markdownDescription ?? '', /plain file name/);
+  assert.match(remoteName?.markdownDescription ?? '', /\.zenwave-manifest\.yml/);
+  const domains = properties['zenwave.architecture.allowedDomains'];
+  assert.equal(domains?.type, 'array');
+  assert.equal(domains?.items?.type, 'string');
+  assert.equal(domains?.scope, 'window');
+  assert.deepEqual(domains?.default, []);
+  assert.match(domains?.description ?? '', /github\.com matches that host only/);
+  assert.match(domains?.description ?? '', /\*\.githubusercontent\.com matches any subdomain/);
+  assert.match(domains?.description ?? '', /every hop/);
 });
 
 test('the build fails with instructions when the language server package is not linked', () => {

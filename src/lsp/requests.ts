@@ -12,11 +12,13 @@ import type { RequestResult } from './supervisor.js';
 export const ZENWAVE_REQUESTS = {
   hierarchy: 'zenwave/hierarchy',
   forwardReferences: 'zenwave/forwardReferences',
-  reverseReferences: 'zenwave/reverseReferences',
   organizeZflServices: 'zenwave/organizeZflServices',
   eventFlowViews: 'zenwave/eventFlowViews',
   preview: 'zenwave/preview',
   symbolAt: 'zenwave/symbolAt',
+  conceptAt: 'zenwave/conceptAt',
+  statResource: 'zenwave/statResource',
+  readResource: 'zenwave/readResource',
 } as const;
 
 export type ZenwaveRequestMethod = typeof ZENWAVE_REQUESTS[keyof typeof ZENWAVE_REQUESTS];
@@ -29,6 +31,36 @@ export interface RequestIssuer {
 export interface LspPosition { readonly line: number; readonly character: number }
 export interface LspRange { readonly start: LspPosition; readonly end: LspPosition }
 
+/** An architectural concept covering the requested position, named by the server. */
+export interface ArchitectureConcept {
+  readonly id: string;
+  readonly kind: string;
+  readonly name: string;
+  readonly identityOrigin: string;
+}
+
+/** The concepts the server found, plus whether its limit omitted further matches. */
+export interface ConceptsAt {
+  readonly concepts: readonly ArchitectureConcept[];
+  readonly truncated: boolean;
+}
+
+/** `zenwave/statResource` (AR-R4): what a `zenwave:` address resolves to. `fileUri` is present only for the `workspace` source. */
+export interface ResourceStat {
+  readonly uri: string;
+  readonly type: 'file';
+  readonly size: number;
+  readonly readonly: true;
+  readonly source: { readonly kind: string; readonly fileUri?: string };
+}
+
+/** `zenwave/readResource` (AR-R5): the content as text, or as base64 when it is not text. */
+export interface ResourceContent {
+  readonly uri: string;
+  readonly encoding: 'utf8' | 'base64';
+  readonly content: string;
+}
+
 export interface RelatedResource {
   readonly targetKind: string;
   readonly label: string;
@@ -38,7 +70,7 @@ export interface RelatedResource {
   readonly relationType?: string;
 }
 
-/** `zenwave/forwardReferences` and `zenwave/reverseReferences` answer these. */
+/** `zenwave/forwardReferences` answers these. */
 export type NavigationTarget = RelatedResource;
 
 export interface HierarchyNode {
@@ -53,6 +85,12 @@ export interface HierarchyNode {
   readonly uiHints: Readonly<Record<string, unknown>>;
   /** Ids of the same document's `zenwave/eventFlowViews` nodes and groups; empty when none. */
   readonly viewNodeIds: readonly string[];
+  /** Manifest resource version, when the declaration has one. */
+  readonly version?: string;
+  /** Server-owned `zenwave:` address for an architecture resource. */
+  readonly address?: string;
+  /** Why this manifest entry is visible but cannot be opened yet. */
+  readonly disabledReason?: string;
 }
 
 /** A view model as the server produced it; `schema` names its shape. */
@@ -63,17 +101,42 @@ export interface EventFlowViews {
   readonly serviceGraph: ViewModel;
   /** The flow's variants, in the server's order; absent from a server that does not list them. */
   readonly variants?: readonly FlowVariant[];
+  /** The variants grouped by end outcome as a prefix tree of steps (EF-R25); absent from a server that does not build it. */
+  readonly variantTree?: readonly VariantTreeGroup[];
+  /** Echoed when `lanes` was sent to a server that advertised `flowLanes` (EF-R24). */
+  readonly lanes?: 'systems' | 'services';
   /** Present when `positions` was sent to a server that advertised `savedPositions` (LVR-R18). */
   readonly savedPositions?: SavedPositionsAnswer;
 }
 
 export type SavedPositionsAnswer =
   | { readonly applied: true }
-  | { readonly applied: false; readonly reason?: 'missing-nodes' | 'invalid'; readonly missing?: readonly string[] };
+  | { readonly applied: false; readonly reason?: 'missing-nodes' | 'invalid' | 'lanes'; readonly missing?: readonly string[] };
 
 export interface FlowVariant {
   readonly id: string;
   readonly title: string;
+  /** The end outcome, and the start followed by the choices taken, from a server that builds the variant tree. */
+  readonly outcome?: string;
+  readonly steps?: readonly string[];
+}
+
+/**
+ * A line of the variant tree (EF-R25, MP-R36): `steps` are those it adds to its parent, `title` is the full title of the
+ * path down to it, `count` the variants under it. A leaf's id is its variant's id; any other id stands for all its variants.
+ */
+export interface VariantTreeNode {
+  readonly id: string;
+  readonly steps: readonly string[];
+  readonly title: string;
+  readonly count: number;
+  readonly children: readonly VariantTreeNode[];
+}
+
+/** The variants that end in one outcome. Groups come in the order of the flow's `end`. */
+export interface VariantTreeGroup {
+  readonly outcome: string;
+  readonly nodes: readonly VariantTreeNode[];
 }
 
 /** `mode` of `zenwave/organizeZflServices`. Absent on the wire means `full`. */
@@ -88,6 +151,8 @@ export interface PreviewRepresentation {
   readonly content: string;
   /** The kind of element, in `diagrams` mode only (LVR-R17). */
   readonly group?: string;
+  /** The end outcome of a ZFL sequence diagram (MP-R36). */
+  readonly outcome?: string;
 }
 
 /** What `zenwave/preview` is asked for: the page (`docs`, the default) or one diagram per element (`diagrams`). */
@@ -96,6 +161,8 @@ export type PreviewMode = 'docs' | 'diagrams';
 export interface Preview {
   readonly representations: readonly PreviewRepresentation[];
   readonly defaultRepresentationId: string;
+  /** Only when asked with `sequenceTree` and the sequences are separate variants (MP-R36): the variants as a tree. A leaf's id is a representation's; a line with branches is asked for by `representationId` when chosen. */
+  readonly sequenceTree?: readonly VariantTreeGroup[];
 }
 
 export interface SymbolAt {
@@ -162,11 +229,6 @@ export class ZenwaveRequests {
       await this.issuer.request(ZENWAVE_REQUESTS.forwardReferences, { uri, semanticId }), isArray);
   }
 
-  async reverseReferences(uri: string, semanticId: string): Promise<RequestResult<readonly NavigationTarget[]>> {
-    return expect(ZENWAVE_REQUESTS.reverseReferences,
-      await this.issuer.request(ZENWAVE_REQUESTS.reverseReferences, { uri, semanticId }), isArray);
-  }
-
   /**
    * The whole ZFL text with its services organised (equal to the current text when nothing changes), or `null`
    * when the server could not process the document, e.g. a syntax error (observed with lsp-js d7156e7).
@@ -185,19 +247,22 @@ export class ZenwaveRequests {
   /**
    * `variant` is sent only when given, and only to a server that advertised `flowVariants`; then `flowGraph` is that variant's view.
    * `positions` (a saved file's `flow`) is sent only for the full diagram, and only to a server that advertised `savedPositions`.
+   * `lanes` is sent only when the diagram is drawn in lanes, and only to a server that advertised `flowLanes` (EF-R24).
    */
-  async eventFlowViews(uri: string, variant?: string, positions?: Readonly<Record<string, unknown>>): Promise<RequestResult<EventFlowViews>> {
-    const params = { textDocument: { uri }, ...(variant === undefined ? {} : { variant }), ...(positions === undefined ? {} : { positions }) };
+  async eventFlowViews(uri: string, variant?: string, positions?: Readonly<Record<string, unknown>>, lanes?: 'systems' | 'services'): Promise<RequestResult<EventFlowViews>> {
+    const params = { textDocument: { uri }, ...(variant === undefined ? {} : { variant }), ...(positions === undefined ? {} : { positions }), ...(lanes === undefined ? {} : { lanes }) };
     return expect(ZENWAVE_REQUESTS.eventFlowViews,
       await this.issuer.request(ZENWAVE_REQUESTS.eventFlowViews, params),
       (value) => isObject(value) && isObject(value.flowGraph) && isObject(value.serviceGraph));
   }
 
-  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode): Promise<RequestResult<Preview>> {
+  async preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode, sequenceTree?: boolean, representationId?: string): Promise<RequestResult<Preview>> {
     const params = {
       textDocument: { uri },
       ...(sequenceRenderMode === undefined ? {} : { sequenceRenderMode }),
       ...(mode === undefined ? {} : { mode }),
+      ...(sequenceTree === true ? { sequenceTree } : {}),
+      ...(representationId === undefined ? {} : { representationId }),
     };
     return expect(ZENWAVE_REQUESTS.preview, await this.issuer.request(ZENWAVE_REQUESTS.preview, params),
       (value) => isObject(value) && Array.isArray(value.representations) && typeof value.defaultRepresentationId === 'string');
@@ -209,4 +274,43 @@ export class ZenwaveRequests {
       await this.issuer.request(ZENWAVE_REQUESTS.symbolAt, { textDocument: { uri }, position: { line: position.line, character: position.character } }),
       (value) => value === null || (isObject(value) && typeof value.uri === 'string' && typeof value.semanticId === 'string'));
   }
+
+  /** What a `zenwave:` address resolves to, and where it came from (AR-R4). Fetches nothing the server does not already hold. */
+  async statResource(uri: string): Promise<RequestResult<ResourceStat>> {
+    return expect(ZENWAVE_REQUESTS.statResource, await this.issuer.request(ZENWAVE_REQUESTS.statResource, { uri }),
+      (value) => isObject(value) && typeof value.size === 'number' && isObject(value.source) && typeof value.source.kind === 'string');
+  }
+
+  /** The content of a `zenwave:` address (AR-R5). */
+  async readResource(uri: string): Promise<RequestResult<ResourceContent>> {
+    return expect(ZENWAVE_REQUESTS.readResource, await this.issuer.request(ZENWAVE_REQUESTS.readResource, { uri }),
+      (value) => isObject(value) && typeof value.content === 'string' && (value.encoding === 'utf8' || value.encoding === 'base64'));
+  }
+
+  /** Architectural concepts covering a document position. Older JVM servers return the concepts array directly. */
+  async conceptAt(uri: string, position: LspPosition): Promise<RequestResult<ConceptsAt>> {
+    const result = await this.issuer.request(ZENWAVE_REQUESTS.conceptAt, { uri, position: { line: position.line, character: position.character } });
+    if (result.kind !== 'ok') return result;
+    const concepts = conceptsAt(result.value);
+    return concepts
+      ? { kind: 'ok', value: concepts }
+      : { kind: 'failed', reason: `Language server answered ${ZENWAVE_REQUESTS.conceptAt} with an unexpected shape` };
+  }
+}
+
+function isConcept(value: unknown): value is ArchitectureConcept {
+  return isObject(value) && typeof value.id === 'string' && typeof value.kind === 'string' &&
+    typeof value.name === 'string' && typeof value.identityOrigin === 'string';
+}
+
+function conceptsAt(value: unknown): ConceptsAt | undefined {
+  // The present JVM adapter returns its `List<ArchitectureConceptRef>` directly.
+  if (Array.isArray(value)) return value.every(isConcept) ? { concepts: value, truncated: false } : undefined;
+  if (!isObject(value) || typeof value.truncated !== 'boolean') return undefined;
+  // `elements` is the core DTO's field. Accept `concepts` as well while the
+  // request is being carried to the JavaScript server.
+  const concepts = Array.isArray(value.elements) ? value.elements : value.concepts;
+  return Array.isArray(concepts) && concepts.every(isConcept)
+    ? { concepts, truncated: value.truncated }
+    : undefined;
 }

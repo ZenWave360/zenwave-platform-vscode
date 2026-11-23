@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { releaseProblems } from './release-rules.mjs';
 import { generateChangelog, readNotes } from './release-notes.mjs';
-import { linkedSiblings, repositoryRoot } from './siblings.mjs';
+import { linkedSiblingVersionProblems, linkedSiblings, repositoryRoot } from './siblings.mjs';
 
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
@@ -27,6 +27,11 @@ if (channel !== undefined && channel !== 'stable' && channel !== 'pre-release') 
 const preRelease = channel === 'pre-release';
 const notes = readNotes(projectDir);
 const linked = linkedSiblings().map((sibling) => sibling.package);
+const linkedVersionProblems = linkedSiblingVersionProblems(manifest);
+
+if (linkedVersionProblems.length > 0) {
+  throw new Error(`Cannot package linked sibling versions:\n  ${linkedVersionProblems.join('\n  ')}`);
+}
 
 if (channel) {
   const problems = releaseProblems({

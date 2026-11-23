@@ -28,7 +28,11 @@ test('the catalogue goes in the initialization options at the top level, beside 
   const options = initializationOptions(chooseManifest([]), true, catalogue);
   assert.deepEqual(Object.keys(options).sort(), ['pluginCatalogue', 'zenwave']);
   assert.equal(options.pluginCatalogue, catalogue);
-  assert.deepEqual(options.zenwave, { clientCapabilities: { credentialRequest: true } });
+  assert.deepEqual(options.zenwave, {
+    clientCapabilities: { credentialRequest: true },
+    remoteManifestName: '.zenwave-manifest.yml',
+    allowedDomains: [],
+  });
 });
 
 test('a catalogue that cannot be read is logged and left out, and the server starts with its own copy', async () => {
@@ -46,7 +50,13 @@ test('a catalogue that cannot be read is logged and left out, and the server sta
     assert.equal(log.lines.length, 1, name);
     assert.match(log.lines[0]!, /^warn: Plugin catalogue: .*the language server uses its own$/, name);
     const options = initializationOptions(chooseManifest([]), false, catalogue);
-    assert.deepEqual(options, { zenwave: { clientCapabilities: { credentialRequest: false } } }, `${name}: the option is left out`);
+    assert.deepEqual(options, {
+      zenwave: {
+        clientCapabilities: { credentialRequest: false },
+        remoteManifestName: '.zenwave-manifest.yml',
+        allowedDomains: [],
+      },
+    }, `${name}: the option is left out`);
     assert.ok(!('pluginCatalogue' in options), name);
   }
 });

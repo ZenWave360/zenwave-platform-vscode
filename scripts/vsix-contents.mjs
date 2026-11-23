@@ -35,13 +35,22 @@ function patternRegex(entry) {
   return new RegExp(`^${escape(entry.slice(0, slash + 1))}${entry.slice(slash + 1).split('*').map(escape).join('[^/]+')}$`);
 }
 
+/** A contributed icon that is a packaged file. Codicons (`$(name)`) are not files. */
+function packagedIcon(icon) {
+  return typeof icon === 'string' && icon.includes('/') && !icon.startsWith('$(') ? [normalize(icon)] : [];
+}
+
 /** Files the manifest itself points at: entry points, icons, grammars, language configuration. */
 export function manifestReferences(manifest) {
   const contributes = manifest.contributes ?? {};
+  const containers = Object.values(contributes.viewsContainers ?? {}).flatMap((entries) =>
+    (Array.isArray(entries) ? entries : []).flatMap((entry) => packagedIcon(entry?.icon)),
+  );
   return [
     manifest.main,
     manifest.browser,
     manifest.icon,
+    ...containers,
     ...(contributes.grammars ?? []).map((grammar) => grammar.path),
     ...(contributes.languages ?? []).flatMap((language) => [
       language.configuration,

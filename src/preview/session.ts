@@ -1,4 +1,4 @@
-import type { Preview, PreviewMode, SequenceRenderMode } from '../lsp/requests.js';
+import type { Preview, PreviewMode, SequenceRenderMode, VariantTreeGroup } from '../lsp/requests.js';
 import type { RequestResult } from '../lsp/supervisor.js';
 import type { StatePresentation } from '../eventflow/protocol.js';
 import type { SessionLog } from '../eventflow/session.js';
@@ -20,7 +20,7 @@ export interface PreviewSessionPorts {
   /** Whether the document has sequence variants, so the render mode means something for it (ZFL). */
   readonly hasRenderMode: boolean;
   /** `languageServer.requests.preview`. */
-  preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode): Promise<RequestResult<Preview>>;
+  preview(uri: string, sequenceRenderMode?: SequenceRenderMode, mode?: PreviewMode, sequenceTree?: boolean, representationId?: string): Promise<RequestResult<Preview>>;
   /** Whether this document can show ZDL Diagrams: a ZDL, and a server that advertised `previewModes` (MP-R25). Asked each time, as the server can reconnect. */
   diagramsAvailable?(): boolean;
   /** `webview.postMessage`. */
@@ -33,6 +33,11 @@ export interface PreviewSessionPorts {
 }
 
 const POSTED_HISTORY = 200;
+
+function treeHas(tree: readonly VariantTreeGroup[], id: string): boolean {
+  const has = (nodes: VariantTreeGroup['nodes']): boolean => nodes.some((node) => node.id === id || has(node.children));
+  return tree.some((group) => has(group.nodes));
+}
 let nextRestoreKey = 1;
 
 /** Title-bar and palette `when`: the preview on screen is a Markdown page (MP-R26). */
@@ -69,6 +74,8 @@ export class PreviewSession {
   /** The last good set, in the server's order. */
   representations: readonly PageRepresentation[] = [];
   defaultRepresentationId: string | undefined;
+  /** The last good set's variants as a tree grouped by outcome, for Separate variants (MP-R36). Absent for Alt blocks and older servers. */
+  sequenceTree: readonly VariantTreeGroup[] | undefined;
   /** Where the page was scrolled to last, for a following preview that comes back to this file (MP-R31). */
   scrollTop = 0;
   /** The scroll the page is still to apply after `attach`; each render carries it until the page reports from it. */
@@ -166,20 +173,33 @@ export class PreviewSession {
     const renderMode = this.ports.hasRenderMode ? this.renderMode : undefined;
     const result = await (mode === 'diagrams'
       ? this.ports.preview(this.ports.documentUri, renderMode, mode)
-      : this.ports.preview(this.ports.documentUri, renderMode));
+      : renderMode === 'SEPARATE_VARIANTS'
+        ? this.ports.preview(this.ports.documentUri, renderMode, undefined, true)
+        : this.ports.preview(this.ports.documentUri, renderMode));
     if (this.disposed || this.again || generation !== this.generation) return;
     const data = previewStateFromResult(result);
     this.record(data);
     this.data = data;
     if (result.kind === 'ok' && result.value.representations.length > 0) {
       const { representations, defaultRepresentationId } = result.value;
-      // A grouped set keeps the element only by its exact id: its ids do not name an outcome (MP-R25, MP-R12).
-      const choice = reselect(this.selectedId, representations, defaultRepresentationId, mode !== 'diagrams');
-      this.representations = representations.map((item) => ({
+      const shown: PageRepresentation[] = representations.map((item) => ({
         id: item.id, title: item.title, format: item.format, content: item.content,
         ...(mode === 'diagrams' && item.group !== undefined ? { group: item.group } : {}),
+        ...(mode !== 'diagrams' && item.outcome !== undefined ? { outcome: item.outcome } : {}),
       }));
+      // A chosen line of the tree is not in the answer, which carries leaves only: ask for it again, so an edit keeps it (MP-R36, MP-R12).
+      const chosenLine = this.selectedId !== undefined && !shown.some((item) => item.id === this.selectedId) && result.value.sequenceTree !== undefined && treeHas(result.value.sequenceTree, this.selectedId)
+        ? this.selectedId : undefined;
+      if (chosenLine !== undefined) {
+        const line = await this.fetchLine(chosenLine);
+        if (this.disposed || this.again || generation !== this.generation) return;
+        if (line) shown.push(line);
+      }
+      // A grouped set keeps the element only by its exact id: its ids do not name an outcome (MP-R25, MP-R12).
+      const choice = reselect(this.selectedId, shown, defaultRepresentationId, mode !== 'diagrams');
+      this.representations = shown;
       this.defaultRepresentationId = defaultRepresentationId;
+      this.sequenceTree = mode === 'diagrams' ? undefined : result.value.sequenceTree;
       if (choice) {
         if (this.selectedId !== undefined && choice.id !== this.selectedId) {
           this.ports.log.debug(`Preview of ${this.ports.fileName}: ${this.selectedId} is gone; showing ${choice.id} (${choice.reason})`);
@@ -192,9 +212,36 @@ export class PreviewSession {
     this.updateMarkdownContext();
   }
 
-  /** Shows another representation. Answers whether the id is one of the current set. */
+  /** The sequence of a line of the tree with branches, which the server only builds when it is chosen (MP-R36). */
+  private async fetchLine(id: string): Promise<PageRepresentation | undefined> {
+    const result = await this.ports.preview(this.ports.documentUri, 'SEPARATE_VARIANTS', undefined, true, id);
+    const item = result.kind === 'ok' ? result.value.representations.find((candidate) => candidate.id === id) : undefined;
+    if (!item) {
+      this.ports.log.debug(`Preview of ${this.ports.fileName}: the sequence of ${id} could not be had`);
+      return undefined;
+    }
+    return { id: item.id, title: item.title, format: item.format, content: item.content, ...(item.outcome === undefined ? {} : { outcome: item.outcome }) };
+  }
+
+  private async selectLine(id: string): Promise<void> {
+    const generation = this.generation;
+    const line = await this.fetchLine(id);
+    if (this.disposed || generation !== this.generation) return;
+    if (line) {
+      this.representations = [...this.representations.filter((item) => item.id !== id), line];
+      this.selectedId = id;
+    }
+    this.renderIfReady(); // also puts the page's selector back when the line could not be had
+    this.updateMarkdownContext();
+  }
+
+  /** Shows another representation. Answers whether the id is one of the current set, or a line of its tree, which is fetched first. */
   selectRepresentation(id: string): boolean {
-    if (!this.representations.some((item) => item.id === id)) return false;
+    if (!this.representations.some((item) => item.id === id)) {
+      if (this.sequenceTree === undefined || !treeHas(this.sequenceTree, id)) return false;
+      void this.selectLine(id);
+      return true;
+    }
     if (this.selectedId === id) return true;
     this.selectedId = id;
     this.renderIfReady();
@@ -351,6 +398,7 @@ export class PreviewSession {
       showRenderMode: this.ports.hasRenderMode,
       groups: this.groups,
       ...(this.selectedGroup === undefined ? {} : { selectedGroup: this.selectedGroup }),
+      ...(this.sequenceTree === undefined ? {} : { sequenceTree: this.sequenceTree }),
       ...(this.restore === undefined ? {} : { restore: this.restore }),
     };
     this.lastRender = payload;

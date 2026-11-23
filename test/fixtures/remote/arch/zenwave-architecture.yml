@@ -1,0 +1,18 @@
+config:
+  contentResolution: [git]
+  sources:
+    git:
+      provider: generic
+      server: http://127.0.0.1:47813
+      contentUrlExpression: "${server}/content/${owner.id}/${content.path}"
+domains:
+  sales:
+    services:
+      orders:
+        id: orders
+        version: 0.1.0
+        artifacts:
+          - { type: openapi, path: openapi.yml, version: 0.1.0 }
+          - { type: zdl, path: domain-model.zdl, version: 0.1.0 }
+        docs:
+          summary: README.md

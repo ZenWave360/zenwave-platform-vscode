@@ -30,6 +30,7 @@ body > #controls select {
   border-radius: 2px;
   font: inherit;
 }
+body > #controls #diagram-title { max-width: 36rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; }
 body > #controls select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 
 body > #view { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; outline: none; user-select: text; }

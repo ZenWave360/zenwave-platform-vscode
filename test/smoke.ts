@@ -13,6 +13,7 @@ import { findNode, type ExplorerNode } from '../src/explorer/hierarchy-model.js'
 import type { EventFlowApi, EventFlowEditorApi, EventFlowOpenOutcome } from '../src/eventflow/feature.js';
 import type { PreviewApi, PreviewEditorApi, PreviewOpenOutcome, PreviewSelectOutcome } from '../src/preview/feature.js';
 import { contentHash, PREVIEW_VIEW_TYPES, isPreviewViewType, type PreviewProbe } from '../src/preview/protocol.js';
+import { remoteArchitecture } from './smoke-remote.js';
 import { outcomeOf } from '../src/preview/selection.js';
 import type { Preview } from '../src/lsp/requests.js';
 
@@ -148,7 +149,7 @@ async function connected(api: LanguageServerApi, message: string): Promise<void>
   assert(api.status.kind === 'connected', `${message}: ${JSON.stringify(api.status)}`);
 }
 
-const EXPECTED_REQUESTS = ['zenwave/hierarchy', 'zenwave/forwardReferences', 'zenwave/reverseReferences',
+const EXPECTED_REQUESTS = ['zenwave/hierarchy', 'zenwave/forwardReferences',
   'zenwave/organizeZflServices', 'zenwave/eventFlowViews', 'zenwave/preview', 'zenwave/symbolAt'];
 
 /** The real @zenwave360/lsp-js server, over IPC on the desktop and in a Web Worker in the browser. */
@@ -159,9 +160,16 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
   for (const method of EXPECTED_REQUESTS) {
     assert(api.advertisedRequests.includes(method), `Server did not advertise ${method}: ${api.advertisedRequests.join(', ')}`);
   }
-  assert(api.manifest.route === 'config' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml') &&
-    api.manifest.configUri?.endsWith('/.zenwave/config.yml'), `Manifest not resolved from .zenwave/config.yml: ${JSON.stringify(api.manifest)}`);
-  console.log(`PASS: ${api.transport} server connected, customRequests discovered, manifest resolved from .zenwave/config.yml`);
+  if (!desktop && api.manifest.route !== 'setting') {
+    // The browser host may not read the mounted folder's .vscode/settings.json: set the same value through the API.
+    console.log(`NOTE: the browser host did not read .vscode/settings.json (${JSON.stringify(api.manifest)}); setting zenwave.workspace.manifest instead`);
+    await vscode.workspace.getConfiguration('zenwave').update('workspace.manifest', 'zenwave-architecture.yml', vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.manifest.route === 'setting', 'The browser host did not take zenwave.workspace.manifest');
+    await connected(api, 'Restart with the manifest setting');
+  }
+  assert(api.manifest.route === 'setting' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml'),
+    `Manifest not resolved from .vscode/settings.json: ${JSON.stringify(api.manifest)}`);
+  console.log(`PASS: ${api.transport} server connected, customRequests discovered, manifest resolved from the workspace setting`);
 
   const broken = await vscode.workspace.openTextDocument(await fixture('lsp/broken.zdl'));
   await vscode.window.showTextDocument(broken);
@@ -209,8 +217,6 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
     `symbolAt: ${JSON.stringify(symbol)}`);
   const forward = await api.requests.forwardReferences(symbol.value!.uri, symbol.value!.semanticId);
   assert(forward.kind === 'ok', `forwardReferences: ${JSON.stringify(forward)}`);
-  const reverse = await api.requests.reverseReferences(symbol.value!.uri, symbol.value!.semanticId);
-  assert(reverse.kind === 'ok', `reverseReferences: ${JSON.stringify(reverse)}`);
   const hierarchy = await api.requests.hierarchy(uri);
   assert(hierarchy.kind === 'ok' && hierarchy.value.length > 0, `hierarchy: ${JSON.stringify(hierarchy).slice(0, 300)}`);
   const organized = await api.requests.organizeZflServices(uri);
@@ -250,10 +256,18 @@ async function realLanguageServer(api: LanguageServerApi, desktop: boolean): Pro
 async function modelActions(api: LanguageServerApi): Promise<void> {
   await connected(api, 'Model actions');
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['zenwave.model.forwardReferences', 'zenwave.model.reverseReferences', 'zenwave.zfl.organizeServices', 'zenwave.zfl.addMissingServices']) {
+  for (const command of ['zenwave.model.forwardReferences', 'zenwave.zfl.organizeServices', 'zenwave.zfl.addMissingServices']) {
     assert(commands.includes(command), `${command} was not registered`);
   }
-  assert(!commands.includes('zenwave.model.conceptsAt'), 'conceptsAt must not exist while no server answers it');
+  assert(!commands.includes('zenwave.model.reverseReferences'), 'reverseReferences is retired: Find References is the only who-uses-this');
+  assert(commands.includes('zenwave.model.conceptsAt'), 'conceptsAt was not registered');
+  assert(!api.advertisedRequests.includes('zenwave/conceptAt'), 'The bundled server unexpectedly advertises conceptAt');
+  const manifest = vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON as {
+    contributes?: { menus?: { commandPalette?: { command?: string; when?: string }[] } };
+  } | undefined;
+  const conceptsMenu = manifest?.contributes?.menus?.commandPalette?.find((item) => item.command === 'zenwave.model.conceptsAt');
+  assert(conceptsMenu?.when?.includes("'zenwave/conceptAt' in zenwave.languageServerRequests"),
+    'conceptsAt must be hidden until the connected server advertises it');
 
   const checkout = await vscode.workspace.openTextDocument(await fixture('lsp/checkout.zfl'));
   await vscode.window.showTextDocument(checkout);
@@ -274,15 +288,10 @@ async function modelActions(api: LanguageServerApi): Promise<void> {
   const fromCursor = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences');
   assert(fromCursor.kind === 'navigated', `forwardReferences from the cursor: ${JSON.stringify(fromCursor)}`);
   await vscode.window.showTextDocument(checkout);
-  const reverse = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences', checkout.uri, { line: 14, character: 30 });
-  // lsp-js d7156e7 reports no reverse references for any concept of these fixtures (zenwave-specs 001 task 2.19).
-  // When the server starts finding them, this assertion is the one to update.
-  assert(reverse.kind === 'none' && reverse.targets.length === 0, `reverseReferences: ${JSON.stringify(reverse)}`);
-  assert(vscode.window.activeTextEditor?.document.uri.toString() === checkout.uri.toString(), 'No reverse references must not navigate');
   const blank = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.forwardReferences', checkout.uri, { line: 8, character: 0 });
   assert(blank.kind === 'no-symbol', `A blank line must resolve to nothing, quietly: ${JSON.stringify(blank)}`);
   assert(vscode.window.activeTextEditor?.document.uri.toString() === checkout.uri.toString(), 'A blank line must not navigate');
-  console.log(`PASS: forward references open the declaring ZDL directly; no reverse references is reported as none; a blank line does nothing`);
+  console.log(`PASS: forward references open the declaring ZDL directly; a blank line does nothing`);
 
   const flow = await vscode.workspace.openTextDocument({ language: 'zfl', content: checkoutText });
   const flowEditor = await vscode.window.showTextDocument(flow);
@@ -397,7 +406,7 @@ async function modelActionsOnDisk(api: LanguageServerApi): Promise<void> {
   await connected(api, 'Re-enabled after model actions');
 }
 
-const EXPLORER_COMMANDS = ['zenwave.explorer.refresh', 'zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.openManifest'];
+const EXPLORER_COMMANDS = ['zenwave.explorer.refresh', 'zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.openManifest', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences'];
 
 const labels = (nodes: readonly ExplorerNode[] | undefined): string[] => (nodes ?? []).map((item) => item.node.label);
 const roots = (tree: HierarchyTreeApi): ExplorerNode[] => (tree.tree?.roots ?? []) as ExplorerNode[];
@@ -451,6 +460,7 @@ async function explorerBeforeAnyDocument(api: LanguageServerApi, explorer: Model
     assert(await vscode.commands.executeCommand<boolean>('zenwave.explorer.openManifest'), 'Open Architecture Manifest did nothing');
     await treeState(architecture, 'ready', 'Architecture tree once the user opened the manifest');
     assert(labels(roots(architecture)[0]?.children).join() === 'orders,fulfillment', `Domains after opening: ${labels(roots(architecture)[0]?.children)}`);
+    assert(architecture.view.message === '', `Architecture success left a stale banner: ${architecture.view.message}`);
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     console.log('PASS: in the browser the architecture tree explains an unreadable manifest without retrying, and populates once the user opens it');
   }
@@ -483,24 +493,24 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
     `Commands under their service: ${labels(service?.children)}`);
   const ordersItem = await model.provider.getTreeItem(orders);
   assert(ordersItem.description === 'model.zdl' && (ordersItem.iconPath as vscode.ThemeIcon).id === 'server-environment' &&
-    ordersItem.contextValue === 'zenwave.hierarchy.system.related.declaration.references', `Orders item: ${String(ordersItem.description)} ${(ordersItem.iconPath as vscode.ThemeIcon).id} ${ordersItem.contextValue}`);
+    ordersItem.contextValue === 'zenwave.hierarchy.system.related.declaration', `Orders item: ${String(ordersItem.description)} ${(ordersItem.iconPath as vscode.ThemeIcon).id} ${ordersItem.contextValue}`);
   const context = async (item: ExplorerNode): Promise<string> => String((await model.provider.getTreeItem(item)).contextValue ?? '');
   const has = (value: string, name: string): boolean => new RegExp(`\\.${name}(?:\\.|$)`).test(value);
   const checkoutFlow = node(model, 'CheckoutFlow', 'flow');
   assert(checkoutFlow, 'CheckoutFlow is not in the tree');
   const flowContext = await context(checkoutFlow);
-  assert(has(flowContext, 'declaration') && has(flowContext, 'references'), `CheckoutFlow: ${flowContext}`);
+  assert(has(flowContext, 'declaration'), `CheckoutFlow: ${flowContext}`);
   assert(service, 'OrderService is not in the tree');
   const serviceContext = await context(service);
-  assert(has(serviceContext, 'declaration') && !has(serviceContext, 'references'), `OrderService: ${serviceContext}`);
+  assert(has(serviceContext, 'declaration'), `OrderService: ${serviceContext}`);
   const createOrder = service.children.find((child) => child.node.kind === 'command' && child.node.label === 'createOrder');
   assert(createOrder, `createOrder is not a command under OrderService: ${labels(service.children)}`);
   const commandContext = await context(createOrder);
-  assert(has(commandContext, 'declaration') && !has(commandContext, 'references'), `createOrder: ${commandContext}`);
+  assert(has(commandContext, 'declaration'), `createOrder: ${commandContext}`);
   const policyEvent = model.tree && findNode(model.tree, (candidate) => candidate.parent?.node.kind === 'policy' && candidate.node.kind === 'event');
   assert(policyEvent, 'No event under a policy');
   const policyEventContext = await context(policyEvent);
-  assert(!has(policyEventContext, 'declaration') && !has(policyEventContext, 'references'), `A policy event is not a declaration: ${policyEventContext}`);
+  assert(!has(policyEventContext, 'declaration'), `A policy event is not a declaration: ${policyEventContext}`);
   console.log('PASS: model tree names checkout.zfl, shows the system declared in its @zdl model and each command under its service');
 
   // Go to References follows the hierarchy id. A cursor on the name `Orders` in the flow resolves to that id;
@@ -514,18 +524,35 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   const ordersSymbol = await api.requests.symbolAt(checkout, { line: ordersNameLine, character: ordersNameCharacter });
   assert(ordersSymbol.kind === 'ok' && ordersSymbol.value?.semanticId === orders.node.id,
     `symbolAt on the Orders name: ${JSON.stringify(ordersSymbol)} vs ${orders.node.id}`);
-  const fromEditor = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences');
-  const fromTree = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.explorer.goToReferences', orders);
-  assert(fromTree !== undefined && fromEditor !== undefined && fromTree.kind === fromEditor.kind && fromTree.kind !== 'no-symbol',
-    `Go to References from the tree: ${JSON.stringify(fromTree)}; from the name: ${JSON.stringify(fromEditor)}`);
-  const treeTargets = 'targets' in fromTree ? fromTree.targets : undefined;
-  const editorTargets = 'targets' in fromEditor ? fromEditor.targets : undefined;
-  assert(treeTargets !== undefined && JSON.stringify(treeTargets) === JSON.stringify(editorTargets),
-    `Go to References targets differ: tree ${JSON.stringify(treeTargets)} editor ${JSON.stringify(editorTargets)}`);
-  const atDeclaration = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.model.reverseReferences', vscode.Uri.parse(orders.node.sourceUri), orders.node.sourceRange.start);
-  // Since zenwave-lsp resolves ZDL positions on the right line (001 task 2.21), the stored position resolves to Orders too.
-  assert(atDeclaration.kind === fromEditor.kind, `The position stored on Orders resolves differently from its name: ${JSON.stringify(atDeclaration)} vs ${JSON.stringify(fromEditor)}`);
-  console.log('PASS: Go to References on the Orders system matches a cursor on its name, and its stored position');
+  // Go to References runs Find References at the node's source location (ME-R9): the document opens with the cursor on it.
+  const closedUser = await fixture('lsp/indexed/closed-user.zfl');
+  assert(!vscode.workspace.textDocuments.some((open) => open.uri.toString() === closedUser.toString()), 'closed-user.zfl must not be open in this session');
+  const sourceUri = vscode.Uri.parse(orders.node.sourceUri, true);
+  await vscode.window.showTextDocument(checkoutDocument);
+  await vscode.commands.executeCommand('zenwave.explorer.goToReferences', orders);
+  const fromTree = vscode.window.activeTextEditor;
+  assert(fromTree !== undefined && fromTree.document.uri.toString() === sourceUri.toString() &&
+    fromTree.selection.active.line === orders.node.sourceRange.start.line && fromTree.selection.active.character === orders.node.sourceRange.start.character,
+    `Go to References from the tree did not place the cursor on the node: ${fromTree?.document.uri.toString()} ${JSON.stringify(fromTree?.selection.active)} vs ${JSON.stringify(orders.node.sourceRange)}`);
+  // The same action on a command, whose stored position is on its name, answers with real locations,
+  // including a use in a file nobody opened (the background index, end to end).
+  await vscode.commands.executeCommand('closeReferenceSearch');
+  const commandUri = vscode.Uri.parse(createOrder.node.sourceUri!, true);
+  const commandStart = new vscode.Position(createOrder.node.sourceRange!.start.line, createOrder.node.sourceRange!.start.character);
+  let last: vscode.Location[] = [];
+  const found = await waitFor(async () => {
+    last = await vscode.commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', commandUri, commandStart) ?? [];
+    // A Web Worker server cannot read the workspace's files: the background index is a desktop (ipc) feature (NAV-R20).
+    const expected = api.transport === 'ipc' ? closedUser : checkoutUri;
+    return last.some((location) => location.uri.toString() === expected.toString()) ? last : undefined;
+  }, `Find References on createOrder (${commandUri.toString()}:${commandStart.line}:${commandStart.character}) did not include the closed file ${closedUser.toString()}`, 30000)
+    .catch((error: unknown) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; last answer=${JSON.stringify(last.map((location) => [location.uri.toString(), location.range.start.line]))}`);
+    });
+  assert(found.length > 0 && api.transport !== 'none' && !vscode.workspace.textDocuments.some((open) => open.uri.toString() === closedUser.toString()),
+    'The closed file stayed closed while Find References listed it');
+  await vscode.commands.executeCommand('closeReferenceSearch');
+  console.log('PASS: Go to References on the Orders system runs Find References at its source location');
 
   const placeOrderUri = await fixture('place-order-flow.zfl');
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(placeOrderUri));
@@ -544,15 +571,28 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
     `PaymentsProcessingService commands: ${labels(payments?.children)}`);
   console.log('PASS: place-order-flow.zfl: five systems, one declared in its annotated ZDL, commands under their services');
 
-  // Not a model: the tree keeps the last model rather than emptying.
-  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(await fixture('README.md')));
-  const panel = vscode.window.createWebviewPanel('zenwave.smoke', 'Not a model', vscode.ViewColumn.Active, {});
+  // A Java editor keeps the last model, while Markdown uses its host outline without asking the server.
+  const java = await vscode.workspace.openTextDocument({ language: 'java', content: 'class App {}' });
+  await vscode.window.showTextDocument(java);
   await delay(1000);
   await model.settled();
   assert(model.documentUri === placeOrderUri.toString() && model.state.kind === 'ready' && roots(model).length > 0,
-    `A Markdown editor or a webview changed the model tree: ${model.documentUri} ${JSON.stringify(model.state)}`);
+    `A Java editor changed the model tree: ${model.documentUri} ${JSON.stringify(model.state)}`);
+  const markdown = await vscode.workspace.openTextDocument(await fixture('README.md'));
+  const hierarchyRequests = model.stats.requests;
+  await vscode.window.showTextDocument(markdown);
+  await waitFor(() => model.tree?.documentUri === markdown.uri.toString() && model.state.kind === 'ready' && roots(model).length > 0 ? true : undefined,
+    `Model tree did not follow Markdown with its outline: shown ${model.documentUri} tree ${model.tree?.documentUri} ${JSON.stringify(model.state)}`);
+  await model.settled();
+  assert(model.stats.requests === hierarchyRequests, `Following Markdown sent ${model.stats.requests - hierarchyRequests} hierarchy request(s)`);
+  const markdownRoots = labels(roots(model)).join();
+  const panel = vscode.window.createWebviewPanel('zenwave.smoke', 'Not a model', vscode.ViewColumn.Active, {});
+  await delay(1000);
+  await model.settled();
+  assert(model.tree?.documentUri === markdown.uri.toString() && model.state.kind === 'ready' && labels(roots(model)).join() === markdownRoots,
+    `A webview changed the model tree: ${model.documentUri} ${JSON.stringify(model.state)}`);
   panel.dispose();
-  console.log('PASS: focusing a Markdown file or a webview keeps the last model on screen');
+  console.log('PASS: Java keeps the last model; Markdown follows its host outline without a hierarchy request; a webview keeps that outline');
 
   // Deliberately moving back to the flow retargets; drilling into its ZDL does not.
   await vscode.window.showTextDocument(checkoutDocument);
@@ -575,6 +615,23 @@ async function explorerTrees(api: LanguageServerApi, explorer: ModelExplorerApi,
   await model.settled();
   assert(model.documentUri === checkout, `Navigating inside the ZDL retargeted the tree: ${model.documentUri}`);
   console.log('PASS: selecting a system opens the ZDL declaring it at the declaration, and the tree keeps showing the flow');
+
+  // The gestures of NAV-R1/R3 on a node. A keybinding (F12, Shift+F12) passes no node: the focused tree's selection is used.
+  await vscode.window.showTextDocument(checkoutDocument, vscode.ViewColumn.One);
+  await vscode.commands.executeCommand('zenwave.model.focus');
+  await model.view.reveal(declared, { select: true, focus: true });
+  await waitFor(() => model.view.selection[0]?.key === declared.key, 'The service was not selected in the tree');
+  await vscode.commands.executeCommand('zenwave.explorer.goToDefinition');
+  const gestured = vscode.window.activeTextEditor;
+  assert(gestured?.document.uri.toString() === zdl && gestured.selection.active.line === declared.node.sourceRange.start.line,
+    `Go to Definition (F12) on the selected node: ${gestured?.document.uri.toString()} ${JSON.stringify(gestured?.selection.active)}`);
+  const forwardFromNode = await vscode.commands.executeCommand<ReferencesOutcome>('zenwave.explorer.forwardReferences', declared);
+  assert(forwardFromNode !== undefined && !['no-server', 'unsupported', 'failed', 'no-document'].includes(forwardFromNode.kind),
+    `Forward References from a node: ${JSON.stringify(forwardFromNode)}`);
+  await vscode.commands.executeCommand('closeReferenceSearch');
+  // Without an argument nor a selection nothing happens.
+  assert(await vscode.commands.executeCommand('zenwave.explorer.forwardReferences', { node: { sourceUri: '' } }) === undefined, 'a node without a source answered');
+  console.log('PASS: the node gestures run on the selected tree item (F12) and Forward References answers from a node');
 
   const related = node(model, 'Orders', 'system')!;
   const back = related.node.relatedResources.findIndex((resource) => resource.relationType === 'referenced-by');
@@ -658,7 +715,7 @@ const isDiagramTab = (tab: vscode.Tab | undefined, uri: string): boolean =>
   tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === 'zenwave.eventflow' && tab.input.uri.toString() === uri;
 const isTextTab = (tab: vscode.Tab | undefined, uri: string): boolean => tab?.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri;
 
-interface Graphs { readonly flowGraph: { readonly nodes: readonly { readonly id: string; readonly label?: string }[] }; readonly serviceGraph: { readonly nodes: readonly { readonly id: string }[] }; readonly variants?: readonly { readonly id: string; readonly title: string }[] }
+interface Graphs { readonly flowGraph: { readonly nodes: readonly { readonly id: string; readonly label?: string }[] }; readonly serviceGraph: { readonly nodes: readonly { readonly id: string }[] }; readonly variants?: readonly { readonly id: string; readonly title: string }[]; readonly variantTree?: readonly { readonly outcome: string; readonly nodes: readonly { readonly id: string; readonly count: number; readonly children: readonly unknown[] }[] }[] }
 
 /** The diagram editor for a document once its page said it loaded and rendered a diagram, with no state shown over it. */
 async function renderedDiagram(eventflow: EventFlowApi, uri: string): Promise<EventFlowEditorApi> {
@@ -717,13 +774,54 @@ async function eventflowDiagrams(api: LanguageServerApi, explorer: ModelExplorer
   const posted = flow.session.lastRenderBundle!;
   assert(JSON.stringify(posted.flowGraph) === JSON.stringify(views.flowGraph) && JSON.stringify(posted.serviceGraph) === JSON.stringify(views.serviceGraph),
     'renderBundle does not carry the server answer field for field');
-  assert(posted.viewMode === 'flow' && JSON.stringify(posted.displaySettings) === '{"humanizeLabels":true}', `renderBundle controls: ${posted.viewMode} ${JSON.stringify(posted.displaySettings)}`);
+  assert(posted.viewMode === 'flow' && JSON.stringify(posted.displaySettings) === '{"humanizeLabels":true,"lanes":"none"}', `renderBundle controls: ${posted.viewMode} ${JSON.stringify(posted.displaySettings)}`);
+  // EF-R24: the shipped server offers lanes, so the page may show its Lanes control; without lanes there are no bands.
+  assert((posted as { lanesSupported?: boolean }).lanesSupported === true, `renderBundle lanesSupported: ${JSON.stringify((posted as { lanesSupported?: boolean }).lanesSupported)}`);
+  assert(!(posted.flowGraph as { lanes?: unknown[] | null }).lanes?.length, 'The flow is drawn in lanes before lanes were chosen');
   const flowIds = views.flowGraph.nodes.map((node) => node.id).sort();
   const drawn = await waitFor(async () => {
     const probe = await flow.probe();
     return JSON.stringify([...probe.nodeIds].sort()) === JSON.stringify(flowIds) ? probe : undefined;
   }, `The page did not draw the server's flow nodes: ${JSON.stringify((await flow.probe()).nodeIds)} vs ${JSON.stringify(flowIds)}`, 30000);
   console.log(`PASS: renderBundle carries zenwave/eventFlowViews verbatim and the page draws all ${drawn.nodeIds.length} flow nodes`);
+
+  // EF-R25: the tree reaches the page as the server built it, and a line with children is asked for like a variant and lays its variants out together.
+  assert(JSON.stringify((posted as { variantTree?: unknown }).variantTree) === JSON.stringify(views.variantTree) && (views.variantTree?.length ?? 0) > 1,
+    `renderBundle does not carry the variant tree: ${JSON.stringify((posted as { variantTree?: unknown }).variantTree)?.slice(0, 200)}`);
+  const treeLine = views.variantTree!.flatMap((group) => group.nodes).find((node) => node.children.length > 0 && node.count > 1);
+  assert(treeLine, 'The place-order flow has no tree line with several variants');
+  const asked = flow.session.lastRenderBundle;
+  flow.session.receive({ type: 'variantChanged', payload: { variant: treeLine.id } });
+  const together = await waitFor(() => {
+    const bundle = flow.session.lastRenderBundle as { variant?: string | null; flowGraph?: { nodes: readonly unknown[] } } | undefined;
+    return bundle !== asked && bundle?.variant === treeLine.id ? bundle : undefined;
+  }, `Choosing the tree line ${treeLine.id} did not draw its variants`, 30000);
+  assert(together.flowGraph!.nodes.length > 0 && together.flowGraph!.nodes.length < views.flowGraph.nodes.length, `A tree line shows ${together.flowGraph!.nodes.length} of ${views.flowGraph.nodes.length} nodes`);
+  const beforeFull = flow.session.lastRenderBundle;
+  flow.session.receive({ type: 'variantChanged', payload: { variant: null } });
+  await waitFor(() => flow.session.lastRenderBundle !== beforeFull && (flow.session.lastRenderBundle as { variant?: string | null }).variant === null ? true : undefined, 'The full diagram did not come back', 30000);
+  await waitFor(async () => JSON.stringify([...(await flow.probe()).nodeIds].sort()) === JSON.stringify(flowIds) ? true : undefined, 'The page did not draw the full diagram again', 30000);
+  // MP-R36: the tree answer carries leaves only; a line's sequence is asked for by its id and is the alt blocks of its variants.
+  const lazy = await api.requests.preview(placeOrder, 'SEPARATE_VARIANTS', undefined, true);
+  assert(lazy.kind === 'ok' && !lazy.value.representations.some((item) => item.id.startsWith('branch:')) && (lazy.value.sequenceTree?.length ?? 0) > 1,
+    `The tree answer is not leaves only: ${lazy.kind === 'ok' ? lazy.value.representations.length : lazy.kind}`);
+  const oneLine = await api.requests.preview(placeOrder, 'SEPARATE_VARIANTS', undefined, true, treeLine.id);
+  assert(oneLine.kind === 'ok' && oneLine.value.representations.length === 1 && oneLine.value.representations[0]!.id === treeLine.id && oneLine.value.representations[0]!.content.includes('alt '),
+    `The line ${treeLine.id} was not answered as alt blocks: ${JSON.stringify(oneLine).slice(0, 200)}`);
+  console.log(`PASS: the variant tree reaches the page, and choosing the line ${treeLine.id} draws its ${treeLine.count} variants together (${together.flowGraph!.nodes.length} nodes)`);
+
+  // EF-R24: Systems lanes from the palette command, drawn in server bands, then back to no lanes.
+  assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.lanes', placeOrderUri, 'systems'), 'The lanes command found no diagram');
+  const laned = await waitFor(async () => {
+    const bundle = flow.session.lastRenderBundle as { displaySettings?: { lanes?: string }; flowGraph?: { lanes?: { id: string }[] | null } } | undefined;
+    return bundle?.displaySettings?.lanes === 'systems' && (bundle.flowGraph?.lanes?.length ?? 0) > 0 ? bundle : undefined;
+  }, 'Choosing Systems lanes did not draw the flow in bands', 30000);
+  assert(await vscode.commands.executeCommand<boolean>('zenwave.eventflow.lanes', placeOrderUri, 'none'), 'The lanes command found no diagram to turn lanes off');
+  await waitFor(async () => {
+    const bundle = flow.session.lastRenderBundle as { displaySettings?: { lanes?: string }; flowGraph?: { lanes?: unknown[] | null } } | undefined;
+    return bundle?.displaySettings?.lanes === 'none' && !bundle.flowGraph?.lanes?.length ? true : undefined;
+  }, 'Choosing No lanes did not draw the flow without bands', 30000);
+  console.log(`PASS: Systems lanes draw the flow in ${laned.flowGraph!.lanes!.length} server bands, and No lanes draws it without them`);
 
   // Controls, per editor: services view, labels as written.
   // The variant dropdown (EF-R12) shows the server's titles as written, so a label it names would be on the page anyway.
@@ -973,20 +1071,19 @@ async function explorerOnDisk(api: LanguageServerApi, explorer: ModelExplorerApi
   await treeState(model, 'ready', 'Model tree after the server restarted');
   console.log('PASS: with the server stopped both trees say they need it, and repopulate when it returns');
 
-  const config = await fixture('.zenwave/config.yml');
-  const configText = await vscode.workspace.fs.readFile(config);
+  const manifestSetting = vscode.workspace.getConfiguration('zenwave');
   try {
-    await vscode.workspace.fs.delete(config);
-    await waitFor(() => api.manifest.route === 'none', `Deleting .zenwave/config.yml did not unresolve the manifest: ${JSON.stringify(api.manifest)}`);
+    await manifestSetting.update('workspace.manifest', undefined, vscode.ConfigurationTarget.Workspace);
+    await waitFor(() => api.manifest.route === 'none', `Removing zenwave.workspace.manifest did not unresolve the manifest: ${JSON.stringify(api.manifest)}`);
     await connected(api, 'Restarted without a manifest');
     await treeState(architecture, 'no-manifest', 'Architecture tree without a manifest');
     assert(roots(architecture).length === 0, 'Architecture tree has nodes without a manifest');
     await treeState(model, 'ready', 'Model tree without a manifest');
     assert(model.documentUri === checkout.uri.toString() && node(model, 'Orders', 'system'), 'Model tree stopped working without a manifest');
   } finally {
-    await vscode.workspace.fs.writeFile(config, configText);
+    await manifestSetting.update('workspace.manifest', 'zenwave-architecture.yml', vscode.ConfigurationTarget.Workspace);
   }
-  await waitFor(() => api.manifest.route === 'config', 'Restored .zenwave/config.yml was not resolved');
+  await waitFor(() => api.manifest.route === 'setting', 'Restored zenwave.workspace.manifest was not resolved');
   await connected(api, 'Restarted with the manifest restored');
   await treeState(architecture, 'ready', 'Architecture tree with the manifest restored');
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -1029,12 +1126,13 @@ async function languageServerSettings(api: LanguageServerApi): Promise<void> {
     await connected(api, 'Re-enabled');
     console.log('PASS: an invalid serverPath fails once with its reason, and zenwave.lsp.enabled turns the server off and on');
   } finally {
-    await workspace.update('workspace.manifest', undefined, vscode.ConfigurationTarget.Workspace);
+    await workspace.update('workspace.manifest', 'zenwave-architecture.yml', vscode.ConfigurationTarget.Workspace);
     await workspace.update('lsp.serverPath', undefined, vscode.ConfigurationTarget.Workspace);
     await workspace.update('lsp.enabled', undefined, vscode.ConfigurationTarget.Workspace);
     await workspace.update('lsp.trace.server', undefined, vscode.ConfigurationTarget.Workspace);
   }
-  await waitFor(() => api.manifest.route === 'config', 'Manifest resolution did not return to .zenwave/config.yml');
+  await waitFor(() => api.manifest.route === 'setting' && api.manifest.manifestUri?.endsWith('/zenwave-architecture.yml'),
+    'Manifest resolution did not return to the fixture setting');
   await connected(api, 'Restored configuration');
 }
 
@@ -1237,7 +1335,7 @@ const baseName = (url: string): string => url.slice(url.lastIndexOf('/') + 1);
 /** What the server answers for a document right now (the reference the page is compared with). */
 async function serverPreview(api: LanguageServerApi, uri: string, mode?: 'ALT_BLOCKS' | 'SEPARATE_VARIANTS'): Promise<Preview> {
   return waitFor(async () => {
-    const result = await api.requests.preview(uri, mode);
+    const result = await api.requests.preview(uri, mode, undefined, mode === 'SEPARATE_VARIANTS');
     return result.kind === 'ok' ? result.value : undefined;
   }, `zenwave/preview did not answer for ${uri}`, 30000);
 }
@@ -1478,9 +1576,14 @@ async function editsAndChoices(api: LanguageServerApi, flow: PreviewEditorApi, a
   assert(kept !== undefined && separate.representations.some((item) => item.id === kept) && outcomeOf(kept) === 'rejected', `The outcome did not survive the mode change: ${kept} in ${separate.representations.map((item) => item.id).join()}`);
   const separateProbe = await waitFor(async () => {
     const answer = await flow.probe();
-    return answer.renderModeSelector.value === 'SEPARATE_VARIANTS' && answer.diagramSelector.options.map((option) => option.label).join('|') === separate.representations.map((item) => item.title).join('|') ? answer : undefined;
+    return answer.renderModeSelector.value === 'SEPARATE_VARIANTS' && separate.representations.every((item) => answer.diagramSelector.options.some((option) => option.value === item.id)) && answer.diagramSelector.groups.length > 0 ? answer : undefined;
   }, 'The selectors do not show the server answer for the separate variants', 30000);
   assert(separateProbe.diagramSelector.value === kept, `The diagram selector does not show ${kept}: ${separateProbe.diagramSelector.value}`);
+  // MP-R36: each option's tooltip is the full title of what it shows, and follows the set when it changes.
+  assert(separateProbe.diagramSelector.options.every((option) => option.title.length > 0), `An option has no tooltip: ${JSON.stringify(separateProbe.diagramSelector.options)}`);
+  // MP-R36: the selector is grouped by outcome, in the order of the server's tree, and each line of the tree is an option.
+  assert((separate.sequenceTree?.length ?? 0) > 0 && separateProbe.diagramSelector.groups.join() === separate.sequenceTree!.map((group) => group.outcome).join(),
+    `The selector groups ${separateProbe.diagramSelector.groups.join()} are not the server's outcomes ${separate.sequenceTree?.map((group) => group.outcome).join()}`);
   await vscode.commands.executeCommand('zenwave.preview.selectRenderMode', { documentUri: checkout, renderMode: 'ALT_BLOCKS' });
   await waitFor(() => flow.session.renderMode === 'ALT_BLOCKS' && flow.session.data.kind === 'rendered' && flow.session.representations.length === server.representations.length ? true : undefined, 'Going back to alt blocks did not ask again', 30000);
   assert(flow.session.selectedId !== undefined && outcomeOf(flow.session.selectedId) === 'rejected', `The outcome did not survive the way back: ${flow.session.selectedId}`);
@@ -1776,6 +1879,7 @@ export async function run(): Promise<void> {
   if (desktop) await modelActionsOnDisk(api);
   if (desktop) await explorerOnDisk(api, explorer);
   if (desktop) await languageServerSettings(api);
+  await remoteArchitecture(api, true);
 
   const document = await vscode.workspace.openTextDocument(await fixture('complete.zdl'));
   assert(document.languageId === 'zdl', `Expected zdl language id, got ${document.languageId}`);

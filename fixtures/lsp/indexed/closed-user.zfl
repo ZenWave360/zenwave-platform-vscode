@@ -1,0 +1,22 @@
+systems {
+    @zdl("../orders/model.zdl")
+    Orders {
+        service OrderService {
+            commands: createOrder
+        }
+    }
+}
+
+flow ClosedUserFlow {
+    start ClosedUserStarted {
+    }
+
+    when ClosedUserStarted do createOrder {
+        service Orders.OrderService
+        emits OrderCreated
+    }
+
+    end {
+        completed: OrderCreated
+    }
+}

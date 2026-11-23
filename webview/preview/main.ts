@@ -22,6 +22,7 @@ import {
   type RenderMode,
   type RenderPayload,
 } from '../../src/preview/protocol.js';
+import { chosenTitle, sequenceSelector, type SelectorLayout, type SelectorOption } from '../../src/preview/sequence-tree.js';
 
 interface Mermaid {
   initialize(config: Record<string, unknown>): void;
@@ -51,6 +52,7 @@ const groupSelect = element<HTMLSelectElement>('group');
 const diagramLabel = element<HTMLElement>('diagram-label');
 const diagramField = element<HTMLElement>('diagram-field');
 const diagramSelect = element<HTMLSelectElement>('diagram');
+const diagramTitle = element<HTMLElement>('diagram-title');
 const stateBox = element<HTMLElement>('state');
 const view = element<HTMLElement>('view');
 
@@ -354,6 +356,29 @@ function fill(select: HTMLSelectElement, options: readonly { readonly value: str
   select.value = value;
 }
 
+/** A selector with groups (MP-R36): the loose options first, then one <optgroup> per outcome. */
+function fillLayout(select: HTMLSelectElement, layout: SelectorLayout, value: string): void {
+  const option = (item: SelectorOption): HTMLOptionElement => {
+    const node = document.createElement('option');
+    node.value = item.value;
+    node.textContent = item.label;
+    node.title = item.title;
+    return node;
+  };
+  const wanted = [...layout.loose, ...layout.groups.flatMap((group) => group.options)];
+  const same = select.options.length === wanted.length && select.querySelectorAll('optgroup').length === layout.groups.length &&
+    wanted.every((item, index) => select.options[index]?.value === item.value && select.options[index]?.textContent === item.label && select.options[index]?.title === item.title);
+  if (!same) {
+    select.replaceChildren(...layout.loose.map(option), ...layout.groups.map((group) => {
+      const node = document.createElement('optgroup');
+      node.label = group.label;
+      node.append(...group.options.map(option));
+      return node;
+    }));
+  }
+  select.value = value;
+}
+
 function syncControls(current: RenderPayload): void {
   renderModeField.hidden = !current.showRenderMode;
   // A grouped set (ZDL Diagrams): Show picks the kind, Element one of that kind. A selector with no real choice is hidden (MP-R25).
@@ -364,10 +389,20 @@ function syncControls(current: RenderPayload): void {
   groupField.hidden = groups.length <= 1;
   diagramField.hidden = elements.length <= 1;
   diagramLabel.textContent = grouped ? 'Element' : 'Diagram';
+  const layout = grouped ? undefined : sequenceSelector(current.representations, current.sequenceTree);
   controls.hidden = renderModeField.hidden && groupField.hidden && diagramField.hidden;
   fill(renderModeSelect, RENDER_MODES, current.renderMode);
   fill(groupSelect, groups.map((group) => ({ value: group, label: group })), current.selectedGroup ?? '');
-  fill(diagramSelect, elements.map((item: PageRepresentation) => ({ value: item.id, label: item.title })), current.selectedId);
+  if (layout) {
+    fillLayout(diagramSelect, layout, current.selectedId);
+    const title = chosenTitle(layout, current.selectedId);
+    diagramTitle.hidden = title === undefined;
+    diagramTitle.textContent = title ?? '';
+    diagramTitle.title = title ?? '';
+  } else {
+    fill(diagramSelect, elements.map((item: PageRepresentation) => ({ value: item.id, label: item.title })), current.selectedId);
+    diagramTitle.hidden = true;
+  }
 }
 
 function showState(state: StatePresentation | null): void {
@@ -480,7 +515,8 @@ function probe(requestId: number, followLink?: string, copyMermaid?: number): vo
       diagramSelector: {
         visible: !diagramField.hidden && !controls.hidden,
         value: diagramSelect.value,
-        options: [...diagramSelect.options].map((option) => ({ value: option.value, label: option.textContent ?? '' })),
+        options: [...diagramSelect.options].map((option) => ({ value: option.value, label: option.textContent ?? '', title: option.title })),
+        groups: [...diagramSelect.querySelectorAll('optgroup')].map((group) => group.label),
       },
       renderedId: drawn?.id,
       renderedHash: drawn?.hash,

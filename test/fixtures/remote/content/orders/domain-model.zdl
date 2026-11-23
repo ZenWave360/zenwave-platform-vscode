@@ -1,0 +1,7 @@
+config {
+    title "Remote Orders"
+}
+
+entity RemoteOrder {
+    total Integer
+}

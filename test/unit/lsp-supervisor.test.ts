@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, advertisedRequests, previewModesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
+import { advertisedFlowLanes, advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, advertisedRequests, definitionAdvertised, previewModesAdvertised, referencesAdvertised, LspSupervisor, type LspTransport } from '../../src/lsp/supervisor.js';
 
 const INITIALIZE = { capabilities: { experimental: { customRequests: ['zenwave/workspaceStatus'] } } };
 
@@ -203,4 +203,25 @@ test('flowVariants is advertised only by the boolean capability', () => {
   assert.equal(advertisedSavedPositions({ capabilities: { experimental: { savedPositions: true } } }), true);
   assert.equal(advertisedSavedPositions({ capabilities: { experimental: { savedPositions: 'yes' } } }), false);
   assert.equal(advertisedSavedPositions({}), false);
+});
+
+test('flowLanes is advertised only by a list that has systems and services', () => {
+  assert.equal(advertisedFlowLanes({ capabilities: { experimental: { flowLanes: ['none', 'systems', 'services'] } } }), true);
+  for (const flowLanes of [undefined, true, 'systems', ['none'], ['none', 'systems']]) {
+    assert.equal(advertisedFlowLanes({ capabilities: { experimental: { flowLanes } } }), false);
+  }
+  assert.equal(advertisedFlowLanes({}), false);
+});
+
+test('definition and references are advertised only by the standard providers, as true or options', () => {
+  const result = (capabilities: unknown) => ({ capabilities });
+  for (const advertised of [true, {}, { workDoneProgress: false }]) {
+    assert.equal(referencesAdvertised(result({ referencesProvider: advertised })), true);
+    assert.equal(definitionAdvertised(result({ definitionProvider: advertised })), true);
+  }
+  for (const missing of [undefined, null, {}, result({}), result({ referencesProvider: false }), result({ definitionProvider: 'yes' }), result({ hoverProvider: true })]) {
+    assert.equal(referencesAdvertised(missing), false);
+    assert.equal(definitionAdvertised(missing), false);
+  }
+  assert.equal(referencesAdvertised(result({ definitionProvider: true })), false);
 });

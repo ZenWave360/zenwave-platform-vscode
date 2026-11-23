@@ -24,7 +24,6 @@ test('every request the server advertises today has a wrapper sending the wire p
   const { sent, requests } = issuer(() => ({ kind: 'ok', value: null }));
   await requests.hierarchy('file:///w/a.zfl');
   await requests.forwardReferences('file:///w/a.zfl', 'file:///w/a.zfl#x');
-  await requests.reverseReferences('file:///w/a.zfl', 'file:///w/a.zfl#x');
   await requests.organizeZflServices('file:///w/a.zfl');
   await requests.organizeZflServices('file:///w/a.zfl', 'full');
   await requests.organizeZflServices('file:///w/a.zfl', 'additive');
@@ -36,7 +35,6 @@ test('every request the server advertises today has a wrapper sending the wire p
   assert.deepEqual(sent, [
     { method: 'zenwave/hierarchy', params: { uri: 'file:///w/a.zfl' } },
     { method: 'zenwave/forwardReferences', params: { uri: 'file:///w/a.zfl', semanticId: 'file:///w/a.zfl#x' } },
-    { method: 'zenwave/reverseReferences', params: { uri: 'file:///w/a.zfl', semanticId: 'file:///w/a.zfl#x' } },
     { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl' } },
     { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl', mode: 'full' } },
     { method: 'zenwave/organizeZflServices', params: { uri: 'file:///w/a.zfl', mode: 'additive' } },
@@ -46,7 +44,31 @@ test('every request the server advertises today has a wrapper sending the wire p
     { method: 'zenwave/preview', params: { textDocument: { uri: 'file:///w/a.zfl' }, sequenceRenderMode: 'SEPARATE_VARIANTS' } },
     { method: 'zenwave/symbolAt', params: { textDocument: { uri: 'file:///w/a.zfl' }, position: { line: 14, character: 30 } } },
   ]);
-  assert.deepEqual(Object.values(ZENWAVE_REQUESTS), json('customRequests.json'));
+  assert.deepEqual(Object.values(ZENWAVE_REQUESTS).filter((method) => method !== ZENWAVE_REQUESTS.conceptAt && method !== ZENWAVE_REQUESTS.statResource && method !== ZENWAVE_REQUESTS.readResource),
+    // The server still advertises reverseReferences; this client no longer calls it (Find References replaced it, NAV-R19).
+    json('customRequests.json').filter((method) => method !== 'zenwave/reverseReferences'));
+});
+
+test('conceptAt sends the cursor position and normalizes several, truncated, empty, and no-architecture answers', async () => {
+  const first = { id: 'architecture://orders', kind: 'service', name: 'Orders', identityOrigin: 'manifest' };
+  const second = { id: 'architecture://orders/create', kind: 'command', name: 'Create Order', identityOrigin: 'model' };
+  const answers: unknown[] = [
+    { elements: [first, second], truncated: true },
+    { concepts: [], truncated: false },
+    [], // The current server's no-architecture result is its legacy empty list.
+  ];
+  const { sent, requests } = issuer(() => ({ kind: 'ok', value: answers.shift() }));
+  assert.deepEqual(await requests.conceptAt('file:///w/orders.zdl', { line: 8, character: 4 }),
+    { kind: 'ok', value: { concepts: [first, second], truncated: true } });
+  assert.deepEqual(await requests.conceptAt('file:///w/orders.zdl', { line: 9, character: 0 }),
+    { kind: 'ok', value: { concepts: [], truncated: false } });
+  assert.deepEqual(await requests.conceptAt('file:///w/no-architecture.zdl', { line: 0, character: 0 }),
+    { kind: 'ok', value: { concepts: [], truncated: false } });
+  assert.deepEqual(sent, [
+    { method: 'zenwave/conceptAt', params: { uri: 'file:///w/orders.zdl', position: { line: 8, character: 4 } } },
+    { method: 'zenwave/conceptAt', params: { uri: 'file:///w/orders.zdl', position: { line: 9, character: 0 } } },
+    { method: 'zenwave/conceptAt', params: { uri: 'file:///w/no-architecture.zdl', position: { line: 0, character: 0 } } },
+  ]);
 });
 
 test('recorded server answers pass through unchanged and unexpected shapes fail', async () => {

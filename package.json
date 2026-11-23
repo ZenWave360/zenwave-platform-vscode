@@ -63,11 +63,11 @@
   },
   "zenwaveLanguageServer": {
     "package": "@zenwave360/lsp-js",
-    "version": "0.1.0-next.17.2"
+    "version": "0.9.0"
   },
   "zenwaveEventFlowWebview": {
     "package": "@zenwave360/vistas-eventflow-webview",
-    "version": "0.0.0-next-20261105091918",
+    "version": "0.2.0",
     "protocol": "zenwave.eventflow.webview",
     "protocolVersion": 1
   },
@@ -85,7 +85,7 @@
     "onLanguage:zdl",
     "onLanguage:zw",
     "onLanguage:zfl",
-    "workspaceContains:.zenwave/config.yml",
+    "onFileSystem:zenwave",
     "onView:zenwave.architecture",
     "onView:zenwave.model"
   ],
@@ -162,7 +162,7 @@
         {
           "id": "zenwave",
           "title": "ZenWave",
-          "icon": "$(type-hierarchy)"
+          "icon": "resources/zenwave-brand/zenwave-activitybar.svg"
         }
       ]
     },
@@ -200,7 +200,7 @@
       },
       {
         "view": "zenwave.architecture",
-        "contents": "No architecture manifest was found for this workspace. Name one with `project-manifest` in `.zenwave/config.yml` at a workspace folder root, or with the setting.\n[Configure Architecture Manifest](command:workbench.action.openSettings?%5B%22zenwave.workspace.manifest%22%5D)",
+        "contents": "No architecture manifest was found for this workspace. Name one with the `zenwave.workspace.manifest` setting.\n[Configure Architecture Manifest](command:workbench.action.openSettings?%5B%22zenwave.workspace.manifest%22%5D)",
         "when": "zenwave.architectureTreeState == no-manifest"
       },
       {
@@ -260,6 +260,11 @@
       },
       {
         "view": "zenwave.model",
+        "contents": "Nothing provides an outline for this document.",
+        "when": "zenwave.modelTreeState == outline-empty"
+      },
+      {
+        "view": "zenwave.model",
         "contents": "The model tree could not be loaded. The reason is recorded in the ZenWave output.\n[Show Output](command:zenwave.showOutput)",
         "when": "zenwave.modelTreeState == failed"
       }
@@ -286,6 +291,16 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.manifest.choose",
+        "title": "Choose Architecture Manifest…",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.resource.open",
+        "title": "Open Architecture Resource",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.credentials.record",
         "title": "Record Credential",
         "category": "ZenWave"
@@ -301,8 +316,8 @@
         "category": "ZenWave"
       },
       {
-        "command": "zenwave.model.reverseReferences",
-        "title": "Go to What References This",
+        "command": "zenwave.model.conceptsAt",
+        "title": "Show Concepts at Position",
         "category": "ZenWave"
       },
       {
@@ -327,6 +342,11 @@
         "category": "ZenWave"
       },
       {
+        "command": "zenwave.explorer.openResource",
+        "title": "Open Architecture Resource",
+        "category": "ZenWave"
+      },
+      {
         "command": "zenwave.explorer.goToDefinition",
         "title": "Go to Definition",
         "category": "ZenWave",
@@ -337,6 +357,11 @@
         "title": "Go to References",
         "category": "ZenWave",
         "icon": "$(references)"
+      },
+      {
+        "command": "zenwave.explorer.forwardReferences",
+        "title": "Forward References",
+        "category": "ZenWave"
       },
       {
         "command": "zenwave.explorer.openRelated",
@@ -394,6 +419,11 @@
       {
         "command": "zenwave.eventflow.discardSavedPositions",
         "title": "Discard Saved Positions",
+        "category": "ZenWave"
+      },
+      {
+        "command": "zenwave.eventflow.lanes",
+        "title": "EventFlow Lanes…",
         "category": "ZenWave"
       },
       {
@@ -511,6 +541,13 @@
           "command": "zenwave.lsp.showStatus"
         },
         {
+          "command": "zenwave.manifest.choose"
+        },
+        {
+          "command": "zenwave.resource.open",
+          "when": "false"
+        },
+        {
           "command": "zenwave.credentials.record",
           "when": "isWorkspaceTrusted"
         },
@@ -522,8 +559,8 @@
           "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests"
         },
         {
-          "command": "zenwave.model.reverseReferences",
-          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests"
+          "command": "zenwave.model.conceptsAt",
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/conceptAt' in zenwave.languageServerRequests"
         },
         {
           "command": "zenwave.zfl.organizeServices",
@@ -542,6 +579,10 @@
           "when": "false"
         },
         {
+          "command": "zenwave.explorer.openResource",
+          "when": "false"
+        },
+        {
           "command": "zenwave.explorer.openRelated",
           "when": "false"
         },
@@ -551,6 +592,10 @@
         },
         {
           "command": "zenwave.explorer.goToReferences",
+          "when": "false"
+        },
+        {
+          "command": "zenwave.explorer.forwardReferences",
           "when": "false"
         },
         {
@@ -588,6 +633,10 @@
         {
           "command": "zenwave.eventflow.discardSavedPositions",
           "when": "activeCustomEditorId == zenwave.eventflow && zenwave.eventflowPositionsExist"
+        },
+        {
+          "command": "zenwave.eventflow.lanes",
+          "when": "activeCustomEditorId == zenwave.eventflow"
         },
         {
           "command": "zenwave.preview.openToSide",
@@ -657,9 +706,9 @@
           "group": "navigation@90"
         },
         {
-          "command": "zenwave.model.reverseReferences",
-          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
-          "group": "navigation@91"
+          "command": "zenwave.model.conceptsAt",
+          "when": "editorLangId =~ /^(zdl|zw|zfl)$/ && zenwave.languageServerAvailable && 'zenwave/conceptAt' in zenwave.languageServerRequests",
+          "group": "navigation@92"
         },
         {
           "command": "zenwave.zfl.addMissingServices",
@@ -682,18 +731,33 @@
       "view/item/context": [
         {
           "command": "zenwave.explorer.goToDefinition",
-          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.definitionAvailable",
           "group": "inline@1"
         },
         {
           "command": "zenwave.explorer.goToReferences",
-          "when": "view == zenwave.model && viewItem =~ /\\.references(\\.|$)/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/reverseReferences' in zenwave.languageServerRequests",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.referencesAvailable",
           "group": "inline@2"
+        },
+        {
+          "command": "zenwave.explorer.goToDefinition",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.definitionAvailable",
+          "group": "1_navigation@1"
+        },
+        {
+          "command": "zenwave.explorer.goToReferences",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.referencesAvailable",
+          "group": "1_navigation@2"
+        },
+        {
+          "command": "zenwave.explorer.forwardReferences",
+          "when": "view == zenwave.model && viewItem =~ /\\.declaration(\\.|$)/ && zenwave.languageServerAvailable && 'zenwave/symbolAt' in zenwave.languageServerRequests && 'zenwave/forwardReferences' in zenwave.languageServerRequests",
+          "group": "1_navigation@3"
         },
         {
           "command": "zenwave.explorer.openRelated",
           "when": "(view == zenwave.architecture || view == zenwave.model) && viewItem =~ /\\.related(\\.|$)/",
-          "group": "navigation"
+          "group": "1_navigation@4"
         }
       ],
       "editor/title": [
@@ -897,7 +961,22 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "The architecture manifest for this workspace, relative to the workspace folder or absolute. When set it is used as-is and nothing is searched for; otherwise project-manifest in .zenwave/config.yml at a workspace folder root is used."
+          "description": "The architecture manifest for this workspace: a path relative to the workspace folder or absolute, or an http(s) address. **ZenWave: Choose Architecture Manifest…** writes it. When set it is used as-is and nothing is searched for."
+        },
+        "zenwave.architecture.remoteManifestName": {
+          "type": "string",
+          "default": ".zenwave-manifest.yml",
+          "scope": "window",
+          "markdownDescription": "The file name a remote architecture manifest is opened as. Its address is `zenwave:/` followed by this name. The client and the language server accept a plain file name and use `.zenwave-manifest.yml` when the value is not one. Changing this restarts the language server."
+        },
+        "zenwave.architecture.allowedDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "window",
+          "description": "Hosts an absolute http or https entry in the architecture manifest may be fetched from. A value such as github.com matches that host only. A value that starts with *. such as *.githubusercontent.com matches any subdomain of that host, and not the host itself. A redirect is checked on every hop, and a hop to a host that is not listed is refused. An empty list fetches no absolute http or https entry. Changing this restarts the language server."
         },
         "zenwave.credentials.origins": {
           "type": "array",
@@ -974,6 +1053,22 @@
           "default": true,
           "scope": "resource",
           "description": "Whether an EventFlow diagram opens with humanized labels (CheckoutStarted shown as \"Checkout Started\"). Each open diagram can be switched from the page or the command palette afterwards."
+        },
+        "zenwave.eventflow.lanes": {
+          "type": "string",
+          "enum": [
+            "none",
+            "systems",
+            "services"
+          ],
+          "enumDescriptions": [
+            "No lanes: the flow in its usual layout.",
+            "One full-width band per system.",
+            "One full-width band per service."
+          ],
+          "default": "none",
+          "scope": "resource",
+          "description": "How an EventFlow diagram opens: in lanes per system or per service, or without lanes. Needs a language server that draws lanes; saved positions are not used with lanes. Each open diagram can be switched from the page or the command palette afterwards."
         }
       }
     },
@@ -1047,6 +1142,16 @@
     ],
     "keybindings": [
       {
+        "command": "zenwave.explorer.goToDefinition",
+        "key": "f12",
+        "when": "focusedView == zenwave.model && zenwave.definitionAvailable"
+      },
+      {
+        "command": "zenwave.explorer.goToReferences",
+        "key": "shift+f12",
+        "when": "focusedView == zenwave.model && zenwave.referencesAvailable"
+      },
+      {
         "command": "zenwave.preview.open",
         "key": "ctrl+shift+v",
         "mac": "cmd+shift+v",
@@ -1069,8 +1174,8 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.0.0",
-    "@zenwave360/lsp-js": "0.1.0-next.17.2",
-    "@zenwave360/vistas-eventflow-webview": "0.0.0-next-20261105091918",
+    "@zenwave360/lsp-js": "0.9.0",
+    "@zenwave360/vistas-eventflow-webview": "0.2.0",
     "adm-zip": "^0.6.1",
     "esbuild": "^0.23.0",
     "eslint": "^8.57.0",
@@ -1080,7 +1185,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
-    "@zenwave360/dsl": "1.10.0",
+    "@zenwave360/dsl": "1.11.0",
     "dompurify": "3.4.17",
     "markdown-it": "14.3.2",
     "mermaid": "12.2.0",

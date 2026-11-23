@@ -7,6 +7,7 @@
  * to the page (see `page.ts`); the upstream page ignores unknown message types.
  */
 
+import type { VariantTreeGroup } from '../lsp/requests.js';
 import { validatePositions, type Positions } from './positions.js';
 
 /** The custom editor's view type. */
@@ -18,8 +19,14 @@ export const EVENTFLOW_PROTOCOL_VERSION = 1;
 
 export type ViewMode = 'flow' | 'services';
 
+/** How the flow is drawn: no lanes, or one band per system or per service (EF-R24). */
+export type Lanes = 'none' | 'systems' | 'services';
+export const LANES: readonly Lanes[] = ['none', 'systems', 'services'];
+
 export interface DisplaySettings {
   readonly humanizeLabels: boolean;
+  /** The lanes the page shows. Always `none` when the server does not advertise `flowLanes`. */
+  readonly lanes: Lanes;
 }
 
 /** Host → page, per the vistas protocol. `flowGraph` and `serviceGraph` are the server's, by reference. */
@@ -31,6 +38,8 @@ export type PageMessage =
       readonly serviceGraph: unknown;
       readonly viewMode: ViewMode;
       readonly displaySettings: DisplaySettings;
+      /** Whether the server draws lanes (advertises `flowLanes`); when false the page keeps its Lanes control at `none` (EF-R24). */
+      readonly lanesSupported: boolean;
       /**
        * Stable for one diagram, so the page keeps pan and zoom across edits.
        * One editor shows one document, and the server answers one pair of graphs for it,
@@ -38,7 +47,9 @@ export type PageMessage =
        */
       readonly diagramId: string;
       /** Only when the server advertised `flowVariants`; the dropdown is absent otherwise (EF-R12). */
-      readonly variants?: readonly { readonly id: string; readonly title: string }[];
+      readonly variants?: readonly { readonly id: string; readonly title: string; readonly outcome?: string; readonly steps?: readonly string[] }[];
+      /** The variants as a tree grouped by outcome, when the server built one (EF-R25). Sent with `variants`. */
+      readonly variantTree?: readonly VariantTreeGroup[];
       /** The variant `flowGraph` shows, or `null` for the full diagram. Sent with `variants`. */
       readonly variant?: string | null;
       /** Only for the full diagram, when the server advertised `savedPositions` (EF-R14). */
@@ -122,6 +133,7 @@ export type InboundMessage =
   | { readonly type: 'viewModeChanged'; readonly payload: { readonly viewMode: ViewMode } }
   | { readonly type: 'variantChanged'; readonly payload: { readonly variant: string | null } }
   | { readonly type: 'labelsChanged'; readonly payload: { readonly humanize: boolean } }
+  | { readonly type: 'lanesChanged'; readonly payload: { readonly lanes: Lanes } }
   | { readonly type: 'savePositions'; readonly payload: { readonly positions: Positions } }
   | { readonly type: 'webviewReady'; readonly payload?: unknown }
   | { readonly type: 'zenwave.host.loadError'; readonly payload: { readonly message: string } }
@@ -142,6 +154,8 @@ export function inboundMessage(message: unknown): InboundMessage | undefined {
       return typeof object?.variant === 'string' || object?.variant === null ? { type, payload: { variant: object.variant } } : undefined;
     case 'labelsChanged':
       return typeof object?.humanize === 'boolean' ? { type, payload: { humanize: object.humanize } } : undefined;
+    case 'lanesChanged':
+      return LANES.includes(object?.lanes as Lanes) ? { type, payload: { lanes: object?.lanes as Lanes } } : undefined;
     case 'savePositions': {
       const positions = validatePositions(object?.positions);
       return positions ? { type, payload: { positions } } : undefined;

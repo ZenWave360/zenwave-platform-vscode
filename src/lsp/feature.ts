@@ -7,25 +7,32 @@ import {
   type LanguageServerHost,
   type LanguageServerTransport,
 } from './client.js';
+import { askManifest, choiceFromArgument, sessionValue, settingValue } from './manifest-choice.js';
 import { CREDENTIAL_REQUEST, CredentialBroker } from './credentials.js';
 import type { CredentialAnswer } from './credential-policy.js';
 import {
+  ALLOWED_DOMAINS_SETTING,
   documentSelector,
   isManifest,
   MANIFEST_SETTING,
   manifestWatchers,
+  readArchitectureSettings,
+  REMOTE_MANIFEST_NAME_SETTING,
   resolveWorkspaceManifest,
 } from './manifest.js';
 import {
   describeManifest,
   initializationOptions,
+  sameArchitectureSettings,
   sameInitialization,
+  type ArchitectureSettings,
   type ResolvedManifest,
 } from './manifest-resolution.js';
 import { loadPluginCatalogue, shippedCatalogueSource, type PluginCatalogueSource } from './plugin-catalogue.js';
+import { openResource, registerResourceProvider, type OpenResourceOutcome } from './resource-provider.js';
 import { ZenwaveRequests } from './requests.js';
 import { languageServerStatus, presentStatus, type LanguageServerStatus } from './status.js';
-import { advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, LspSupervisor, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
+import { advertisedFlowLanes, advertisedFlowVariants, advertisedSavedPositions, advertisedOrganizeModes, definitionAdvertised, LspSupervisor, referencesAdvertised, previewModesAdvertised, type LspState, type RequestResult } from './supervisor.js';
 
 /** Context keys for `when` clauses. */
 export const LSP_CONTEXT_KEYS = {
@@ -38,14 +45,27 @@ export const LSP_CONTEXT_KEYS = {
   previewModesAvailable: 'zenwave.previewModesAvailable',
   /** An architecture manifest was resolved for the workspace. */
   manifestAvailable: 'zenwave.manifestAvailable',
+  /** The connected server advertised `definitionProvider` / `referencesProvider`. */
+  definitionAvailable: 'zenwave.definitionAvailable',
+  referencesAvailable: 'zenwave.referencesAvailable',
 } as const;
 
 export const LSP_COMMANDS = {
   restart: 'zenwave.lsp.restart',
   showStatus: 'zenwave.lsp.showStatus',
+  chooseManifest: 'zenwave.manifest.choose',
+  openResource: 'zenwave.resource.open',
   recordCredential: 'zenwave.credentials.record',
   clearCredential: 'zenwave.credentials.clear',
 } as const;
+
+/** Where a session override of the manifest is kept when no folder is open to hold the setting (LC-R5). */
+const MANIFEST_OVERRIDE_KEY = 'zenwave.manifest.override';
+
+export type ChooseManifestOutcome =
+  | { readonly kind: 'cancelled' }
+  /** `setting`: written at workspace scope. `session`: kept in `workspaceState` only, nothing written to disk. */
+  | { readonly kind: 'chosen'; readonly scope: 'setting' | 'session'; readonly manifest: string };
 
 /**
  * The one connection every server-backed feature uses. Later changes (004–007)
@@ -67,6 +87,8 @@ export interface LanguageServerApi {
   readonly flowVariants: boolean;
   /** The connected server applies `positions` on `zenwave/eventFlowViews`. False when none is connected. */
   readonly savedPositions: boolean;
+  /** The connected server draws the flow in lanes: accepts `lanes` on `zenwave/eventFlowViews`. False when none is connected. */
+  readonly flowLanes: boolean;
   readonly serverInfo: { readonly name: string; readonly version?: string } | undefined;
   readonly requests: ZenwaveRequests;
   /** Issue any `zenwave/*` request; answers with the four-way result, never throws. */
@@ -76,6 +98,16 @@ export interface LanguageServerApi {
   /** Resolves once the current start, stop or restart has settled. */
   settled(): Promise<void>;
   restart(): Promise<void>;
+  /**
+   * **Choose Architecture Manifest…**. With a folder open it writes `zenwave.workspace.manifest` at workspace scope;
+   * with none it keeps the choice for the session. The server restarts with the new manifest. `argument` answers
+   * without asking: `{ url }` or `{ file }` (a URI string).
+   */
+  chooseManifest(argument?: unknown): Promise<ChooseManifestOutcome>;
+  /** Opens a `zenwave:` address as the server resolved it: the plain file for a workspace entry, otherwise through the scheme (AR-R4). */
+  openResource(address: string): Promise<OpenResourceOutcome>;
+  /** The documents the client sent the connected server with `textDocument/didOpen` since it started: what the selector let through. */
+  readonly sentToServer: readonly string[];
   /** The `zenwave/credential` handler, exposed for tests. */
   answerCredential(params: unknown): Promise<CredentialAnswer | null>;
   /** A test seam: the source the next start takes the plugin catalogue from instead of the shipped one; `undefined` restores it. */
@@ -104,11 +136,24 @@ export function registerLanguageServer(
   const changed = new vscode.EventEmitter<void>();
   const credentials = new CredentialBroker(context.secrets, context.globalState, logger);
   let manifest: ResolvedManifest = { route: 'none', notes: [] };
+  let manifestOverride = context.workspaceState.get<string>(MANIFEST_OVERRIDE_KEY);
+  // An override stands in for a setting no folder can hold; once a folder is open the setting is the place for the choice.
+  const currentOverride = (): string | undefined => (vscode.workspace.workspaceFolders?.length ? undefined : manifestOverride);
   let settings = readSettings();
+  let architecture: ArchitectureSettings = readArchitectureSettings();
+  let reportedRemoteManifestWarning: string | undefined;
+  /** Logs a rejected remote-manifest name once per distinct warning. A missing or valid name logs nothing. */
+  function reportRemoteManifestName(settings: ArchitectureSettings): void {
+    const warning = settings.remoteManifestNameWarning;
+    if (warning === reportedRemoteManifestWarning) return;
+    reportedRemoteManifestWarning = warning;
+    if (warning) logger.warn(warning);
+  }
   let absentReason: string | undefined = host ? undefined : 'no language server transport is available in this host';
   let pending: Promise<void> = Promise.resolve();
   let watchers: vscode.FileSystemWatcher[] = [];
   let lastState: LspState['kind'] = 'unavailable';
+  let sentToServer: string[] = [];
   let transport: ReturnType<typeof languageClientTransport> | undefined;
   let startError = 'language server was not located';
   let catalogueSource: PluginCatalogueSource = shippedCatalogueSource;
@@ -131,6 +176,7 @@ export function registerLanguageServer(
     return supervisor.request(method, params);
   };
   const requests = new ZenwaveRequests({ request });
+  registerResourceProvider(context, requests);
 
   const item = vscode.window.createStatusBarItem('zenwave.languageServer', vscode.StatusBarAlignment.Right, 100);
   item.name = 'ZenWave';
@@ -163,6 +209,8 @@ export function registerLanguageServer(
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.languageServerRequests, current.kind === 'connected' ? advertised : []);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.organizeModesAvailable, organizeModes);
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.previewModesAvailable, previewModes);
+    void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.definitionAvailable, current.kind === 'connected' && definitionAdvertised(supervisor.initializeResult));
+    void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.referencesAvailable, current.kind === 'connected' && referencesAdvertised(supervisor.initializeResult));
     void vscode.commands.executeCommand('setContext', LSP_CONTEXT_KEYS.manifestAvailable, manifest.manifestUri !== undefined);
     if (notify) changed.fire();
   }
@@ -192,11 +240,14 @@ export function registerLanguageServer(
   }
 
   async function prepare(): Promise<boolean> {
-    manifest = await resolveWorkspaceManifest();
+    manifest = await resolveWorkspaceManifest(currentOverride());
+    architecture = readArchitectureSettings();
+    reportRemoteManifestName(architecture);
     logger.info(describeManifest(manifest));
     for (const watcher of watchers) watcher.dispose();
     watchers = [];
     transport = undefined;
+    sentToServer = [];
     if (!host) return false;
     const location = await host.locateServer(settings.serverPath);
     if (location.kind === 'absent') {
@@ -213,10 +264,11 @@ export function registerLanguageServer(
     watchers = manifestWatchers(manifest);
     const pluginCatalogue = await loadPluginCatalogue(catalogueSource, logger);
     const options = sharedClientOptions(
-      documentSelector(manifest),
-      initializationOptions(manifest, true, pluginCatalogue),
+      documentSelector(manifest, architecture.remoteManifestName),
+      initializationOptions(manifest, true, pluginCatalogue, architecture),
       logger.outputChannel,
       watchers,
+      { didOpen: (document, next) => { sentToServer.push(document.uri.toString()); return next(document); } },
     );
     transport = languageClientTransport(host, location.location, options, [
       { method: CREDENTIAL_REQUEST, handle: (params) => credentials.answer(params) },
@@ -246,12 +298,18 @@ export function registerLanguageServer(
     });
   }
 
-  /** Re-resolves; restarts only when the server would be initialised differently. */
+  /**
+   * Re-resolves the manifest and the architecture resource settings. Restarts only when the server would be
+   * initialised differently: a new manifest, or a new remote-manifest name or allowed-domain list.
+   */
   function reconsiderManifest(trigger: string): Promise<void> {
     return queue(async () => {
       if (!settings.enabled || !vscode.workspace.isTrusted) return;
-      const next = await resolveWorkspaceManifest();
-      if (sameInitialization(manifest, next)) {
+      const next = await resolveWorkspaceManifest(currentOverride());
+      const nextArchitecture = readArchitectureSettings();
+      reportRemoteManifestName(nextArchitecture);
+      if (sameInitialization(manifest, next) && sameArchitectureSettings(architecture, nextArchitecture)) {
+        if (manifest.route !== next.route) logger.info(describeManifest(next));
         manifest = next;
         refresh();
         return;
@@ -261,24 +319,45 @@ export function registerLanguageServer(
     });
   }
 
-  const configWatchers = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
-    vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, '.zenwave/config.yml')));
-  for (const watcher of configWatchers) {
-    context.subscriptions.push(watcher,
-      watcher.onDidCreate((uri) => void reconsiderManifest(`${uri.toString()} created`)),
-      watcher.onDidChange((uri) => void reconsiderManifest(`${uri.toString()} changed`)),
-      watcher.onDidDelete((uri) => void reconsiderManifest(`${uri.toString()} deleted`)));
+  async function chooseManifest(argument?: unknown): Promise<ChooseManifestOutcome> {
+    const choice = choiceFromArgument(argument) ?? await askManifest();
+    if (!choice) return { kind: 'cancelled' };
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (folder) {
+      manifestOverride = undefined;
+      await context.workspaceState.update(MANIFEST_OVERRIDE_KEY, undefined);
+      await vscode.workspace.getConfiguration('zenwave.workspace', folder.uri)
+        .update('manifest', settingValue(choice), vscode.ConfigurationTarget.Workspace);
+    } else {
+      manifestOverride = sessionValue(choice);
+      await context.workspaceState.update(MANIFEST_OVERRIDE_KEY, manifestOverride);
+    }
+    await reconsiderManifest('Choose Architecture Manifest');
+    return { kind: 'chosen', scope: folder ? 'setting' : 'session', manifest: folder ? settingValue(choice) : sessionValue(choice) };
+  }
+
+  async function openResourceCommand(address: unknown): Promise<OpenResourceOutcome> {
+    const outcome = await openResource(requests, String(address));
+    if (outcome.kind === 'failed') {
+      logger.warn(outcome.message);
+      void vscode.window.showErrorMessage(outcome.message.split('\n')[0]!);
+    }
+    return outcome;
   }
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
+      // The manifest, the remote manifest's name and the allowed domains are initialization options.
+      // A change of any of them restarts through the same path; trim and duplicates are not a change.
+      const changed = [MANIFEST_SETTING, REMOTE_MANIFEST_NAME_SETTING, ALLOWED_DOMAINS_SETTING]
+        .filter((setting) => event.affectsConfiguration(setting));
       if (event.affectsConfiguration('zenwave.lsp.enabled') || event.affectsConfiguration('zenwave.lsp.serverPath')) {
         const previous = settings;
         settings = readSettings();
         if (!settings.enabled) void stop('zenwave.lsp.enabled was turned off');
         else if (!previous.enabled || previous.serverPath !== settings.serverPath) void start('server settings changed');
-      } else if (event.affectsConfiguration(MANIFEST_SETTING)) {
-        void reconsiderManifest(`${MANIFEST_SETTING} changed`);
+      } else if (changed.length > 0) {
+        void reconsiderManifest(`${changed.join(', ')} changed`);
       }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void reconsiderManifest('workspace folders changed')),
@@ -287,6 +366,8 @@ export function registerLanguageServer(
     vscode.window.onDidChangeActiveTextEditor(() => refresh(false)),
     vscode.commands.registerCommand(LSP_COMMANDS.restart, () => start('restart requested')),
     vscode.commands.registerCommand(LSP_COMMANDS.showStatus, () => showStatus()),
+    vscode.commands.registerCommand(LSP_COMMANDS.chooseManifest, (argument?: unknown) => chooseManifest(argument)),
+    vscode.commands.registerCommand(LSP_COMMANDS.openResource, (address: unknown) => openResourceCommand(address)),
     vscode.commands.registerCommand(LSP_COMMANDS.recordCredential, () => credentials.record()),
     vscode.commands.registerCommand(LSP_COMMANDS.clearCredential, () => credentials.clear()),
     { dispose: () => { for (const watcher of watchers) watcher.dispose(); void supervisor.stop(); } },
@@ -322,12 +403,16 @@ export function registerLanguageServer(
     get organizeModes() { return status().kind === 'connected' && advertisedOrganizeModes(supervisor.initializeResult); },
     get flowVariants() { return status().kind === 'connected' && advertisedFlowVariants(supervisor.initializeResult); },
     get savedPositions() { return status().kind === 'connected' && advertisedSavedPositions(supervisor.initializeResult); },
+    get flowLanes() { return status().kind === 'connected' && advertisedFlowLanes(supervisor.initializeResult); },
     get serverInfo() { return serverInfo(); },
     requests,
     request,
     onDidChange: changed.event,
     settled: async () => { let seen: Promise<void> | undefined; while (seen !== pending) { seen = pending; await seen; } },
     restart: () => start('restart requested'),
+    get sentToServer() { return [...sentToServer]; },
+    chooseManifest,
+    openResource: (address) => openResource(requests, address),
     answerCredential: (params) => credentials.answer(params),
     overridePluginCatalogue: (source) => { catalogueSource = source ?? shippedCatalogueSource; },
   };

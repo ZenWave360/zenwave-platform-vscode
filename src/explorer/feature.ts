@@ -1,12 +1,18 @@
 import * as vscode from 'vscode';
 import type { Logger } from '../host/logger.js';
 import type { LanguageServerApi } from '../lsp/feature.js';
-import { openLocation, toLocation } from '../model/navigation.js';
+import { manifestDocument } from '../lsp/manifest.js';
+import { isRemoteManifest } from '../lsp/manifest-resolution.js';
+import { MODEL_ACTION_COMMANDS } from '../model/actions.js';
+import { openLocation, presentLocations, toLocation } from '../model/navigation.js';
 import { CoalescedRefresh } from './coalesce.js';
+import { loadDocumentOutline, type DocumentOutlineSymbol } from './document-symbols.js';
 import { DiagramPanels, reflectSelection, type SelectionReflection } from './diagram-selection.js';
-import { followDecision, isModelDocument, tabDocumentUri } from './follow.js';
-import { buildTree, fileName, nodeAt, presentNode, type ExplorerNode, type ExplorerTree } from './hierarchy-model.js';
+import { focusedTreeTarget, followDecision, outlineRetarget, tabDocumentUri, targetForTextDocument, type FocusedTab, type ModelTreeSource, type OutlineKind, type TextDocumentTarget } from './follow.js';
+import { buildTree, CURSOR_REVEAL, fileName, iconResourceUri, initialExpansion, itemIcon, nodeAt, presentNode, type ExplorerNode, type ExplorerTree } from './hierarchy-model.js';
 import { describeState, sameState, serverUnavailable, stateFromResult, type TreeState } from './tree-state.js';
+import { LatestLoad, resumeAbandoned } from './latest-load.js';
+import { untilSettledOrStale, waitForOutline } from './outline-wait.js';
 
 export const EXPLORER_VIEWS = {
   container: 'zenwave',
@@ -17,8 +23,10 @@ export const EXPLORER_VIEWS = {
 export const EXPLORER_COMMANDS = {
   refresh: 'zenwave.explorer.refresh',
   openNode: 'zenwave.explorer.openNode',
+  openResource: 'zenwave.explorer.openResource',
   goToDefinition: 'zenwave.explorer.goToDefinition',
   goToReferences: 'zenwave.explorer.goToReferences',
+  forwardReferences: 'zenwave.explorer.forwardReferences',
   openRelated: 'zenwave.explorer.openRelated',
   openManifest: 'zenwave.explorer.openManifest',
 } as const;
@@ -35,6 +43,21 @@ const EDIT_DELAY_MS = 400;
 const SWITCH_DELAY_MS = 50;
 /** The cursor settles before the tree follows it. */
 const REVEAL_DELAY_MS = 150;
+/**
+ * How long to wait for a host outline. The Markdown provider in the web host can
+ * register after the file is shown, or fail to answer; the tree still has to
+ * leave the previous model within this budget, not after several stacked waits.
+ */
+const OUTLINE_WAIT_MS = 15000;
+/** How often a wait notices that the user moved to another document, or that the tree was disposed. */
+const STALE_POLL_MS = 50;
+/**
+ * First retry after an empty Markdown outline. Doubles each time up to
+ * `OUTLINE_RETRY_MAX_MS`, so a heading-less file is asked about ten times in
+ * the 15 s budget instead of once every stale poll.
+ */
+const OUTLINE_RETRY_MS = 100;
+const OUTLINE_RETRY_MAX_MS = 2000;
 
 export interface HierarchyTreeApi {
   readonly state: TreeState;
@@ -63,9 +86,32 @@ export type OpenRelatedOutcome =
 
 interface Target {
   readonly uri?: string;
+  /** Which service supplies this tree. Architecture and ZenWave models use the server. */
+  readonly source?: ModelTreeSource;
+  /** Needed only to activate Markdown's outline provider on first use. */
+  readonly outlineKind?: OutlineKind;
   /** Why there is nothing to ask about, when there is not. */
   readonly absent?: TreeState;
 }
+
+interface TreeLoad {
+  readonly tree: ExplorerTree | undefined;
+  readonly state: TreeState;
+  /** A banner `viewsWelcome` does not already show. An empty outline leaves this unset. */
+  readonly message?: string;
+  /** More precise than the generic state description when a non-server provider failed. */
+  readonly log?: string;
+  /**
+   * The attempt stopped because the target changed. Not a tree to publish, even
+   * when the target has since changed back to this document.
+   */
+  readonly superseded?: boolean;
+}
+
+const SUPERSEDED: TreeLoad = { tree: undefined, state: { kind: 'loading' }, superseded: true };
+
+const sameTarget = (left: Target, right: Target): boolean =>
+  left.uri === right.uri && left.source === right.source && left.outlineKind === right.outlineKind && left.absent?.kind === right.absent?.kind;
 
 class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<ExplorerNode | undefined>();
@@ -77,8 +123,11 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
   target: Target = {};
   requests = 0;
   renders = 0;
-  private generation = 0;
+  private readonly latestLoad = new LatestLoad<Target, TreeLoad>();
   private logged: { state: TreeState; uri: string | undefined } | undefined;
+  /** Resource-open failures survive tree rendering until the user explicitly refreshes. */
+  private readonly openWarnings = new Map<string, string>();
+  private disposed = false;
 
   constructor(
     private readonly name: string,
@@ -87,6 +136,8 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
     private readonly server: LanguageServerApi,
     private readonly logger: Logger,
     private readonly resolveTarget: () => Target,
+    private readonly loadTarget: (target: Target, stale: () => boolean) => Promise<TreeLoad>,
+    private readonly unavailable: (target: Target) => TreeState | undefined,
     /** Called after every update, to add what the tree knows beyond the answer (the Model tree's problem note). */
     private readonly afterShow: () => void = () => undefined,
   ) {
@@ -97,15 +148,31 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
 
   getTreeItem(element: ExplorerNode): vscode.TreeItem {
     const presentation = presentNode(element, this.tree?.documentUri ?? '');
-    const item = new vscode.TreeItem(presentation.label, presentation.collapsible
-      ? element.depth < 2 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed
-      : vscode.TreeItemCollapsibleState.None);
+    const expansion = initialExpansion(element, this.name === 'Model' ? 'model' : 'architecture');
+    const item = new vscode.TreeItem(presentation.label, expansion === 'expanded'
+      ? vscode.TreeItemCollapsibleState.Expanded
+      : expansion === 'collapsed'
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None);
     item.id = element.key;
     if (presentation.description) item.description = presentation.description;
-    item.tooltip = presentation.tooltip;
-    item.iconPath = new vscode.ThemeIcon(presentation.icon);
+    const warning = this.openWarnings.get(element.key);
+    item.tooltip = warning ? `${presentation.tooltip}\n\nWarning: ${warning}` : presentation.tooltip;
+    const icon = itemIcon(presentation, warning !== undefined);
+    if ('resource' in icon) {
+      // ThemeIcon.File plus a URI whose path ends with the file name. The command
+      // below is what a click runs, so this URI is not opened and nothing is fetched.
+      item.iconPath = vscode.ThemeIcon.File;
+      const target = iconResourceUri(icon.resource);
+      item.resourceUri = vscode.Uri.from({ scheme: target.scheme, path: target.path });
+    } else {
+      item.iconPath = new vscode.ThemeIcon(icon.themeIcon,
+        icon.disabled ? new vscode.ThemeColor('disabledForeground') : undefined);
+    }
     item.contextValue = presentation.contextValue;
-    if (element.node.sourceUri) {
+    if (presentation.address) {
+      item.command = { command: EXPLORER_COMMANDS.openResource, title: 'Open Architecture Resource', arguments: [element] };
+    } else if (element.node.kind !== 'artifact' && element.node.kind !== 'doc' && element.node.kind !== 'consumer' && element.node.sourceUri) {
       item.command = { command: EXPLORER_COMMANDS.openNode, title: 'Go to Declaration', arguments: [element] };
     }
     return item;
@@ -121,38 +188,66 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
     return current.parent;
   }
 
-  private async load(): Promise<void> {
-    const generation = ++this.generation;
-    const unavailable = serverUnavailable(this.server.status, this.server.advertisedRequests);
-    const target = this.resolveTarget();
-    this.target = target;
-    if (unavailable) return this.show(undefined, unavailable, target.uri);
-    if (!target.uri) return this.show(undefined, target.absent ?? { kind: 'empty' }, undefined);
+  /** The title-bar refresh deliberately clears resource warnings before re-asking the hierarchy. */
+  manualRefresh(): void {
+    if (this.disposed) return;
+    this.openWarnings.clear();
+    this.changed.fire(undefined);
+    this.refresher.request(SWITCH_DELAY_MS);
+  }
 
-    this.requests++;
-    const result = await this.server.requests.hierarchy(target.uri);
-    // A newer load, or a new target, owns the tree now.
-    if (generation !== this.generation || this.resolveTarget().uri !== target.uri) return;
-    const tree = result.kind === 'ok' ? buildTree(target.uri, result.value) : undefined;
-    const state = stateFromResult(result, tree?.size ?? 0);
-    if (state.kind === 'unreadable' && this.tree?.documentUri === target.uri) {
+  async openResource(element: unknown): Promise<void> {
+    if (this.disposed) return;
+    const explorerNode = element as ExplorerNode | undefined;
+    const presentation = explorerNode ? presentNode(explorerNode, this.tree?.documentUri ?? '') : undefined;
+    if (!explorerNode || !presentation?.address) return;
+    const outcome = await this.server.openResource(presentation.address);
+    if (this.disposed || outcome.kind === 'opened') return;
+    this.openWarnings.set(explorerNode.key, outcome.message);
+    this.changed.fire(explorerNode);
+  }
+
+  private async load(): Promise<void> {
+    const current = await this.latestLoad.run(this.resolveTarget, async (target) => {
+      const stale = () => this.disposed || !sameTarget(target, this.resolveTarget());
+      const unavailable = this.unavailable(target);
+      if (unavailable) return { tree: undefined, state: unavailable };
+      if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
+      if (target.source !== 'outline') this.requests++;
+      const loaded = await this.loadTarget(target, stale);
+      // Stopped early, or the target moved during the last tick. Publishing would
+      // either flash a placeholder or put this document's tree under the new one.
+      if (loaded.superseded || stale()) return SUPERSEDED;
+      return loaded;
+    }, sameTarget);
+    // A dropped attempt used to return here and leave the previous tree up, with
+    // nothing queued when the adopting request had already been consumed.
+    if (this.disposed) return;
+    const publish = resumeAbandoned(current, () => this.refresher.request(0));
+    if (!publish || this.disposed) return;
+    const { target, result: loaded } = publish;
+    this.target = target;
+    const { tree, state } = loaded;
+    if (target.uri && state.kind === 'unreadable' && this.tree?.documentUri === target.uri) {
       // Keep the last readable hierarchy of the same document rather than blanking it mid-edit.
       this.view.message = `${fileName(target.uri)} could not be read; showing its last readable hierarchy.`;
       return this.show(this.tree, state, target.uri);
     }
-    this.view.message = '';
-    return this.show(tree, state, target.uri);
+    // A successful hierarchy replaces an unreadable banner from a prior attempt.
+    if (tree !== undefined && loaded.message === undefined) this.view.message = '';
+    return this.show(tree, state, target.uri, loaded.message, loaded.log);
   }
 
-  private show(tree: ExplorerTree | undefined, state: TreeState, uri: string | undefined): void {
+  private show(tree: ExplorerTree | undefined, state: TreeState, uri: string | undefined, message?: string, log?: string): void {
+    if (this.disposed) return;
     this.tree = tree;
     this.state = state;
-    if (tree === undefined) this.view.message = '';
+    if (message !== undefined || tree === undefined) this.view.message = message ?? '';
     this.renders++;
     this.changed.fire(undefined);
     void this.publishState();
     const subject = uri ? fileName(uri) : undefined;
-    const line = describeState(this.name, subject, state);
+    const line = log ?? describeState(this.name, subject, state);
     if (this.logged && sameState(this.logged.state, state) && this.logged.uri === uri) {
       this.logger.debug(line);
     } else if (state.kind === 'ready' || state.kind === 'loading') {
@@ -161,14 +256,17 @@ class HierarchyTree implements vscode.TreeDataProvider<ExplorerNode>, vscode.Dis
       this.logger.warn(line);
     }
     this.logged = { state, uri };
-    this.afterShow();
+    if (!this.disposed) this.afterShow();
   }
 
   private async publishState(): Promise<void> {
+    if (this.disposed) return;
     await vscode.commands.executeCommand('setContext', this.contextKey, this.state.kind);
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.refresher.dispose();
     this.view.dispose();
     this.changed.dispose();
@@ -184,7 +282,7 @@ function api(tree: HierarchyTree, documentUri: () => string | undefined): Hierar
     provider: tree,
     get stats() { return { requests: tree.requests, renders: tree.renders }; },
     settled: () => tree.refresher.idle(),
-    refresh: () => tree.refresher.request(SWITCH_DELAY_MS),
+    refresh: () => tree.manualRefresh(),
   };
 }
 
@@ -195,16 +293,107 @@ export function registerModelExplorer(
 ): ModelExplorerApi {
   const diagramPanels = new DiagramPanels();
 
+  const loadServerHierarchy = async (target: Target, stale: () => boolean): Promise<TreeLoad> => {
+    if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
+    // The request keeps its own timeout. This only stops waiting when the user
+    // has moved on, so a slow hierarchy cannot hold the single refresh open.
+    const outcome = await untilSettledOrStale(server.requests.hierarchy(target.uri), stale, STALE_POLL_MS);
+    if (outcome.kind === 'stale' || stale()) return SUPERSEDED;
+    if (outcome.kind === 'rejected') {
+      const reason = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      return { tree: undefined, state: { kind: 'failed', reason } };
+    }
+    const result = outcome.value;
+    const tree = result.kind === 'ok' ? buildTree(target.uri, result.value) : undefined;
+    return { tree, state: stateFromResult(result, tree?.size ?? 0) };
+  };
+  const serverUnavailableFor = (target: Target): TreeState | undefined =>
+    target.source === 'outline' ? undefined : serverUnavailable(server.status, server.advertisedRequests);
+  const documentSymbols = (uri: string): Promise<readonly DocumentOutlineSymbol[] | undefined> =>
+    Promise.resolve(vscode.commands.executeCommand<readonly DocumentOutlineSymbol[] | undefined>(
+      'vscode.executeDocumentSymbolProvider', vscode.Uri.parse(uri, true)));
+  const fromOutline = (uri: string, outline: Awaited<ReturnType<typeof loadDocumentOutline>>): TreeLoad => {
+    const tree = outline.nodes.length > 0 ? buildTree(uri, outline.nodes) : undefined;
+    return tree
+      ? { tree, state: { kind: 'ready', nodes: tree.size }, ...(outline.log ? { log: outline.log } : {}) }
+      : { tree: undefined, state: outline.state, ...(outline.message ? { message: outline.message } : {}), ...(outline.log ? { log: outline.log } : {}) };
+  };
+  const loadModelTree = async (target: Target, stale: () => boolean): Promise<TreeLoad> => {
+    if (target.source !== 'outline') return loadServerHierarchy(target, stale);
+    if (!target.uri) return { tree: undefined, state: target.absent ?? { kind: 'empty' } };
+    const uri = target.uri;
+    // Markdown's provider registers after the file is shown, and the extension
+    // can already report itself active while that provider is still missing.
+    // An empty answer is retried with backoff until the budget passes, and the
+    // wait stops at the first non-empty outline. An API description is asked
+    // once: an immediate empty outline is the document.
+    if (target.outlineKind === 'markdown') {
+      const waited = await waitForOutline({
+        ask: () => documentSymbols(uri),
+        activate: () => activateMarkdown(uri),
+        deadlineMs: OUTLINE_WAIT_MS,
+        pollMs: STALE_POLL_MS,
+        initialIntervalMs: OUTLINE_RETRY_MS,
+        maxIntervalMs: OUTLINE_RETRY_MAX_MS,
+        stale,
+      });
+      if (waited.kind === 'stale') return SUPERSEDED;
+      if (waited.kind === 'unanswered') {
+        logger.warn(`Document symbol provider did not answer for ${fileName(uri)} within ${OUTLINE_WAIT_MS}ms`);
+      }
+      if (waited.kind === 'failed') {
+        return fromOutline(uri, {
+          nodes: [],
+          state: { kind: 'failed', reason: waited.reason },
+          log: `document symbol provider failed for ${uri}: ${waited.reason}`,
+        });
+      }
+      const symbols = waited.kind === 'symbols' ? waited.symbols : undefined;
+      return fromOutline(uri, await loadDocumentOutline(uri, async () => symbols));
+    }
+    const started = Date.now();
+    const outcome = await untilSettledOrStale(
+      documentSymbols(uri),
+      () => stale() || Date.now() - started >= OUTLINE_WAIT_MS,
+      STALE_POLL_MS,
+    );
+    if (stale()) return SUPERSEDED;
+    if (outcome.kind === 'stale') {
+      logger.warn(`Document symbol provider did not answer for ${fileName(uri)} within ${OUTLINE_WAIT_MS}ms`);
+      return fromOutline(uri, await loadDocumentOutline(uri, async () => undefined));
+    }
+    if (outcome.kind === 'rejected') {
+      const reason = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      return fromOutline(uri, {
+        nodes: [],
+        state: { kind: 'failed', reason },
+        log: `document symbol provider failed for ${uri}: ${reason}`,
+      });
+    }
+    return fromOutline(uri, await loadDocumentOutline(uri, async () => outcome.value));
+  };
+  /** Starts the built-in Markdown extension once. A failure still leaves the outline wait free to ask again. */
+  async function activateMarkdown(uri: string): Promise<void> {
+    const markdown = vscode.extensions.getExtension('vscode.markdown-language-features');
+    if (!markdown) return;
+    try {
+      await markdown.activate();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn(`Markdown outline provider did not activate for ${fileName(uri)}: ${reason}`);
+    }
+  }
+
   // ── Architecture: the manifest 003 resolved, and nothing else ──────────────
   const architecture = new HierarchyTree('Architecture', EXPLORER_VIEWS.architecture, EXPLORER_CONTEXT_KEYS.architectureTree,
     server, logger, () => server.manifest.manifestUri
       ? { uri: server.manifest.manifestUri }
-      : { absent: { kind: 'no-manifest' } });
+      : { absent: { kind: 'no-manifest' } }, loadServerHierarchy, serverUnavailableFor);
 
   // ── Model: the model document the user is looking at ───────────────────────
-  let shown: string | undefined;
+  let shown: Target | undefined;
   const model = new HierarchyTree('Model', EXPLORER_VIEWS.model, EXPLORER_CONTEXT_KEYS.modelTree,
-    server, logger, () => shown ? { uri: shown } : { absent: { kind: 'no-model' } }, () => noteProblems());
+    server, logger, () => shown ?? { absent: { kind: 'no-model' } }, loadModelTree, serverUnavailableFor, () => noteProblems());
 
   /**
    * A server may still build a hierarchy for a document with syntax errors. The tree
@@ -212,6 +401,7 @@ export function registerModelExplorer(
    * hierarchy is not mistaken for the whole model.
    */
   function noteProblems(): void {
+    if (shown?.source === 'outline') return;
     if (model.state.kind !== 'ready' || !model.tree) return;
     const uri = model.tree.documentUri;
     const errors = vscode.languages.getDiagnostics(vscode.Uri.parse(uri, true))
@@ -222,23 +412,100 @@ export function registerModelExplorer(
   }
   let lastReflection: SelectionReflection | undefined;
 
-  const openDocumentLanguage = (uri: string): string | undefined =>
-    vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.languageId;
+  /** Reads only enough of a structured document to identify an API description. */
+  const outlineProbe = (document: vscode.TextDocument): string => {
+    const lastLine = Math.min(document.lineCount - 1, 49);
+    const end = document.lineAt(lastLine).range.end;
+    return document.getText(new vscode.Range(0, 0, end.line, end.character)).slice(0, 4 * 1024);
+  };
 
-  function followActiveTab(): void {
-    const uri = tabDocumentUri(vscode.window.tabGroups.activeTabGroup.activeTab?.input);
-    const focused = uri && isModelDocument(uri, openDocumentLanguage(uri.toString())) ? uri.toString() : undefined;
-    const current = model.tree?.documentUri === shown ? model.tree : undefined;
-    if (followDecision(shown === undefined ? undefined : { uri: shown, ...(current ? { tree: current } : {}) }, focused) === 'keep') return;
+  /**
+   * The active tab, including one that holds no model document. A webview has no
+   * uri; it is still the focus, so the text editor in another group is not used.
+   */
+  function describeFocusedTab(input: unknown): FocusedTab {
+    const uri = tabDocumentUri(input);
+    if (uri && isPlainTextTab(input)) {
+      const document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
+      return document
+        ? { uri, customEditor: false, languageId: document.languageId, text: outlineProbe(document) }
+        : { uri, customEditor: false };
+    }
+    if (!uri) return { customEditor: true };
+    const languageId = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.languageId;
+    return languageId !== undefined ? { uri, customEditor: true, languageId } : { uri, customEditor: true };
+  }
+
+  function followActiveDocument(): void {
+    const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const textEditor = vscode.window.activeTextEditor;
+    // The text editor is the fallback only when the editor reported no active tab.
+    // A diagram, image or webview is the focus even while a text editor stays
+    // active in another group.
+    const textTarget = !activeTab && textEditor
+      ? targetForTextDocument(textEditor.document.uri, textEditor.document.languageId, outlineProbe(textEditor.document))
+      : undefined;
+    const next = focusedTreeTarget(textTarget, activeTab ? describeFocusedTab(activeTab.input) : undefined);
+    if (!next) return;
+    adoptTreeTarget(next);
+  }
+
+  function adoptTreeTarget(next: TextDocumentTarget): void {
+    const focused: Target = { uri: next.uri, source: next.source, ...(next.outlineKind ? { outlineKind: next.outlineKind } : {}) };
+
+    if (focused.source === 'server') {
+      const current = model.tree?.documentUri === shown?.uri ? model.tree : undefined;
+      const currentModel = shown?.source === 'server' ? { uri: shown.uri!, ...(current ? { tree: current } : {}) } : undefined;
+      if (followDecision(currentModel, focused.uri) === 'keep') return;
+    } else if (shown?.uri === focused.uri && shown?.source === focused.source) {
+      return;
+    }
+
     shown = focused;
-    model.view.description = focused ? fileName(focused) : '';
-    logger.debug(`Model tree follows ${focused}`);
+    model.view.description = fileName(focused.uri!);
+    logger.debug(`Model tree follows ${focused.uri} from ${focused.source}`);
     model.refresher.request(SWITCH_DELAY_MS);
   }
 
+  /**
+   * The document the user is editing. A text tab is that tab's document. The
+   * active text editor counts only when no tab is reported: a diagram or image
+   * can leave a text editor active in another group.
+   */
+  function isActiveTextDocument(document: vscode.TextDocument): boolean {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document !== document) return false;
+    const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (!activeTab) return true;
+    if (!isPlainTextTab(activeTab.input)) return false;
+    return tabDocumentUri(activeTab.input)?.toString() === document.uri.toString();
+  }
+
+  let outlineEditTimer: ReturnType<typeof setTimeout> | undefined;
+  let outlineEditDocument: vscode.TextDocument | undefined;
+  /** Re-reads the active document's discriminator once edits have gone quiet. */
+  function scheduleOutlineRecheck(document: vscode.TextDocument): void {
+    outlineEditDocument = document;
+    if (outlineEditTimer !== undefined) clearTimeout(outlineEditTimer);
+    outlineEditTimer = setTimeout(() => {
+      outlineEditTimer = undefined;
+      const edited = outlineEditDocument;
+      outlineEditDocument = undefined;
+      if (!edited || !isActiveTextDocument(edited)) return;
+      const current = shown?.uri && shown.source ? { uri: shown.uri, source: shown.source } : undefined;
+      const next = outlineRetarget(current, {
+        active: true,
+        uri: edited.uri,
+        languageId: edited.languageId,
+        text: outlineProbe(edited),
+      });
+      if (next) adoptTreeTarget(next);
+    }, EDIT_DELAY_MS);
+  }
+
   /** Documents whose content can change what the Model tree shows. */
-  const concernsModel = (uri: string): boolean => uri === shown || (model.tree?.sourceUris.has(uri) ?? false);
-  const isManifest = (uri: string): boolean => uri === server.manifest.manifestUri;
+  const concernsModel = (uri: string): boolean => uri === shown?.uri || (shown?.source === 'server' && (model.tree?.sourceUris.has(uri) ?? false));
+  const isManifest = (uri: string): boolean => uri === manifestDocument(server.manifest)?.toString();
 
   let manifestWatcher: vscode.FileSystemWatcher | undefined;
   let watchedManifest: string | undefined;
@@ -249,7 +516,8 @@ export function registerModelExplorer(
     manifestWatcher = undefined;
     watchedManifest = manifestUri;
     architecture.view.description = manifestUri ? fileName(manifestUri) : '';
-    if (!manifestUri) return;
+    // An http(s) manifest has nothing on disk to watch; the server re-reads it on a restart.
+    if (!manifestUri || isRemoteManifest(manifestUri)) return;
     const uri = vscode.Uri.parse(manifestUri, true);
     const directory = vscode.Uri.joinPath(uri, '..');
     manifestWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, fileName(manifestUri)));
@@ -263,6 +531,12 @@ export function registerModelExplorer(
     watchManifest();
     architecture.refresher.request(SWITCH_DELAY_MS);
     model.refresher.request(SWITCH_DELAY_MS);
+  }
+
+  function manualRefreshAll(): void {
+    watchManifest();
+    architecture.manualRefresh();
+    model.manualRefresh();
   }
 
   let revealTimer: ReturnType<typeof setTimeout> | undefined;
@@ -279,14 +553,74 @@ export function registerModelExplorer(
     const active = editor.selection.active;
     const node = nodeAt(tree, uri, { line: active.line, character: active.character });
     if (!node || model.view.selection[0]?.key === node.key) return;
-    await model.view.reveal(node, { select: true, focus: false, expand: true }).then(undefined, () => undefined);
+    // `expand` opens the node in focus. reveal walks getParent and opens those ancestors.
+    await model.view.reveal(node, CURSOR_REVEAL).then(undefined, () => undefined);
   }
 
   async function openNode(element: unknown): Promise<string | undefined> {
-    const node = (element as ExplorerNode | undefined)?.node;
+    const elementNode = element as ExplorerNode | undefined;
+    const node = elementNode?.node;
     if (!node?.sourceUri) return undefined;
-    const editor = await openLocation(toLocation({ uri: node.sourceUri, ...(node.sourceRange ? { range: node.sourceRange } : {}) }), { preserveFocus: true });
+    const range = elementNode?.revealRange ?? node.sourceRange;
+    const editor = await openLocation(toLocation({ uri: node.sourceUri, ...(range ? { range } : {}) }), { preserveFocus: true });
     return editor.document.uri.toString();
+  }
+
+  /**
+   * The node a gesture is about. A menu or an inline button passes it; a keybinding (F12, Shift+F12) passes nothing
+   * (microsoft/vscode#130880), so the focused tree's selection stands in.
+   */
+  function gestureTarget(element: unknown): ExplorerNode | undefined {
+    const given = element as ExplorerNode | undefined;
+    if (given?.node) return given;
+    return model.view.selection[0];
+  }
+
+  /** Where a node's declaration starts, as the position the standard navigation requests are asked at. */
+  function sourcePosition(target: ExplorerNode | undefined): { uri: vscode.Uri; position: vscode.Position } | undefined {
+    const item = target?.node;
+    if (!item?.sourceUri || !item.sourceRange) return undefined;
+    const start = item.sourceRange.start;
+    return { uri: vscode.Uri.parse(item.sourceUri, true), position: new vscode.Position(start.line, start.character) };
+  }
+
+  /**
+   * Go to Definition on a node (NAV-R1): the editor's definition at the node's source position, so a flow command reaches
+   * its ZDL method. A declaration that is its own definition, or a server without an answer, reveals the source instead.
+   */
+  async function goToDefinition(element: unknown): Promise<string | undefined> {
+    const target = gestureTarget(element);
+    const source = sourcePosition(target);
+    if (!target || !source) return undefined;
+    // The server must know the document before it can resolve in it (web host, `zenwave:` documents).
+    await vscode.workspace.openTextDocument(source.uri).then(() => undefined, () => undefined);
+    const found = await Promise.resolve(vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[] | undefined>(
+      'vscode.executeDefinitionProvider', source.uri, source.position)).then((result) => result ?? [], () => []);
+    const locations = found.map((entry) => 'targetUri' in entry
+      ? new vscode.Location(entry.targetUri, entry.targetSelectionRange ?? entry.targetRange)
+      : entry);
+    if (locations.length === 0) return openNode(target);
+    if (locations.length === 1) return (await openLocation(locations[0]!)).document.uri.toString();
+    await presentLocations(new vscode.Location(source.uri, new vscode.Range(source.position, source.position)), locations, '');
+    return source.uri.toString();
+  }
+
+  async function goToReferences(element: unknown): Promise<unknown> {
+    const source = sourcePosition(gestureTarget(element));
+    if (!source) return undefined;
+    // Find References at the node's source location: the same answer as Shift+F12 on the declaration.
+    const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(source.uri));
+    editor.selection = new vscode.Selection(source.position, source.position);
+    editor.revealRange(new vscode.Range(source.position, source.position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    return vscode.commands.executeCommand('editor.action.goToReferences');
+  }
+
+  /** Forward References of a node: the model action of the editor menu, asked at the node's source position. */
+  async function forwardReferences(element: unknown): Promise<unknown> {
+    const source = sourcePosition(gestureTarget(element));
+    if (!source) return undefined;
+    return vscode.commands.executeCommand(MODEL_ACTION_COMMANDS.forwardReferences, source.uri,
+      { line: source.position.line, character: source.position.character });
   }
 
   async function openRelated(element: unknown, choice?: unknown): Promise<OpenRelatedOutcome> {
@@ -312,12 +646,12 @@ export function registerModelExplorer(
   }
 
   async function openManifest(): Promise<boolean> {
-    const manifestUri = server.manifest.manifestUri;
-    if (!manifestUri) {
+    const document = manifestDocument(server.manifest);
+    if (!document) {
       await vscode.commands.executeCommand('workbench.action.openSettings', 'zenwave.workspace.manifest');
       return false;
     }
-    await vscode.window.showTextDocument(vscode.Uri.parse(manifestUri, true), { preview: true });
+    await vscode.window.showTextDocument(document, { preview: true });
     return true;
   }
 
@@ -326,20 +660,24 @@ export function registerModelExplorer(
     model,
     { dispose: () => manifestWatcher?.dispose() },
     server.onDidChange(() => refreshAll()),
-    vscode.window.tabGroups.onDidChangeTabs(() => followActiveTab()),
-    vscode.window.tabGroups.onDidChangeTabGroups(() => followActiveTab()),
+    vscode.window.tabGroups.onDidChangeTabs(() => followActiveDocument()),
+    vscode.window.tabGroups.onDidChangeTabGroups(() => followActiveDocument()),
+    vscode.window.onDidChangeActiveTextEditor(() => followActiveDocument()),
     vscode.workspace.onDidOpenTextDocument((document) => {
       const uri = document.uri.toString();
       if (isManifest(uri)) architecture.refresher.request();
       if (concernsModel(uri)) model.refresher.request();
       // A document opened before its tab settles: its language decides whether it is a model.
-      followActiveTab();
+      followActiveDocument();
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (event.contentChanges.length === 0) return;
       const uri = event.document.uri.toString();
       if (isManifest(uri)) architecture.refresher.request();
       if (concernsModel(uri)) model.refresher.request();
+      // An ordinary YAML or JSON file can become an API description as it is typed.
+      // The discriminator is the bounded prefix; the tree moves only when it qualifies.
+      if (isActiveTextDocument(event.document)) scheduleOutlineRecheck(event.document);
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (isManifest(document.uri.toString())) architecture.refresher.request();
@@ -352,32 +690,39 @@ export function registerModelExplorer(
       if (revealTimer !== undefined) clearTimeout(revealTimer);
       revealTimer = setTimeout(() => { revealTimer = undefined; void revealCursor(event.textEditor); }, REVEAL_DELAY_MS);
     }),
-    { dispose: () => { if (revealTimer !== undefined) clearTimeout(revealTimer); } },
+    { dispose: () => {
+      if (revealTimer !== undefined) clearTimeout(revealTimer);
+      if (outlineEditTimer !== undefined) clearTimeout(outlineEditTimer);
+    } },
     model.view.onDidChangeSelection((event) => {
       const selected = event.selection[0];
       void reflectSelection(diagramPanels, model.tree?.documentUri, selected ? selected.node.viewNodeIds ?? [] : undefined)
         .then((reflection) => { lastReflection = reflection; });
     }),
-    vscode.commands.registerCommand(EXPLORER_COMMANDS.refresh, () => refreshAll()),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.refresh, () => manualRefreshAll()),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openNode, openNode),
-    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToDefinition, openNode),
-    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, (element: unknown) => {
-      const item = (element as ExplorerNode | undefined)?.node;
-      // The hierarchy id is the semantic id. A position in the declaration is not: symbolAt there is null or a neighbour.
-      if (!item?.sourceUri || !item.id.includes('#')) return undefined;
-      return vscode.commands.executeCommand('zenwave.model.reverseReferences', vscode.Uri.parse(item.sourceUri, true), item.sourceRange?.start, item.id);
-    }),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.openResource, (element: unknown) => architecture.openResource(element)),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToDefinition, goToDefinition),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.goToReferences, goToReferences),
+    vscode.commands.registerCommand(EXPLORER_COMMANDS.forwardReferences, forwardReferences),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openRelated, openRelated),
     vscode.commands.registerCommand(EXPLORER_COMMANDS.openManifest, openManifest),
   );
 
-  followActiveTab();
+  followActiveDocument();
   refreshAll();
 
-  const modelApi = Object.defineProperty(api(model, () => shown), 'lastReflection', { get: () => lastReflection, enumerable: true });
+  const modelApi = Object.defineProperty(api(model, () => shown?.uri), 'lastReflection', { get: () => lastReflection, enumerable: true });
   return {
     architecture: api(architecture, () => server.manifest.manifestUri),
     model: modelApi as HierarchyTreeApi & { readonly lastReflection: SelectionReflection | undefined },
     diagramPanels,
   };
+}
+
+/** `TabInputText`: one document uri, and none of the fields a custom editor, webview, diff or notebook carries. */
+function isPlainTextTab(input: unknown): boolean {
+  if (typeof input !== 'object' || input === null) return false;
+  if ('viewType' in input || 'notebookType' in input || 'original' in input || 'modified' in input) return false;
+  return tabDocumentUri(input) !== undefined;
 }

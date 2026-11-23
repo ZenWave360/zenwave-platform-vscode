@@ -31,6 +31,43 @@ export function linkedSiblings(root = repositoryRoot) {
   return SIBLINGS.filter((sibling) => isLink(installedPath(root, sibling.package)));
 }
 
+function pinnedVersions(manifest, packageName) {
+  const versions = [
+    manifest.dependencies?.[packageName],
+    manifest.devDependencies?.[packageName],
+    manifest.optionalDependencies?.[packageName],
+    manifest.peerDependencies?.[packageName],
+  ];
+  if (manifest.zenwaveLanguageServer?.package === packageName) versions.push(manifest.zenwaveLanguageServer.version);
+  if (manifest.zenwaveEventFlowWebview?.package === packageName) versions.push(manifest.zenwaveEventFlowWebview.version);
+  return versions.filter((version) => typeof version === 'string');
+}
+
+function displayPath(root, directory) {
+  const relative = path.relative(root, directory).replaceAll(path.sep, '/');
+  return relative.startsWith('.') ? relative : `./${relative}`;
+}
+
+/**
+ * Problems with linked sibling versions that would make a VSIX differ from its package.json pins.
+ *
+ * Package scripts may link a sibling for local development. Packaging may use that link only when every
+ * applicable package.json pin agrees with its package.json version.
+ */
+export function linkedSiblingVersionProblems(manifest, root = repositoryRoot) {
+  return linkedSiblings(root).flatMap((sibling) => {
+    const directory = fs.realpathSync(installedPath(root, sibling.package));
+    const linkedVersion = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')).version;
+    return [...new Set(pinnedVersions(manifest, sibling.package))]
+      .filter((pinnedVersion) => pinnedVersion !== linkedVersion)
+      .map(
+        (pinnedVersion) =>
+          `${sibling.package} is linked at ${displayPath(root, directory)} with version ${linkedVersion}, but package.json pins ${pinnedVersion}. ` +
+          'Fix it with ZENWAVE_USE_LOCAL_DEPENDENCIES=false then npm ci.',
+      );
+  });
+}
+
 /** A built sibling's package directory, or undefined if it isn't there to link. */
 function builtSibling(root, sibling) {
   const directory = path.resolve(root, '..', sibling.directory);

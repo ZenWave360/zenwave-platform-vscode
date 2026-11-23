@@ -276,7 +276,17 @@ const testTargets = extensionTargets.map((target) => ({
   outfile: path.join(projectDir, `.test-dist/${target.name}/index.js`),
 }));
 
-const targets = tests ? testTargets.filter((target) => !target.name.startsWith('preview-')) : extensionTargets;
+// A window with no folder is a second suite over the same two hosts (the manifest choice becomes a session override).
+const noFolderTargets = testTargets
+  .filter((target) => !target.name.startsWith('preview-'))
+  .map((target) => ({
+    ...target,
+    name: `${target.name}-no-folder`,
+    entryPoints: [path.join(projectDir, 'test/smoke-no-folder.ts')],
+    outfile: target.outfile.replace(/index\.js$/, 'no-folder.js'),
+  }));
+
+const targets = tests ? [... testTargets.filter((target) => !target.name.startsWith('preview-')), ...noFolderTargets] : extensionTargets;
 
 /**
  * Both targets build concurrently, but VS Code needs ONE begin/end pair per

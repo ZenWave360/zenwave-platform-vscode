@@ -5,10 +5,13 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { HierarchyNode } from '../../src/lsp/requests.js';
 import { CoalescedRefresh, type Scheduler } from '../../src/explorer/coalesce.js';
+import { documentSymbolsToHierarchy, loadDocumentOutline, type DocumentSymbolLike, type SymbolInformationLike } from '../../src/explorer/document-symbols.js';
 import { DiagramPanels, reflectSelection } from '../../src/explorer/diagram-selection.js';
-import { followDecision, isModelDocument, tabDocumentUri } from '../../src/explorer/follow.js';
-import { buildTree, findNode, NEUTRAL_ICON, nodeAt, presentNode, walk } from '../../src/explorer/hierarchy-model.js';
+import { focusedTreeTarget, followDecision, isApiDescription, isModelDocument, outlineRetarget, tabDocumentUri, targetForTextDocument } from '../../src/explorer/follow.js';
+import { ancestorChain, buildTree, CURSOR_REVEAL, findNode, iconResourceUri, initialExpansion, itemIcon, NEUTRAL_ICON, nodeAt, presentNode, walk } from '../../src/explorer/hierarchy-model.js';
 import { describeState, serverUnavailable, stateFromResult, TREE_STATE_KINDS } from '../../src/explorer/tree-state.js';
+import { LatestLoad, resumeAbandoned } from '../../src/explorer/latest-load.js';
+import { untilSettledOrStale, waitForOutline } from '../../src/explorer/outline-wait.js';
 
 /** Wire samples recorded from @zenwave360/lsp-js 0.1.0-SNAPSHOT (zenwave-lsp d7156e7). */
 const samples = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/lsp-samples');
@@ -42,6 +45,266 @@ test('a server that repeats an id still yields unique tree keys', () => {
   assert.deepEqual(tree.roots.map((root) => root.key), ['x', 'x~1', `${FLOW}/event:c`]);
 });
 
+test('a nested document-symbol response becomes a navigable nested tree', () => {
+  const range = { start: { line: 1, character: 0 }, end: { line: 8, character: 0 } };
+  const symbols: DocumentSymbolLike[] = [{
+    name: 'Orders', detail: 'namespace', kind: 3, range,
+    selectionRange: { start: { line: 1, character: 0 }, end: { line: 1, character: 6 } },
+    children: [{ name: 'create', kind: 5, range: { start: { line: 3, character: 2 }, end: { line: 5, character: 3 } } }],
+  }];
+  const tree = buildTree('file:///workspace/openapi.yaml', documentSymbolsToHierarchy('file:///workspace/openapi.yaml', symbols));
+  const root = tree.roots[0]!;
+  assert.deepEqual([root.node.label, root.node.sourceUri, root.node.sourceRange, root.revealRange],
+    ['Orders', 'file:///workspace/openapi.yaml', symbols[0]!.range, symbols[0]!.selectionRange]);
+  assert.deepEqual(root.children.map((child) => child.node.label), ['create']);
+  assert.equal(presentNode(root, tree.documentUri).description, 'namespace');
+});
+
+test('a flat SymbolInformation response keeps every entry as a navigable root', () => {
+  const symbols: SymbolInformationLike[] = [
+    { name: 'GET /orders', kind: 12, containerName: 'paths', location: { uri: { toString: () => 'file:///workspace/openapi.yaml' }, range: { start: { line: 2, character: 0 }, end: { line: 2, character: 11 } } } },
+    { name: 'Order', kind: 5, location: { uri: { toString: () => 'file:///workspace/schemas.yaml' }, range: { start: { line: 1, character: 0 }, end: { line: 6, character: 0 } } } },
+  ];
+  const nodes = documentSymbolsToHierarchy('file:///workspace/openapi.yaml', symbols);
+  assert.deepEqual(nodes.map((node) => [node.label, node.children.length, node.sourceUri]), [
+    ['GET /orders', 0, 'file:///workspace/openapi.yaml'], ['Order', 0, 'file:///workspace/schemas.yaml'],
+  ]);
+  assert.equal(nodes[0]!.uiHints.detail, 'paths');
+});
+
+test('a document symbol uses its full range for cursor containment and its selection range for navigation', () => {
+  const uri = 'file:///workspace/README.md';
+  const fullRange = { start: { line: 10, character: 0 }, end: { line: 40, character: 0 } };
+  const selectionRange = { start: { line: 10, character: 2 }, end: { line: 10, character: 9 } };
+  const tree = buildTree(uri, documentSymbolsToHierarchy(uri, [{ name: 'Heading', kind: 15, range: fullRange, selectionRange }]));
+  assert.equal(nodeAt(tree, uri, { line: 25, character: 0 })?.node.label, 'Heading');
+  assert.deepEqual(tree.roots[0]?.revealRange, selectionRange);
+});
+
+test('an empty symbol response has no nodes, and only Markdown and API descriptions select the host outline', () => {
+  assert.deepEqual(documentSymbolsToHierarchy('file:///workspace/README.md', undefined), []);
+  const markdown = { path: '/workspace/README.md', toString: () => 'file:///workspace/README.md' };
+  const yaml = { path: '/workspace/openapi.yaml', toString: () => 'file:///workspace/openapi.yaml' };
+  const json = { path: '/workspace/openapi.json', toString: () => 'file:///workspace/openapi.json' };
+  assert.deepEqual(targetForTextDocument(markdown, 'markdown'), { uri: 'file:///workspace/README.md', source: 'outline', outlineKind: 'markdown' });
+  assert.deepEqual(targetForTextDocument(yaml, 'yaml', 'openapi: 3.1.0'), { uri: 'file:///workspace/openapi.yaml', source: 'outline', outlineKind: 'api-description' });
+  assert.deepEqual(targetForTextDocument(json, 'json', '{ "asyncapi": "3.0.0" }'), { uri: 'file:///workspace/openapi.json', source: 'outline', outlineKind: 'api-description' });
+  assert.deepEqual(targetForTextDocument(json, 'jsonc', '// generated\n{ "swagger": "2.0" }'), { uri: 'file:///workspace/openapi.json', source: 'outline', outlineKind: 'api-description' });
+  assert.equal(targetForTextDocument(yaml, 'yaml', 'config:\n  openapi: ignored'), undefined);
+  assert.equal(targetForTextDocument(json, 'json', '{ "config": { "openapi": "3.1.0" } }'), undefined);
+  assert.equal(targetForTextDocument(json, 'jsonc', '{ "title": "an openapi: mention" }'), undefined);
+  assert.equal(targetForTextDocument({ path: '/workspace/model.zdl', toString: () => FLOW }, 'zdl').source, 'server');
+  assert.equal(targetForTextDocument({ path: '/workspace/App.java', toString: () => 'file:///workspace/App.java' }, 'java'), undefined);
+  assert.equal(targetForTextDocument({ path: '/workspace/notes.txt', toString: () => 'file:///workspace/notes.txt' }, 'plaintext'), undefined);
+});
+
+test('the API discriminator looks only at top-level keys in the first fifty lines and four kilobytes', () => {
+  assert.ok(isApiDescription('---\n# a description\nasyncapi: 3.0.0', 'yaml'));
+  assert.ok(isApiDescription('{ /* a comment */ "openapi": "3.1.0" }', 'jsonc'));
+  assert.equal(isApiDescription(`${'ignored: value\n'.repeat(50)}openapi: 3.1.0`, 'yaml'), false);
+  assert.equal(isApiDescription(`${' '.repeat(4096)}\nopenapi: 3.1.0`, 'yaml'), false);
+});
+
+test('a document-symbol provider failure becomes a failed tree state with a provider-specific log', async () => {
+  const result = await loadDocumentOutline('file:///workspace/openapi.yaml', async () => { throw new Error('provider exploded'); });
+  assert.deepEqual(result.state, { kind: 'failed', reason: 'provider exploded' });
+  assert.match(result.log ?? '', /^document symbol provider failed for .*openapi\.yaml: provider exploded$/);
+  assert.doesNotMatch(result.log ?? '', /zenwave\/hierarchy/);
+});
+
+test('an empty outline load carries no banner of its own', async () => {
+  const result = await loadDocumentOutline('file:///workspace/README.md', async () => []);
+  assert.deepEqual(result.state, { kind: 'outline-empty' });
+  assert.equal(result.message, undefined);
+  assert.deepEqual(result.nodes, []);
+});
+
+test('a load result is discarded when its target becomes stale', async () => {
+  let target = { uri: 'file:///workspace/first.md', source: 'outline' };
+  let release: (() => void) | undefined;
+  const latest = new LatestLoad<typeof target, string>();
+  const pending = latest.run(() => target, async () => new Promise<string>((resolve) => { release = () => resolve('first'); }),
+    (left, right) => left.uri === right.uri && left.source === right.source);
+  target = { uri: 'file:///workspace/second.md', source: 'outline' };
+  release!();
+  assert.equal(await pending, undefined);
+});
+
+test('a dropped load is asked again, and a finished one is published', () => {
+  let resumes = 0;
+  const resume = (): void => { resumes++; };
+  assert.equal(resumeAbandoned(undefined, resume), undefined);
+  assert.equal(resumeAbandoned({ result: { superseded: true } }, resume), undefined);
+  assert.equal(resumes, 2);
+  assert.deepEqual(resumeAbandoned({ result: { superseded: false, nodes: 3 } }, resume), { result: { superseded: false, nodes: 3 } });
+  assert.equal(resumes, 2);
+});
+
+test('an outline that answers immediately is not held for a poll, and a late rejection is ignored', async () => {
+  let slept = 0;
+  const answered = await untilSettledOrStale(Promise.resolve(['Intro']), () => false, 50, async () => { slept++; });
+  assert.deepEqual(answered, { kind: 'value', value: ['Intro'] });
+  assert.equal(slept, 0);
+
+  const rejections: unknown[] = [];
+  const onRejection = (error: unknown): void => { rejections.push(error); };
+  process.on('unhandledRejection', onRejection);
+  let rejectLate: (error: Error) => void = () => undefined;
+  const hung = new Promise<string[]>((_, reject) => { rejectLate = reject; });
+  const abandoned = await untilSettledOrStale(hung, () => true, 50, async () => { slept++; });
+  assert.deepEqual(abandoned, { kind: 'stale' });
+  assert.equal(slept, 0);
+  rejectLate(new Error('late'));
+  await new Promise((resolve) => setImmediate(resolve));
+  process.off('unhandledRejection', onRejection);
+  assert.deepEqual(rejections, []);
+});
+
+test('markdown keeps asking after an empty answer and activates once, without an isActive gate', async () => {
+  let time = 0;
+  const answers: (readonly string[] | undefined)[] = [undefined, [], ['Intro', 'Fixtures']];
+  let activations = 0;
+  const outcome = await waitForOutline({
+    ask: async () => answers.shift(),
+    activate: async () => { activations++; },
+    deadlineMs: 15_000,
+    pollMs: 50,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(outcome, { kind: 'symbols', symbols: ['Intro', 'Fixtures'] });
+  assert.equal(activations, 1);
+  assert.ok(time < 15_000, `waited ${time}ms`);
+});
+
+test('an outline that stays empty ends at the deadline, and one that never answers does too', async () => {
+  let time = 0;
+  let asks = 0;
+  const empty = await waitForOutline({
+    ask: async () => { asks++; return []; },
+    deadlineMs: 100,
+    pollMs: 40,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(empty, { kind: 'empty' });
+  assert.ok(asks >= 2);
+  assert.ok(time >= 100);
+
+  time = 0;
+  const silent = await waitForOutline<string>({
+    ask: () => new Promise(() => undefined),
+    deadlineMs: 100,
+    pollMs: 40,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(silent, { kind: 'unanswered' });
+  assert.ok(time >= 100 && time < 180, `silent wait ran for ${time}ms`);
+});
+
+test('an always-empty outline is asked with backoff, not every fifty milliseconds, and ends empty', async () => {
+  let time = 0;
+  let asks = 0;
+  const empty = await waitForOutline({
+    ask: async () => { asks++; return []; },
+    deadlineMs: 15_000,
+    pollMs: 50,
+    initialIntervalMs: 100,
+    maxIntervalMs: 2_000,
+    now: () => time,
+    sleep: async (ms) => { time += ms; },
+  });
+  assert.deepEqual(empty, { kind: 'empty' });
+  assert.ok(asks <= 12, `always-empty outline asked ${asks} times`);
+  assert.ok(asks >= 8, `always-empty outline asked only ${asks} times`);
+  assert.ok(time >= 15_000);
+});
+
+test('a hung outline is abandoned when the target changes, well before the deadline', async () => {
+  let time = 0;
+  let stale = false;
+  let asks = 0;
+  const outcome = await waitForOutline({
+    ask: () => { asks++; return new Promise(() => undefined); },
+    activate: async () => { throw new Error('should not activate after the target moved'); },
+    deadlineMs: 5_000,
+    pollMs: 30,
+    stale: () => stale,
+    now: () => time,
+    sleep: async (ms) => { time += ms; stale = true; },
+  });
+  assert.deepEqual(outcome, { kind: 'stale' });
+  assert.equal(asks, 1);
+  assert.equal(time, 30);
+});
+
+test('disposing the tree cancels an in-flight outline wait: no further polling, no further asks', async () => {
+  let cancelled = false;
+  let sleeps = 0;
+  let pollsAfterCancel = 0;
+  let releaseSleep: (() => void) | undefined;
+  const hung = untilSettledOrStale(
+    new Promise<string[]>(() => undefined),
+    () => cancelled,
+    50,
+    () => {
+      sleeps++;
+      if (cancelled) pollsAfterCancel++;
+      return new Promise<void>((resolve) => { releaseSleep = resolve; });
+    },
+  );
+  await new Promise<void>((resolve) => { setImmediate(resolve); });
+  assert.equal(sleeps, 1, 'the hung ask is polled once while it is live');
+  cancelled = true;
+  releaseSleep!();
+  await new Promise<void>((resolve) => { setImmediate(resolve); });
+  assert.deepEqual(await hung, { kind: 'stale' });
+  assert.equal(pollsAfterCancel, 0);
+  assert.equal(sleeps, 1);
+
+  let time = 0;
+  let disposed = false;
+  let asks = 0;
+  const empty = await waitForOutline({
+    ask: async () => { asks++; return []; },
+    deadlineMs: 15_000,
+    pollMs: 50,
+    initialIntervalMs: 100,
+    maxIntervalMs: 2_000,
+    stale: () => disposed,
+    now: () => time,
+    sleep: async (ms) => { time += ms; disposed = true; },
+  });
+  assert.deepEqual(empty, { kind: 'stale' });
+  assert.equal(asks, 1);
+  assert.ok(time < 15_000, `disposed wait ran for ${time}ms`);
+});
+
+test('an abandoned refresh schedules one follow-up and the next run does not overlap it', async () => {
+  const clock = fakeClock();
+  let runs = 0;
+  let overlap = 0;
+  let inFlight = 0;
+  const refresh = new CoalescedRefresh(() => {
+    inFlight++;
+    if (inFlight > 1) overlap++;
+    runs++;
+    const run = runs;
+    return Promise.resolve().then(() => {
+      inFlight--;
+      if (run === 1) resumeAbandoned(undefined, () => refresh.request(0));
+    });
+  }, 50, clock);
+
+  refresh.request(0);
+  await clock.advance(0);
+  assert.equal(runs, 2);
+  assert.equal(overlap, 0);
+  assert.equal(refresh.pending, false);
+  refresh.dispose();
+});
+
 test('nodes present in this client vocabulary, and a kind released later still renders under its name', () => {
   const tree = buildTree(FLOW, sample('hierarchy-unopened-zfl.json'));
   const systems = presentNode(tree.roots[0]!, FLOW);
@@ -49,9 +312,8 @@ test('nodes present in this client vocabulary, and a kind released later still r
   const orders = presentNode(findNode(tree, byLabel('Orders', 'system'))!, FLOW);
   assert.equal(orders.label, 'Orders');
   assert.equal(orders.description, 'model.zdl', 'a node declared elsewhere names that document');
-  assert.equal(orders.contextValue, 'zenwave.hierarchy.system.related.declaration.references');
+  assert.equal(orders.contextValue, 'zenwave.hierarchy.system.related.declaration');
   assert.match(orders.contextValue, /\.declaration(\.|$)/, 'a declaration can offer navigation actions');
-  assert.match(orders.contextValue, /\.references(\.|$)/, 'a system name resolves, so Go to References is offered');
   assert.ok(!/\.declaration(\.|$)/.test(presentNode(tree.roots[0]!, FLOW).contextValue), 'a structural section does not offer declaration actions');
   const policy = presentNode(findNode(tree, byLabel('OrderCreated', 'policy'))!, FLOW);
   assert.equal(policy.description, 'do notifyCustomer');
@@ -68,6 +330,162 @@ test('nodes present in this client vocabulary, and a kind released later still r
   assert.equal(presentNode(manifest.roots[0]!.children[0]!, MANIFEST).label, 'orders');
 });
 
+test('an Arcadia architecture hierarchy keeps resources lazy, typed and visibly pending where the server says so', () => {
+  const tree = buildTree(MANIFEST, sample('hierarchy-arcadia-manifest.json'));
+  const domain = findNode(tree, byLabel('architecture', 'domain'))!;
+  const subdomain = findNode(tree, byLabel('catalogue', 'subdomain'))!;
+  const emptyDomain = findNode(tree, byLabel('empty-domain', 'domain'))!;
+  assert.ok(domain.children.some(byLabel('Docs', 'docs')), 'a domain with docs is kept even without a version');
+  assert.ok(subdomain.children.some(byLabel('Docs', 'docs')), 'a subdomain with docs remains a node');
+  assert.equal(emptyDomain.children.length, 0, 'a domain without services is not dropped');
+
+  const artifacts = presentNode(findNode(tree, byLabel('Artifacts', 'artifacts'))!, MANIFEST);
+  const docs = presentNode(findNode(tree, byLabel('Docs', 'docs'))!, MANIFEST);
+  const consumers = presentNode(findNode(tree, byLabel('Consumers', 'consumers'))!, MANIFEST);
+  assert.deepEqual([artifacts.icon, docs.icon, consumers.icon], ['library', 'output', 'plug']);
+
+  const openapi = presentNode(findNode(tree, byLabel('apis/catalog.yml', 'artifact'))!, MANIFEST);
+  assert.deepEqual([openapi.description, openapi.address, openapi.disabled], [
+    'apis/catalog.yml · 1.2.3',
+    'zenwave:/architecture/catalogue/1.2.3/apis/catalog.yml',
+    false,
+  ]);
+  const openapiIcon = itemIcon(openapi, false);
+  assert.equal(openapiIcon.themeIcon, 'file', 'ThemeIcon.File, not the openapi codicon');
+  assert.equal('resource' in openapiIcon && openapiIcon.resource, 'zenwave:/architecture/catalogue/1.2.3/apis/catalog.yml');
+  const absolute = presentNode(findNode(tree, byLabel('https://schemas.arcadia.example/catalog/openapi.yml', 'artifact'))!, MANIFEST);
+  assert.equal(absolute.label, 'https://schemas.arcadia.example/catalog/openapi.yml', 'an absolute URI is shown as the server labelled it');
+  assert.equal(absolute.description, 'https://schemas.arcadia.example/catalog/openapi.yml · 2026.11');
+
+  const unversionedDoc = presentNode(findNode(tree, byLabel('README.md', 'doc'))!, MANIFEST);
+  assert.deepEqual([unversionedDoc.description, unversionedDoc.address], ['README.md', 'zenwave:/architecture/-/README.md']);
+  assert.ok(!unversionedDoc.description?.includes('undefined'), 'an unversioned document does not acquire a synthetic version');
+
+  const glob = presentNode(findNode(tree, byLabel('contracts/**/*.yaml', 'artifact'))!, MANIFEST);
+  assert.equal(glob.description, 'contracts/**/*.yaml · 2.0.0 · pending (phase 2)');
+  assert.equal(glob.disabled, true);
+  assert.equal(glob.address, undefined, 'folder and glob resources cannot be opened before phase 2');
+  assert.match(glob.tooltip, /Pending \(phase 2\): Folder and glob entries are not supported/);
+
+  const consumer = presentNode(findNode(tree, byLabel('Arcadia storefront', 'consumer'))!, MANIFEST);
+  assert.deepEqual([consumer.label, consumer.address, consumer.disabled], ['Arcadia storefront', undefined, false], 'consumers are plain text');
+  const unknown = presentNode(findNode(tree, byLabel('Release notes', 'future-resource'))!, MANIFEST);
+  assert.deepEqual([unknown.label, unknown.icon], ['Release notes', NEUTRAL_ICON], 'a future kind remains visible');
+});
+
+test('kind icons, file entries and model-tree expansion follow the owner rule', () => {
+  const architecture = buildTree(MANIFEST, sample('hierarchy-arcadia-manifest.json'));
+  const iconOf = (label: string, kind: string) => presentNode(findNode(architecture, byLabel(label, kind))!, MANIFEST).icon;
+  assert.equal(iconOf('architecture', 'domain'), 'globe');
+  assert.equal(iconOf('catalogue', 'subdomain'), 'folder-library');
+  assert.equal(iconOf('catalog-api', 'service'), 'server');
+  assert.equal(iconOf('Artifacts', 'artifacts'), 'library');
+  assert.equal(iconOf('Docs', 'docs'), 'output');
+  assert.equal(iconOf('Consumers', 'consumers'), 'plug');
+  assert.equal(iconOf('Arcadia storefront', 'consumer'), 'plug');
+
+  const flow = buildTree(FLOW, sample('hierarchy-unopened-zfl.json'));
+  assert.equal(presentNode(findNode(flow, byLabel('createOrder', 'command'))!, FLOW).icon, 'symbol-method-arrow');
+  const orderService = findNode(flow, byLabel('OrderService', 'service'))!;
+  assert.equal(presentNode(orderService, FLOW).icon, 'server');
+  assert.equal(initialExpansion(orderService, 'model'), 'expanded', 'a service is open so its commands show');
+  assert.equal(initialExpansion(orderService.parent!, 'model'), 'expanded', 'the system above the service stays open');
+  assert.equal(initialExpansion(findNode(flow, byLabel('createOrder', 'command'))!, 'model'), 'none');
+  const flowEvents = [...walk(flow.roots)].filter((node) => node.node.kind === 'event');
+  assert.ok(flowEvents.length > 0);
+  assert.ok(flowEvents.every((node) => node.children.length === 0), 'the server sample sends events with no field children');
+
+  const range = { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } };
+  const node = (kind: string, label: string, children: HierarchyNode[] = [], extra: Partial<HierarchyNode> = {}): HierarchyNode => ({
+    id: `${kind}:${label}`, label, kind, sourceUri: ZDL, sourceRange: range,
+    children, relatedResources: [], uiHints: {}, viewNodeIds: [], ...extra,
+  });
+  const api = buildTree(ZDL, [node('api', 'OrdersAsyncAPI')]);
+  assert.equal(presentNode(api.roots[0]!, ZDL).icon, 'symbol-interface');
+  const method = buildTree(ZDL, [node('method', 'createOrder')]);
+  assert.equal(presentNode(method.roots[0]!, ZDL).icon, 'symbol-method-arrow', 'a ZDL service operation is a method');
+
+  const file = (label: string, kind: 'artifact' | 'doc', extra: Partial<HierarchyNode> = {}) =>
+    presentNode(buildTree(MANIFEST, [node(kind, label, [], extra)]).roots[0]!, MANIFEST);
+  const expectFile = (presentation: ReturnType<typeof presentNode>, extension: RegExp) => {
+    const icon = itemIcon(presentation, false);
+    if (!('resource' in icon)) assert.fail(`ThemeIcon.File, got ${icon.themeIcon}`);
+    assert.equal(icon.themeIcon, 'file');
+    assert.match(iconResourceUri(icon.resource).path, extension);
+    const warned = itemIcon(presentation, true);
+    assert.deepEqual(warned, { themeIcon: 'warning', disabled: false }, 'a warning still replaces the file icon');
+  };
+  expectFile(presentNode(findNode(architecture, byLabel('README.md', 'doc'))!, MANIFEST), /README\.md$/);
+  expectFile(file('domain-model.zdl', 'artifact', { uiHints: { type: 'zdl' }, address: 'zenwave:/orders/0.1.0/domain-model.zdl' }), /domain-model\.zdl$/);
+  expectFile(file('place-order.zfl', 'artifact', { uiHints: { type: 'zfl' }, address: 'zenwave:/orders/0.1.0/place-order.zfl' }), /place-order\.zfl$/);
+  expectFile(file('openapi.json', 'artifact', { uiHints: { type: 'openapi' }, address: 'zenwave:/orders/0.1.0/openapi.json' }), /openapi\.json$/);
+  expectFile(file('asyncapi.yaml', 'artifact', { uiHints: { type: 'asyncapi' }, address: 'zenwave:/orders/0.1.0/asyncapi.yaml' }), /asyncapi\.yaml$/);
+  expectFile(file('README.md', 'doc', { address: 'zenwave:/architecture/-/README.md' }), /README\.md$/);
+  expectFile(file('guide.markdown', 'doc', { address: 'zenwave:/architecture/-/docs/guide.markdown' }), /guide\.markdown$/);
+  // The address does not end in the file name, so the entry path supplies it.
+  const absolute = file('https://schemas.arcadia.example/catalog/openapi.yml', 'artifact', {
+    uiHints: { type: 'openapi' }, address: 'zenwave:/architecture/catalogue/2026.11/absolute-uri', version: '2026.11',
+  });
+  expectFile(absolute, /openapi\.yml$/);
+  const absoluteIcon = itemIcon(absolute, false);
+  assert.equal('resource' in absoluteIcon && absoluteIcon.resource, 'https://schemas.arcadia.example/catalog/openapi.yml');
+
+  const relative = file('apis/catalog.yml', 'artifact', { uiHints: { type: 'openapi' } });
+  expectFile(relative, /catalog\.yml$/);
+  assert.equal(iconResourceUri('apis/catalog.yml').scheme, 'file');
+
+  const disabledFile = file('old.yml', 'artifact', { uiHints: { type: 'openapi' }, disabledReason: 'pending' });
+  const disabledIcon = itemIcon(disabledFile, false);
+  assert.equal(disabledFile.fileResource, undefined);
+  assert.deepEqual(disabledIcon, { themeIcon: 'symbol-interface', disabled: true }, 'a disabled file keeps the greyed codicon');
+  const glob = presentNode(findNode(architecture, byLabel('contracts/**/*.yaml', 'artifact'))!, MANIFEST);
+  assert.equal(glob.fileResource, undefined);
+  assert.deepEqual(itemIcon(glob, false), { themeIcon: 'symbol-event', disabled: true });
+
+  const street = node('field', 'street');
+  const address = node('field', 'address', [street]);
+  const status = node('field', 'status');
+  const entity = node('entity', 'Order', [status, address]);
+  const eventField = node('field', 'id');
+  const event = node('event', 'OrderEvent', [eventField]);
+  const input = node('input', 'OrderInput', [node('field', 'name')]);
+  const output = node('output', 'OrderOutput', [node('field', 'total')]);
+  const bareEvent = node('event', 'BareEvent');
+  const command = node('command', 'createOrder');
+  const service = node('service', 'OrderService', [command]);
+  const model = buildTree(ZDL, [
+    node('section', 'entities', [entity]),
+    node('section', 'events', [event, bareEvent]),
+    node('section', 'inputs', [input]),
+    node('section', 'outputs', [output]),
+    node('section', 'services', [service]),
+  ]);
+  const at = (label: string, kind: string) => findNode(model, byLabel(label, kind))!;
+  assert.equal(initialExpansion(at('entities', 'section'), 'model'), 'expanded');
+  assert.equal(initialExpansion(at('Order', 'entity'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderEvent', 'event'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderInput', 'input'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderOutput', 'output'), 'model'), 'collapsed');
+  assert.equal(initialExpansion(at('OrderService', 'service'), 'model'), 'expanded');
+  assert.equal(initialExpansion(at('status', 'field'), 'model'), 'none', 'a field with no children is a leaf');
+  assert.equal(initialExpansion(at('address', 'field'), 'model'), 'collapsed', 'a field with children starts collapsed');
+  assert.equal(initialExpansion(at('createOrder', 'command'), 'model'), 'none');
+  assert.equal(initialExpansion(at('BareEvent', 'event'), 'model'), 'none', 'an event the server sent without fields has no twistie');
+
+  const domain = findNode(architecture, byLabel('architecture', 'domain'))!;
+  const archService = findNode(architecture, byLabel('catalog-api', 'service'))!;
+  assert.equal(initialExpansion(architecture.roots[0]!, 'architecture'), 'expanded');
+  assert.equal(initialExpansion(domain, 'architecture'), 'expanded', 'the architecture tree still opens its second level');
+  assert.equal(initialExpansion(archService, 'architecture'), 'collapsed');
+  assert.equal(initialExpansion(archService, 'model'), 'expanded');
+
+  const nested = at('street', 'field');
+  assert.deepEqual(ancestorChain(nested).map((item) => item.node.label), ['entities', 'Order', 'address']);
+  assert.deepEqual(ancestorChain(nested).map((item) => initialExpansion(item, 'model')), ['expanded', 'collapsed', 'collapsed']);
+  assert.deepEqual(CURSOR_REVEAL, { select: true, focus: false, expand: true }, 'reveal opens the node and, through getParent, its ancestors');
+  assert.equal(nested.parent, at('address', 'field'), 'getParent is the chain reveal walks');
+});
+
 test('the node at a cursor is the narrowest declaration containing it, in the document the cursor is in', () => {
   const tree = buildTree(FLOW, sample('hierarchy-unopened-zfl.json'));
   assert.equal(nodeAt(tree, FLOW, { line: 21, character: 8 })?.node.kind, 'policy', 'the when block, not a part repeated under it');
@@ -75,6 +493,25 @@ test('the node at a cursor is the narrowest declaration containing it, in the do
   assert.equal(nodeAt(tree, ZDL, { line: 5, character: 10 })?.node.label, 'createOrder');
   assert.equal(nodeAt(tree, ZDL, { line: 4, character: 2 })?.node.label, 'OrderService');
   assert.equal(nodeAt(tree, FLOW, { line: 8, character: 0 }), undefined);
+  assert.equal(nodeAt(tree, ZDL, { line: 0, character: 0 })?.node.label, 'Orders', 'a zero-width server range matches its point');
+  assert.equal(nodeAt(tree, ZDL, { line: 0, character: 1 }), undefined, 'a zero-width range matches only its point');
+});
+
+test('a boundary shared by adjacent outline symbols belongs to the following symbol', () => {
+  const uri = 'file:///workspace/README.md';
+  const heading = (label: string, startCharacter: number, endCharacter: number): HierarchyNode => ({
+    id: label, label, kind: 'heading', sourceUri: uri,
+    sourceRange: { start: { line: 3, character: startCharacter }, end: { line: 3, character: endCharacter } },
+    children: [], relatedResources: [], uiHints: {}, viewNodeIds: [],
+  });
+  const tree = buildTree(uri, [heading('First', 0, 4), heading('Second', 4, 10)]);
+  assert.equal(nodeAt(tree, uri, { line: 3, character: 3 })?.node.label, 'First');
+  assert.equal(nodeAt(tree, uri, { line: 3, character: 4 })?.node.label, 'Second', 'the shared end is outside the previous symbol');
+  assert.equal(nodeAt(tree, uri, { line: 3, character: 10 }), undefined, 'a non-zero range excludes its end');
+
+  const point = buildTree(uri, [heading('Point', 4, 4), heading('After', 4, 10)]);
+  assert.equal(nodeAt(point, uri, { line: 3, character: 4 })?.node.label, 'Point', 'a zero-width range is narrower than the symbol that starts there');
+  assert.equal(nodeAt(point, uri, { line: 3, character: 5 })?.node.label, 'After');
 });
 
 test('the model tree follows the focused model, but not into a document its hierarchy already spans', () => {
@@ -98,6 +535,62 @@ test('the active document comes from text and custom editor tabs alike', () => {
   assert.equal(isModelDocument({ path: 'Untitled-1', toString: () => 'untitled:Untitled-1' }, 'zfl'), true);
   assert.equal(isModelDocument({ path: '/w/App.java', toString: () => '' }, 'java'), false);
   assert.equal(isModelDocument({ path: '/w/zenwave-architecture.yml', toString: () => '' }, undefined), false);
+});
+
+test('a focused diagram is the model on screen even when a text editor in another group is still active', () => {
+  const checkout = { path: '/w/lsp/checkout.zfl', toString: () => 'file:///w/lsp/checkout.zfl' };
+  const placeOrder = { path: '/w/place-order-flow.zfl', toString: () => 'file:///w/place-order-flow.zfl' };
+  const readme = { path: '/w/README.md', toString: () => 'file:///w/README.md' };
+  const checkoutText = targetForTextDocument(checkout, 'zfl');
+  assert.deepEqual(focusedTreeTarget(checkoutText, { uri: placeOrder, customEditor: true, languageId: undefined }),
+    { uri: placeOrder.toString(), source: 'server' });
+  assert.deepEqual(focusedTreeTarget(undefined, { uri: placeOrder, customEditor: true, languageId: 'zfl' }),
+    { uri: placeOrder.toString(), source: 'server' });
+  assert.deepEqual(focusedTreeTarget(undefined, { uri: checkout, customEditor: false, languageId: 'zfl' }),
+    { uri: checkout.toString(), source: 'server' }, 'a text tab still follows the server when no text editor is active');
+  const markdown = targetForTextDocument(readme, 'markdown');
+  assert.deepEqual(focusedTreeTarget(markdown, { uri: readme, customEditor: false, languageId: 'markdown' }), markdown);
+  assert.equal(focusedTreeTarget(undefined, undefined), undefined, 'no focused document keeps the current model');
+  assert.equal(focusedTreeTarget(undefined, { uri: { path: '/w/App.java', toString: () => 'file:///w/App.java' }, customEditor: false, languageId: 'java' }), undefined);
+  assert.equal(focusedTreeTarget(markdown, { uri: { path: '/w/pic.png', toString: () => 'file:///w/pic.png' }, customEditor: true }), undefined,
+    'an image is not a model or an outline, so the tree stays where it is');
+  assert.equal(focusedTreeTarget(markdown, { customEditor: true }), undefined, 'a webview keeps the current tree');
+  assert.deepEqual(focusedTreeTarget(markdown, undefined), markdown, 'with no active tab the text editor is the fallback');
+});
+
+test('focusing an image keeps diagram B when Markdown A is still the active text editor', () => {
+  const markdownA = targetForTextDocument({ path: '/w/README.md', toString: () => 'file:///w/README.md' }, 'markdown');
+  const diagramB = { path: '/w/place-order-flow.zfl', toString: () => 'file:///w/place-order-flow.zfl' };
+  const image = { path: '/w/pic.png', toString: () => 'file:///w/pic.png' };
+  const onDiagram = focusedTreeTarget(markdownA, { uri: diagramB, customEditor: true });
+  assert.deepEqual(onDiagram, { uri: diagramB.toString(), source: 'server' }, 'the diagram is the model on screen');
+  assert.equal(focusedTreeTarget(markdownA, { uri: image, customEditor: true }), undefined,
+    'the image keeps diagram B; Markdown A is a text editor in another group');
+  assert.equal(focusedTreeTarget(markdownA, { customEditor: true }), undefined, 'a webview keeps diagram B too');
+});
+
+test('editing the active document onto an API description switches to its outline, and back does not', () => {
+  const yaml = { path: '/w/service.yaml', toString: () => 'file:///w/service.yaml' };
+  const shown = { uri: 'file:///w/place-order-flow.zfl', source: 'server' as const };
+  assert.equal(outlineRetarget(shown, { active: true, uri: yaml, languageId: 'yaml', text: 'info:\n  title: Orders\n' }), undefined,
+    'ordinary YAML leaves the current model');
+  const qualified = outlineRetarget(shown, { active: true, uri: yaml, languageId: 'yaml', text: 'openapi: 3.1.0\ninfo:\n  title: Orders\n' });
+  assert.deepEqual(qualified, { uri: 'file:///w/service.yaml', source: 'outline', outlineKind: 'api-description' });
+  assert.equal(outlineRetarget(
+    { uri: 'file:///w/service.yaml', source: 'outline' },
+    { active: true, uri: yaml, languageId: 'yaml', text: 'openapi: 3.1.0\npaths: {}\n' },
+  ), undefined, 'further edits of the outline already on screen do not retarget');
+  assert.equal(outlineRetarget(
+    { uri: 'file:///w/service.yaml', source: 'outline' },
+    { active: true, uri: yaml, languageId: 'yaml', text: 'info:\n  title: Orders\n' },
+  ), undefined, 'removing the key keeps the outline');
+  const json = { path: '/w/service.json', toString: () => 'file:///w/service.json' };
+  assert.deepEqual(outlineRetarget(shown, { active: true, uri: json, languageId: 'json', text: '{ "openapi": "3.1.0" }' }),
+    { uri: 'file:///w/service.json', source: 'outline', outlineKind: 'api-description' });
+  assert.equal(outlineRetarget(shown, { active: false, uri: yaml, languageId: 'yaml', text: 'openapi: 3.1.0\n' }), undefined,
+    'a document that is not the active one does not move the tree');
+  assert.equal(outlineRetarget(shown, { active: true, uri: { path: '/w/model.zdl', toString: () => 'file:///w/model.zdl' }, languageId: 'zdl', text: 'openapi: 3.1.0\n' }), undefined,
+    'a ZenWave model stays with the server');
 });
 
 test('an empty tree says why: no server, no hierarchy request, not found, unreadable, empty', () => {
@@ -193,17 +686,18 @@ test('the container, both views, activation and an explanation for every empty s
       viewsContainers: { activitybar: { id: string; icon: string }[] };
       views: Record<string, { id: string; name: string }[]>;
       viewsWelcome: { view: string; contents: string; when: string }[];
-      menus: Record<string, { command: string; when?: string }[]>;
+      menus: Record<string, { command: string; when?: string; group?: string }[]>;
     };
   };
   const { contributes } = manifest;
-  assert.ok(contributes.viewsContainers.activitybar.some((container) => container.id === 'zenwave' && container.icon.length > 0));
+  assert.ok(contributes.viewsContainers.activitybar.some((container) => container.id === 'zenwave' && container.icon === 'resources/zenwave-brand/zenwave-activitybar.svg'));
   assert.deepEqual(contributes.views.zenwave?.map((view) => [view.id, view.name]), [['zenwave.architecture', 'Architecture'], ['zenwave.model', 'Model']]);
   for (const view of ['zenwave.architecture', 'zenwave.model']) assert.ok(manifest.activationEvents.includes(`onView:${view}`));
 
   const keys = { 'zenwave.architecture': 'zenwave.architectureTreeState', 'zenwave.model': 'zenwave.modelTreeState' } as const;
   for (const [view, key] of Object.entries(keys)) {
-    const relevant = TREE_STATE_KINDS.filter((kind) => kind !== 'ready' && (kind !== 'no-manifest' || view === 'zenwave.architecture') && (kind !== 'no-model' || view === 'zenwave.model'));
+    const relevant = TREE_STATE_KINDS.filter((kind) => kind !== 'ready' && (kind !== 'no-manifest' || view === 'zenwave.architecture') &&
+      (kind !== 'no-model' || view === 'zenwave.model') && (kind !== 'outline-empty' || view === 'zenwave.model'));
     for (const kind of relevant) {
       const entries = contributes.viewsWelcome.filter((entry) => entry.view === view && entry.when === `${key} == ${kind}`);
       assert.equal(entries.length, 1, `${view} explains ${kind}`);
@@ -214,14 +708,52 @@ test('the container, both views, activation and an explanation for every empty s
   const definition = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToDefinition');
   assert.equal(definition?.group, 'inline@1');
   const references = contributes.menus['view/item/context']?.find((entry) => entry.command === 'zenwave.explorer.goToReferences');
-  assert.ok((references?.when ?? '').includes("'zenwave/symbolAt' in zenwave.languageServerRequests"));
-  assert.ok((references?.when ?? '').includes("'zenwave/reverseReferences' in zenwave.languageServerRequests"));
+  // Go to Definition and Go to References are Find-style standard requests: gated on what the server advertised, on every declaration.
+  assert.ok((definition?.when ?? '').includes('zenwave.definitionAvailable'));
+  assert.ok((references?.when ?? '').includes('zenwave.referencesAvailable'));
+  assert.match(references?.when ?? '', /viewItem =~ \/\\.declaration/);
+  assert.ok(!(references?.when ?? '').includes('reverseReferences'));
   assert.equal(references?.group, 'inline@2');
+  const refresh = contributes.menus['view/title']?.find((entry) => entry.command === 'zenwave.explorer.refresh');
+  assert.deepEqual([refresh?.when, refresh?.group], ['view == zenwave.architecture || view == zenwave.model', 'navigation']);
   const palette = Object.fromEntries((contributes.menus.commandPalette ?? []).map((entry) => [entry.command, entry.when]));
-  for (const command of ['zenwave.explorer.openNode', 'zenwave.explorer.openRelated', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences']) {
+  for (const command of ['zenwave.explorer.openNode', 'zenwave.explorer.openResource', 'zenwave.explorer.openRelated', 'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences']) {
     assert.equal(palette[command], 'false', `${command} is reachable from the Command Palette`);
   }
   assertMenuMarkers(contributes.menus);
+});
+
+test('the node menu offers the four ways out in NAV-R3 order, each only where it applies and the server answers it', () => {
+  const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8')) as {
+    contributes: {
+      menus: Record<string, { command: string; when?: string; group?: string }[]>;
+      keybindings: { command: string; key: string; mac?: string; when: string }[];
+    };
+  };
+  const menu = (manifest.contributes.menus['view/item/context'] ?? []).filter((entry) => entry.group?.startsWith('1_navigation@'));
+  const ordered = [...menu].sort((a, b) => Number(a.group!.split('@')[1]) - Number(b.group!.split('@')[1]));
+  assert.deepEqual(ordered.map((entry) => entry.command), [
+    'zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences', 'zenwave.explorer.openRelated',
+  ]);
+  const when = (command: string): string => menu.find((entry) => entry.command === command)?.when ?? '';
+  assert.match(when('zenwave.explorer.goToDefinition'), /view == zenwave.model/);
+  assert.match(when('zenwave.explorer.goToDefinition'), /zenwave.definitionAvailable/);
+  assert.match(when('zenwave.explorer.goToReferences'), /zenwave.referencesAvailable/);
+  const forward = when('zenwave.explorer.forwardReferences');
+  assert.ok(forward.includes("'zenwave/symbolAt' in zenwave.languageServerRequests") && forward.includes("'zenwave/forwardReferences' in zenwave.languageServerRequests"));
+  assert.match(forward, /zenwave.languageServerAvailable/);
+  for (const command of ['zenwave.explorer.goToDefinition', 'zenwave.explorer.goToReferences', 'zenwave.explorer.forwardReferences']) {
+    assert.match(when(command), /viewItem =~ \/\\.declaration/, `${command} is for declarations only`);
+  }
+  assert.match(when('zenwave.explorer.openRelated'), /viewItem =~ \/\\.related/);
+  // The inline buttons are unchanged (ME-R9).
+  const inline = (manifest.contributes.menus['view/item/context'] ?? []).filter((entry) => entry.group?.startsWith('inline@'));
+  assert.deepEqual(inline.map((entry) => [entry.command, entry.group]), [['zenwave.explorer.goToDefinition', 'inline@1'], ['zenwave.explorer.goToReferences', 'inline@2']]);
+
+  // F12 and Shift+F12 on the focused Model tree, gated like the buttons; a keybinding carries no node, so the command reads the selection.
+  const keys = manifest.contributes.keybindings.filter((binding) => binding.command.startsWith('zenwave.explorer.'));
+  assert.deepEqual(keys.map((binding) => [binding.command, binding.key]), [['zenwave.explorer.goToDefinition', 'f12'], ['zenwave.explorer.goToReferences', 'shift+f12']]);
+  for (const binding of keys) assert.match(binding.when, /^focusedView == zenwave.model && zenwave\.(definition|references)Available$/);
 });
 
 /** A context value the presenter builds, plus every order of its markers. An end-anchored regex fails one of them. */
@@ -286,7 +818,6 @@ function assertMenuMarkers(menus: Record<string, { command: string; when?: strin
           let expected = true;
           if (expression.source.includes('related')) expected = expected && marker(value, 'related');
           if (expression.source.includes('declaration')) expected = expected && marker(value, 'declaration');
-          if (expression.source.includes('references')) expected = expected && marker(value, 'references');
           assert.equal(expression.test(value), expected, `${entry.command} ${expression} against ${value}`);
           checked++;
         }
@@ -295,10 +826,10 @@ function assertMenuMarkers(menus: Record<string, { command: string; when?: strin
   }
   assert.ok(checked > 0, 'no viewItem clause was evaluated');
   const orders = values.find((value) => value.startsWith('zenwave.hierarchy.system'));
-  assert.equal(orders, 'zenwave.hierarchy.system.related.declaration.references');
+  assert.equal(orders, 'zenwave.hierarchy.system.related.declaration');
   assert.ok(values.includes('zenwave.hierarchy.event'), 'a policy event is not a declaration');
   assert.ok(values.includes('zenwave.hierarchy.relationship'), 'a relationship bucket is not a declaration');
-  assert.ok(values.includes('zenwave.hierarchy.field.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.field') && marker(value, 'references')));
-  assert.ok(values.includes('zenwave.hierarchy.method.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.method') && marker(value, 'references')));
-  assert.ok(values.includes('zenwave.hierarchy.entity.declaration') && !values.some((value) => value.startsWith('zenwave.hierarchy.entity') && marker(value, 'references')));
+  assert.ok(values.includes('zenwave.hierarchy.field.declaration'));
+  assert.ok(values.includes('zenwave.hierarchy.method.declaration'));
+  assert.ok(values.includes('zenwave.hierarchy.entity.declaration'));
 }
