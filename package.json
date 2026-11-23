@@ -2,7 +2,7 @@
   "name": "zenwave-platform",
   "displayName": "ZenWave Platform",
   "description": "Domain modeling, event storming and API design with ZDL and ZFL.",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "publisher": "ZenWave360",
   "license": "MIT",
   "icon": "resources/zenwave-brand/zenwave-platform-icon.png",
