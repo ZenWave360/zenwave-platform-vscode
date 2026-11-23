@@ -1,6 +1,6 @@
 {
-  "source": "ZenWave SDK 2.8.0-SNAPSHOT",
-  "version": "2.8.0-SNAPSHOT",
+  "source": "ZenWave SDK 2.9.0-SNAPSHOT",
+  "version": "2.9.0-SNAPSHOT",
   "plugins": [
     {
       "name": "AsyncAPIGeneratorPlugin",
@@ -497,7 +497,7 @@
         },
         "server": {
           "name": "server",
-          "description": "Target server/environment name matching a key in asyncapi servers (e.g. dev, staging, production). Used to merge x-env-server-overrides/env-server-overrides from channel and error-topic bindings.",
+          "description": "Target server/environment name matching a key in asyncapi servers (e.g. dev, staging, production). Used to merge x-env-server-overrides/envServerOverrides from channel and error-topic bindings.",
           "type": "String",
           "defaultValue": "`null`",
           "values": []
@@ -772,7 +772,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -906,6 +906,83 @@
       }
     },
     {
+      "name": "DslDocsPlugin",
+      "configClassName": "io.zenwave360.sdk.plugins.DslDocsPlugin",
+      "summary": "Generates Markdown documentation with Mermaid diagrams from ZDL, ZFL, OpenAPI and AsyncAPI files",
+      "options": {
+        "zdlFiles": {
+          "name": "zdlFiles",
+          "description": "ZDL files to document as separate modules (comma separated)",
+          "type": "List",
+          "defaultValue": "`[]`",
+          "values": []
+        },
+        "zdlFile": {
+          "name": "zdlFile",
+          "description": "Shortcut for one ZDL module file",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "zflFiles": {
+          "name": "zflFiles",
+          "description": "ZFL event-flow files, one page per file (comma separated)",
+          "type": "List",
+          "defaultValue": "`[]`",
+          "values": []
+        },
+        "apiFiles": {
+          "name": "apiFiles",
+          "description": "OpenAPI and AsyncAPI files, detected by content (comma separated)",
+          "type": "List",
+          "defaultValue": "`[]`",
+          "values": []
+        },
+        "apiFile": {
+          "name": "apiFile",
+          "description": "Shortcut for one OpenAPI or AsyncAPI file",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "targetFolder": {
+          "name": "targetFolder",
+          "description": "Output folder for generated Markdown documentation",
+          "type": "String",
+          "defaultValue": "`docs`",
+          "values": []
+        },
+        "title": {
+          "name": "title",
+          "description": "Documentation title (defaults from the first ZDL or API specification)",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "version": {
+          "name": "version",
+          "description": "Documentation version (defaults from the first ZDL or API specification)",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "date": {
+          "name": "date",
+          "description": "Date shown on the index page",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "check": {
+          "name": "check",
+          "description": "Compare with the output folder without writing files",
+          "type": "boolean",
+          "defaultValue": "`false`",
+          "values": []
+        }
+      }
+    },
+    {
       "name": "EventCatalogImporterPlugin",
       "configClassName": "io.zenwave360.sdk.plugins.EventCatalogImporterPlugin",
       "title": "Event Catalog Importer",
@@ -949,7 +1026,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -1071,7 +1148,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -1221,6 +1298,116 @@
       }
     },
     {
+      "name": "LintPlugin",
+      "configClassName": "io.zenwave360.sdk.plugins.LintPlugin",
+      "summary": "Lints a ZDL model and reports findings as text, JSON or SARIF",
+      "options": {
+        "zdlFile": {
+          "name": "zdlFile",
+          "description": "ZDL file to parse",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "linters": {
+          "name": "linters",
+          "description": "Linters to run, in order (comma separated). Fully qualified class names, or simple names of the built-in linters in io.zenwave360.sdk.lint (e.g. ZdlProblemsLinter)",
+          "type": "List",
+          "defaultValue": "`[io.zenwave360.sdk.lint.ZdlProblemsLinter, io.zenwave360.sdk.lint.ZdlReferencesLinter, io.zenwave360.sdk.lint.ZdlCallsLinter, io.zenwave360.sdk.lint.ZdlListenerLinter]`",
+          "values": []
+        },
+        "format": {
+          "name": "format",
+          "description": "Report format",
+          "type": "Format",
+          "defaultValue": "`text`",
+          "values": [
+            "text",
+            "json",
+            "sarif"
+          ]
+        },
+        "output": {
+          "name": "output",
+          "description": "Write the report as UTF-8 to this file instead of stdout",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "strict": {
+          "name": "strict",
+          "description": "Fail (exit code 1) when warnings are found, not only errors",
+          "type": "boolean",
+          "defaultValue": "`false`",
+          "values": []
+        },
+        "root": {
+          "name": "root",
+          "description": "Base directory for reported file paths. Defaults to the working directory",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "layout": {
+          "name": "layout",
+          "description": "Project organization and package structure [(docs)](https://github.com/zenwave360/zenwave-sdk/tree/main/plugins/backend-application-default#project-layout)",
+          "type": "ProjectLayout",
+          "defaultValue": "`DefaultProjectLayout`",
+          "values": [
+            "DefaultProjectLayout",
+            "CleanHexagonalProjectLayout",
+            "LayeredProjectLayout",
+            "SimpleDomainProjectLayout",
+            "HexagonalProjectLayout",
+            "CleanArchitectureProjectLayout"
+          ],
+          "documentation": "https://github.com/zenwave360/zenwave-sdk/tree/main/plugins/backend-application-default#project-layout"
+        },
+        "zdlFiles": {
+          "name": "zdlFiles",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
+          "type": "List",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "apiFile": {
+          "name": "apiFile",
+          "description": "API Spec file to parse",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "apiFiles": {
+          "name": "apiFiles",
+          "description": "API Spec files to parse (comma separated)",
+          "type": "List",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "authentication": {
+          "name": "authentication",
+          "description": "Authentication configuration values for fetching remote resources.",
+          "type": "List",
+          "defaultValue": "`[]`",
+          "values": []
+        },
+        "targetFolder": {
+          "name": "targetFolder",
+          "description": "Target folder for generated output",
+          "type": "String",
+          "defaultValue": "`null`",
+          "values": []
+        },
+        "continueOnZdlError": {
+          "name": "continueOnZdlError",
+          "description": "Continue even when ZDL contains fatal errors",
+          "type": "boolean",
+          "defaultValue": "`true`",
+          "values": []
+        }
+      }
+    },
+    {
       "name": "OpenAPIControllersPlugin",
       "configClassName": "io.zenwave360.sdk.plugins.OpenAPIControllersPlugin",
       "summary": "Generates implementations based on ZDL models and OpenAPI definitions SpringMVC generated OpenAPI interfaces.",
@@ -1241,7 +1428,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -1430,7 +1617,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -1582,7 +1769,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -2279,7 +2466,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -2470,7 +2657,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -2604,7 +2791,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -2772,7 +2959,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -2842,7 +3029,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
@@ -2931,7 +3118,7 @@
         },
         "zdlFiles": {
           "name": "zdlFiles",
-          "description": "ZDL files to parse (comma separated)",
+          "description": "DEPRECATED: ZDL files joined into one model (comma separated). Use zdlFile and reference other models with 'apis { zdl ... }'",
           "type": "List",
           "defaultValue": "`null`",
           "values": []
